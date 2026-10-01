@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AnimatePresence, motion } from "motion/react";
 
 type AgentProfile = { id: string; username: string; role: string; status: string; capabilities: string[] };
@@ -152,7 +153,7 @@ export default function App() {
 
   return (
     <main className="agent-frame" dir="rtl">
-      <div className="agent-header" data-tauri-drag-region><div className="agent-heading" data-tauri-drag-region><div className="agent-orb" data-tauri-drag-region aria-hidden="true">✦</div><span data-tauri-drag-region><strong data-tauri-drag-region>OmniOps</strong><small data-tauri-drag-region>بازوی امن ویندوز</small></span></div><span className={`state-dot ${phase === "chat" ? "on" : ""}`} data-tauri-drag-region aria-label={phase === "chat" ? "متصل" : "قفل"} /></div>
+      <div className="agent-header" data-tauri-drag-region><div className="agent-heading" data-tauri-drag-region><div className="agent-orb" data-tauri-drag-region aria-hidden="true">✦</div><span data-tauri-drag-region><strong data-tauri-drag-region>OmniOps</strong><small data-tauri-drag-region>بازوی امن ویندوز</small></span></div><div className="agent-window-controls"><span className={`state-dot ${phase === "chat" ? "on" : ""}`} aria-label={phase === "chat" ? "متصل" : "قفل"} /><button className="agent-close" type="button" title={isTauri() ? "بستن برنامه" : "پیش‌نمایش مرورگر؛ تب را ببندید"} aria-label="بستن برنامه" disabled={!isTauri()} onClick={() => void getCurrentWindow().close().catch(() => setError("بستن برنامه ممکن نشد."))}>×</button></div></div>
       <AnimatePresence mode="wait">
         {phase === "locked" || phase === "verifying" ? (
           <motion.section key="pin" className="pair-view" initial={{ opacity: 0, scale: .97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: .95 }} transition={{ duration: .25 }}>

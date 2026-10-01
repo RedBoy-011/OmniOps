@@ -8,6 +8,10 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 button:focus-visible, input:focus-visible { outline: 2px solid #84f2d2; outline-offset: 2px; }
 .agent-frame { width: 100vw; min-height: 100vh; display: flex; flex-direction: column; overflow: hidden; border-radius: 28px; background: radial-gradient(circle at 8% 0%, #25242b 0%, transparent 60%), #121212; border: 1px solid #ffffff19; box-shadow: 0 12px 38px #000a; }
 .agent-header { height: 71px; flex: none; padding: 15px 22px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #fff1; }
+.agent-window-controls { display: flex; align-items: center; gap: 14px; }
+.agent-close { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; border: 1px solid #ffffff30; border-radius: 10px; background: #ffffff0b; color: #dce6e2; font-size: 22px; line-height: 1; }
+.agent-close:hover:not(:disabled) { background: #b9435938; border-color: #e899a9; color: #ffe0e5; }
+.agent-close:disabled { opacity: .5; }
 .agent-heading { display: flex; align-items: center; gap: 10px; }
 .agent-heading strong, .agent-heading small { display: block; }
 .agent-heading strong { font-size: 14px; letter-spacing: .4px; }

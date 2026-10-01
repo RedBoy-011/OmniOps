@@ -10,6 +10,7 @@
 - [وضعیت پیاده‌سازی و گام‌های بعدی](docs/IMPLEMENTATION_STATUS.fa.md)
 - [نقشهٔ راه مرحله‌ای و درصدهای قابل سنجش](docs/PROGRESS_ROADMAP.fa.md)
 - [ساخت ویندوز و دریافت خروجی از GitHub Actions](docs/GITHUB_BUILD.fa.md)
+- [اجرای آزمایشی هسته روی اوبونتو و اتصال امن ایجنت ویندوز](docs/UBUNTU_TEST.fa.md)
 - [ثبت‌نام و کد اتصال ایجنت](docs/OTP_AND_REGISTRATION.fa.md)
 - [پیش‌نمایش تعاملی پنل فارسی](web/index.html) — داده و عملیات واقعی ندارد
 
