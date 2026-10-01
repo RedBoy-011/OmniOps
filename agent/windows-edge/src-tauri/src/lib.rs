@@ -9,7 +9,11 @@ use std::{
     thread,
     time::Duration,
 };
-use tauri::State;
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, LogicalSize, Manager, PhysicalPosition, State,
+};
 use zeroize::Zeroizing;
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -221,6 +225,78 @@ async fn disconnect_agent(state: State<'_, SharedState>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn hide_agent(app: AppHandle) -> Result<(), String> {
+    app.get_webview_window("main")
+        .ok_or_else(|| "پنجرهٔ ایجنت پیدا نشد".to_string())?
+        .hide()
+        .map_err(|_| "کوچک‌کردن ایجنت ممکن نشد".to_string())
+}
+
+#[tauri::command]
+fn set_compact(app: AppHandle, compact: bool) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("پنجرهٔ ایجنت پیدا نشد")?;
+    let monitor = window.current_monitor().ok().flatten();
+    let (width, height) = if compact {
+        (350.0, 112.0)
+    } else if let Some(ref monitor) = monitor {
+        let scale = monitor.scale_factor();
+        (
+            560.0_f64
+                .min(monitor.size().width as f64 / scale - 32.0)
+                .max(350.0),
+            640.0_f64
+                .min(monitor.size().height as f64 / scale - 80.0)
+                .max(480.0),
+        )
+    } else {
+        (520.0, 600.0)
+    };
+    window
+        .set_size(LogicalSize::new(width, height))
+        .map_err(|_| "تغییر اندازهٔ پنجره ممکن نشد".to_string())?;
+    if let Some(monitor) = monitor {
+        let scale = monitor.scale_factor();
+        let x = monitor.position().x + ((monitor.size().width as f64 - width * scale) / 2.0) as i32;
+        let y = monitor.position().y + (24.0 * scale) as i32;
+        window
+            .set_position(PhysicalPosition::new(x, y))
+            .map_err(|_| "جابه‌جایی پنجره ممکن نشد".to_string())?;
+    }
+    Ok(())
+}
+
+fn reveal_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn revoke_on_exit(app: &AppHandle) {
+    let shared = app.state::<SharedState>();
+    let session = shared
+        .session
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.take());
+    if let Some(session) = session {
+        // Dar khorooj-e kamel revoke talash mishavad; pinhan-sazi tooken ra negah midarad.
+        if let Ok(client) = reqwest::blocking::Client::builder()
+            .redirect(Policy::none())
+            .timeout(Duration::from_secs(1))
+            .build()
+        {
+            let _ = client
+                .post(format!("{}/api/agent/logout", session.master_url))
+                .bearer_auth(session.token.as_str())
+                .send();
+        }
+    }
+}
+
 fn start_lease_monitor(sessions: Arc<Mutex<Option<Session>>>) {
     thread::spawn(move || {
         let client = reqwest::blocking::Client::builder()
@@ -271,8 +347,59 @@ pub fn run() {
             pair_agent,
             session_status,
             send_agent_chat,
-            disconnect_agent
+            disconnect_agent,
+            hide_agent,
+            set_compact
         ])
+        .setup(|app| {
+            let open = MenuItem::with_id(app, "open", "نمایش OmniOps", true, None::<&str>)?;
+            let hide = MenuItem::with_id(app, "hide", "پنهان کردن", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "قطع ارتباط و خروج", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open, &hide, &quit])?;
+            let icon = app
+                .default_window_icon()
+                .ok_or("آیکون OmniOps پیدا نشد")?
+                .clone();
+            TrayIconBuilder::with_id("omniops")
+                .icon(icon)
+                .tooltip("OmniOps · ایجنت ویندوز")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, event| {
+                    if matches!(
+                        event,
+                        TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        }
+                    ) {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                reveal_window(app);
+                            }
+                        }
+                    }
+                })
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "open" => reveal_window(app),
+                    "hide" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.hide();
+                        }
+                    }
+                    "quit" => {
+                        revoke_on_exit(app);
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .build(app)?;
+            Ok(())
+        })
         .build(tauri::generate_context!())
         .expect("برنامهٔ OmniOps اجرا نشد");
     app.run(|handle, event| {
@@ -280,26 +407,7 @@ pub fn run() {
             event,
             tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
         ) {
-            use tauri::Manager;
-            let shared = handle.state::<SharedState>();
-            let session = shared
-                .session
-                .lock()
-                .ok()
-                .and_then(|mut guard| guard.take());
-            if let Some(session) = session {
-                // Dar exit-e adi revoke talash mishavad; dar logoff-e ejbari lease-e server monghazi mishavad.
-                if let Ok(client) = reqwest::blocking::Client::builder()
-                    .redirect(Policy::none())
-                    .timeout(Duration::from_secs(1))
-                    .build()
-                {
-                    let _ = client
-                        .post(format!("{}/api/agent/logout", session.master_url))
-                        .bearer_auth(session.token.as_str())
-                        .send();
-                }
-            }
+            revoke_on_exit(handle);
         }
     });
 }
