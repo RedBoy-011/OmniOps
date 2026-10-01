@@ -153,6 +153,12 @@ class IdentityStore:
             self._audit(db, user_id, "bootstrap_admin", user_id)
             return user_id
 
+    def has_active_admin(self) -> bool:
+        with self._db() as db:
+            return db.execute(
+                "SELECT 1 FROM users WHERE role='superadmin' AND status='active' LIMIT 1"
+            ).fetchone() is not None
+
     def register(self, username: str, password: str, mobile: str, remote_ip: str = "local") -> str:
         display, key = _normalize_username(username)
         number = _normalize_mobile(mobile)
@@ -210,7 +216,7 @@ class IdentityStore:
     def login(self, username: str, password: str, remote_ip: str = "local") -> dict:
         _, key = _normalize_username(username)
         if not isinstance(password, str):
-            raise IdentityError("Invalid username or password", 401)
+            raise IdentityError("نام کاربری یا رمز عبور درست نیست.", 401)
         with self._lock, self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             self._rate(db, "login:" + key, 5)
@@ -220,7 +226,7 @@ class IdentityStore:
                 self._rate(db, "login:" + key, 5, failure=True)
                 self._rate(db, "login:ip:" + remote_ip, 10, failure=True)
                 db.commit()
-                raise IdentityError("Invalid username or password", 401)
+                raise IdentityError("نام کاربری یا رمز عبور درست نیست.", 401)
             if user["status"] != "active":
                 raise IdentityError("Account is awaiting administrator approval", 403)
             token = self._make_token(db, user, "web")

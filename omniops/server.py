@@ -260,6 +260,8 @@ def main():
     data_path = Path(os.environ.get("OMNIOPS_DB_PATH", "data/identity.db"))
     data_path.parent.mkdir(parents=True, exist_ok=True)
     identity = IdentityStore(data_path, signing_key)
+    if not identity.has_active_admin():
+        raise SystemExit("Hesab-e SuperAdmin sakhte nashodeh; aval python3 -m omniops.bootstrap ra ejra konid.")
     web_dist = Path(__file__).resolve().parents[1] / "web" / "app" / "dist"
     with make_server("127.0.0.1", port, api_key, ollama_url, identity, web_dist if web_dist.is_dir() else None) as server:
         print(f"OmniOps development gateway listening on http://127.0.0.1:{server.server_port}/v1")

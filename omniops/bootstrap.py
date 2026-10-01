@@ -4,7 +4,7 @@ import getpass
 import os
 from pathlib import Path
 
-from .identity import IdentityStore
+from .identity import IdentityError, IdentityStore
 
 
 def main():
@@ -15,12 +15,21 @@ def main():
     db_path.parent.mkdir(parents=True, exist_ok=True)
     username = input("Namn-e karbari-e SuperAdmin: ").strip()
     mobile = input("Shomare mobile: ").strip()
-    password = getpass.getpass("Ramz-e oboor (hadeaghal 12 neveshe): ")
-    confirm = getpass.getpass("Tekrare ramz: ")
-    if password != confirm:
-        raise SystemExit("Ramzha yeksan nistand")
-    IdentityStore(db_path, signing_key).bootstrap_admin(username, password, mobile)
-    print("Hesab-e aval-e SuperAdmin sakhte shod.")
+    while True:
+        password = getpass.getpass("Ramz-e oboor (12 ta 1024 neveshe): ")
+        if not 12 <= len(password) <= 1024:
+            print("Ramz bayad beyn 12 ta 1024 neveshe bashad. Dobare talash konid.")
+            continue
+        confirm = getpass.getpass("Tekrare ramz: ")
+        if password != confirm:
+            print("Ramzha yeksan nistand. Dobare talash konid.")
+            continue
+        break
+    try:
+        IdentityStore(db_path, signing_key).bootstrap_admin(username, password, mobile)
+    except IdentityError as exc:
+        raise SystemExit(f"Hesab-e SuperAdmin sakhte nashod: {exc}") from None
+    print(f"Hesab-e SuperAdmin baraye '{username}' ba movafaghiat sakhte shod.")
 
 
 if __name__ == "__main__":
