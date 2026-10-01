@@ -92,6 +92,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 .pair-result small { display: block; font-size: 11px; color: #f5a2bb; margin-top: 9px; }
 .safety-note { font-size: 11px; color: #bca7b6; line-height: 2; margin-top: 17px; }
 .admin-message { background: #e6658a26; border: 1px solid #f287a452; color: #f7c5d8; border-radius: 12px; padding: 10px 15px; font-size: 12px; }
+.operations-card { margin-top: 20px; }
+.operations-summary { display: flex; flex-wrap: wrap; gap: 12px 28px; font-size: 12px; color: #ecd9e2; }
+.operations-summary strong { color: #b5ecca; }
+.operations-summary ul { width: 100%; margin: 0; padding: 0 20px; color: #d8c3d0; }
+.operations-summary li { text-align: left; margin-bottom: 5px; }
 .pending-toast { position: fixed; z-index: 20; left: 24px; top: 24px; max-width: min(380px, calc(100vw - 40px)); background: #311b2eef; border: 1px solid #f5a7c178; box-shadow: 0 17px 50px #0a0410c9; border-radius: 15px; display: flex; align-items: center; gap: 11px; padding: 13px; font-size: 12px; }
 .pending-toast .toast-icon { color: #ff99b8; font-size: 21px; }
 .pending-toast button { color: #dac0ce; font-size: 22px; margin-right: auto; }

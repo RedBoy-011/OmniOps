@@ -69,6 +69,11 @@ class IdentityGatewayTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertGreaterEqual(admin_login["pending_count"], 1)
         admin_token = admin_login["token"]
+        code, operations = self.call("GET", "/api/admin/operations", token=admin_token)
+        self.assertEqual(code, 200)
+        self.assertEqual(operations["master"], "up")
+        self.assertEqual(operations["ollama"]["status"], "up")
+        self.assertTrue(operations["ollama"]["models"])
         code, pending = self.call("GET", "/api/admin/pending", token=admin_token)
         self.assertEqual(code, 200)
         selected = next(u for u in pending["users"] if u["username"] == "new-operator")
@@ -81,6 +86,7 @@ class IdentityGatewayTests(unittest.TestCase):
         })
         self.assertEqual(code, 200)
         member_token = member_login["token"]
+        self.assertEqual(self.call("GET", "/api/admin/operations", token=member_token)[0], 403)
         self.assertEqual(self.call("GET", "/api/admin/pending", token=member_token)[0], 403)
         code, pairing = self.call("POST", "/api/agent/pairing", {}, member_token)
         self.assertEqual(code, 201)
@@ -110,6 +116,26 @@ class IdentityGatewayTests(unittest.TestCase):
             self.assertEqual(result.status, 200)
             self.assertIn(b"OmniOps", result.read())
             self.assertIn("'self'", result.headers["Content-Security-Policy"])
+
+    def test_operations_keeps_master_available_when_ollama_is_down(self):
+        server = make_server("127.0.0.1", 0, "testing-a-unique-gateway-key-long-enough", "http://127.0.0.1:1", self.store)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            code, login = self.call("POST", "/api/auth/login", {
+                "username": "root-admin", "password": "a very strong admin password",
+            })
+            request = Request(f"http://127.0.0.1:{server.server_port}/api/admin/operations", headers={
+                "Authorization": f"Bearer {login['token']}"
+            })
+            with self.opener.open(request, timeout=3) as response:
+                operations = json.load(response)
+                self.assertEqual((code, response.status, operations["master"]), (200, 200, "up"))
+                self.assertEqual(operations["ollama"], {"status": "unreachable", "models": []})
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
 
 if __name__ == "__main__":

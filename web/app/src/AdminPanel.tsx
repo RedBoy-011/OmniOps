@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { api, type PendingUser, type Profile } from "./api";
+import { api, type Operations, type PendingUser, type Profile } from "./api";
 
 const choices = [
   ["chat", "گفت‌وگو"], ["skill.use", "مهارت‌ها"], ["tool.read", "مشاهدهٔ ابزار"],
@@ -18,11 +18,19 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
   const [pair, setPair] = useState<{ code: string; expires_at: number } | null>(null);
   const [seconds, setSeconds] = useState(0);
   const [selected, setSelected] = useState<Record<string, string[]>>({});
+  const [operations, setOperations] = useState<Operations | null>(null);
+  const [operationsError, setOperationsError] = useState("");
 
   useEffect(() => {
     if (user.role !== "superadmin") return;
     void refresh();
+    void refreshOperations();
   }, [user.role]);
+
+  async function refreshOperations() {
+    try { setOperations(await api.operations()); setOperationsError(""); }
+    catch { setOperationsError("دریافت وضعیت عملیاتی ممکن نشد."); }
+  }
 
   useEffect(() => {
     if (!toast) return;
@@ -118,6 +126,7 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
             </>}
           </section>
         </div>
+        {user.role === "superadmin" && <section className="glass admin-card operations-card"><div className="card-title"><div><h2>وضعیت هسته و مدل‌های محلی</h2><p>این وضعیت مستقیماً از هسته و Ollama دریافت می‌شود.</p></div><button className="quiet-button" onClick={() => void refreshOperations()}>به‌روزرسانی</button></div>{operationsError ? <p className="admin-message" role="alert">{operationsError}</p> : operations ? <div className="operations-summary"><p>هستهٔ مرکزی: <strong>فعال</strong></p><p>Ollama: <strong>{operations.ollama.status === "up" ? "در دسترس" : "در دسترس نیست"}</strong></p><p>مدل‌ها: {operations.ollama.models.length.toLocaleString("fa-IR")}</p>{operations.ollama.models.length > 0 && <ul>{operations.ollama.models.map((model) => <li key={model.id} dir="ltr">{model.id}</li>)}</ul>}</div> : <p className="empty-note">در حال بررسی وضعیت…</p>}</section>}
         {message && <p className="admin-message" role="status" aria-live="polite">{message}</p>}
       </div>
     </main>

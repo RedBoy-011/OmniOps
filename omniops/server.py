@@ -196,6 +196,21 @@ def make_server(
                 except OllamaError as exc:
                     self._send(503, {"error": {"message": str(exc)}})
                 return
+            if self.path == "/api/admin/operations":
+                principal = self._principal()
+                if principal is None:
+                    return
+                if principal["role"] != "superadmin":
+                    self._send(403, {"error": {"message": "Superadmin access required"}})
+                    return
+                try:
+                    models = ollama.list_models()
+                    self._send(200, {"master": "up", "ollama": {"status": "up", "models": [
+                        {"id": f"ollama/{entry.name}", "size_bytes": entry.size_bytes} for entry in models
+                    ]}})
+                except OllamaError:
+                    self._send(200, {"master": "up", "ollama": {"status": "unreachable", "models": []}})
+                return
             if self.path in {"/api/auth/me", "/api/admin/pending", "/api/admin/pending/count"}:
                 principal = self._principal()
                 if principal is None:
