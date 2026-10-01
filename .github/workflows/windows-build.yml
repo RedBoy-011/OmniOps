@@ -35,7 +35,7 @@ jobs:
         run: |
           npm ci
           npm run build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: omniops-web-preview
           path: web/app/dist/
@@ -75,7 +75,7 @@ jobs:
           if ($installers.Count -ne 1) { throw "Expected one installer; found $($installers.Count)" }
           $digest = (Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$digest  $($installers[0].Name)" | Set-Content -LiteralPath (Join-Path $folder 'SHA256SUMS.txt') -Encoding utf8
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: omniops-windows-x64-unsigned-preview
           path: |
