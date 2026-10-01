@@ -1,0 +1,125 @@
+import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { api, type PendingUser, type Profile } from "./api";
+
+const choices = [
+  ["chat", "گفت‌وگو"], ["skill.use", "مهارت‌ها"], ["tool.read", "مشاهدهٔ ابزار"],
+  ["action.request", "درخواست اقدام"], ["action.approve", "تأیید اقدام"], ["agent.pair", "اتصال ایجنت"],
+] as const;
+
+type Props = { user: Profile; initialPending: number; onLogout: () => void };
+
+export function AdminPanel({ user, initialPending, onLogout }: Props) {
+  const [pending, setPending] = useState<PendingUser[]>([]);
+  const [count, setCount] = useState(initialPending);
+  const [toast, setToast] = useState(initialPending > 0 && user.role === "superadmin");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [pair, setPair] = useState<{ code: string; expires_at: number } | null>(null);
+  const [seconds, setSeconds] = useState(0);
+  const [selected, setSelected] = useState<Record<string, string[]>>({});
+
+  useEffect(() => {
+    if (user.role !== "superadmin") return;
+    void refresh();
+  }, [user.role]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(false), 6500);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
+    if (!pair) return;
+    const update = () => {
+      const remaining = Math.max(0, pair.expires_at - Math.floor(Date.now() / 1000));
+      setSeconds(remaining);
+      if (remaining === 0) setPair(null);
+    };
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [pair]);
+
+  async function refresh() {
+    try {
+      const result = await api.pending();
+      setPending(result.users);
+      setCount(result.users.length);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "فهرست درخواست‌ها دریافت نشد.");
+    }
+  }
+
+  async function decide(id: string, approve: boolean) {
+    if (loading) return;
+    setLoading(true);
+    setMessage("");
+    try {
+      if (approve) await api.approve(id, selected[id] || ["chat"]);
+      else await api.reject(id);
+      await refresh();
+      setMessage(approve ? "کاربر تأیید شد." : "درخواست رد شد.");
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "تغییر وضعیت ممکن نشد.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function toggle(userId: string, capability: string) {
+    setSelected((before) => {
+      const current = before[userId] || ["chat"];
+      const next = current.includes(capability) ? current.filter((item) => item !== capability) : [...current, capability];
+      return { ...before, [userId]: next };
+    });
+  }
+
+  async function createPair() {
+    setMessage("");
+    try { setPair(await api.issuePairing()); }
+    catch (cause) { setMessage(cause instanceof Error ? cause.message : "کد اتصال صادر نشد."); }
+  }
+
+  return (
+    <main className="admin-scene" dir="rtl">
+      <div className="tech-grid" aria-hidden="true" />
+      <AnimatePresence>{toast && (
+        <motion.div className="pending-toast" initial={{ opacity: 0, y: -30, scale: 0.94 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -20 }} role="status">
+          <span className="toast-icon">✦</span><span>شما <strong>{count.toLocaleString("fa-IR")}</strong> درخواست ثبت‌نام در انتظار تأیید دارید.</span>
+          <button onClick={() => setToast(false)} aria-label="بستن اعلان">×</button>
+        </motion.div>
+      )}</AnimatePresence>
+      <div className="admin-wrap">
+        <header className="admin-header glass"><div className="flex items-center gap-3"><span className="brand-mark">✦</span><strong>OmniOps</strong><span className="text-white/45 text-xs">/ فضای مدیریت سازمان</span></div><div className="flex items-center gap-4"><span className="text-sm text-white/65">{user.username}</span><button className="quiet-button" onClick={onLogout}>خروج امن</button></div></header>
+        <div className="admin-hero"><span className="form-eyebrow">CONTROL PLANE / ACCESS</span><h1>مدیریت دسترسی و ایجنت‌ها</h1><p>هر قابلیت بر اساس پروفایل کاربر فعال می‌شود. تأیید ثبت‌نام به‌تنهایی اجازهٔ اجرای ابزار نمی‌دهد.</p></div>
+        <div className="admin-grid">
+          <section className="glass admin-card"><div className="card-title"><div><h2>درخواست‌های ثبت‌نام</h2><p>نام کاربری و موبایل پس از درخواست مدیر نمایش داده می‌شوند.</p></div><span className="count-pill">{count.toLocaleString("fa-IR")} در انتظار</span></div>
+            {user.role !== "superadmin" ? <p className="empty-note">این بخش تنها برای مدیر کل با مجوز تأیید نمایش داده می‌شود.</p> : pending.length === 0 ? <p className="empty-note">درخواستی در انتظار تأیید نیست.</p> : (
+              <div className="pending-list">{pending.map((person) => (
+                <article className="pending-user" key={person.id}>
+                  <div className="pending-title"><div><strong>{person.username}</strong><span dir="ltr">{person.mobile}</span></div><time>{new Date(person.created_at * 1000).toLocaleString("fa-IR")}</time></div>
+                  <div className="capabilities" aria-label={`مجوزهای ${person.username}`}>
+                    {choices.map(([value, title]) => <label key={value} className="capability"><input type="checkbox" checked={(selected[person.id] || ["chat"]).includes(value)} onChange={() => toggle(person.id, value)} />{title}</label>)}
+                  </div>
+                  <div className="pending-actions"><button disabled={loading} className="submit-button" onClick={() => decide(person.id, true)}>تأیید با این مجوزها</button><button disabled={loading} className="quiet-button danger" onClick={() => decide(person.id, false)}>رد درخواست</button></div>
+                </article>
+              ))}</div>
+            )}
+          </section>
+          <section className="glass admin-card"><div className="card-title"><div><h2>اتصال موقت ایجنت ویندوز</h2><p>کد یک‌بارمصرف ۶ رقمی فقط ۲ دقیقه اعتبار دارد.</p></div></div>
+            {!user.capabilities.includes("agent.pair") ? <p className="empty-note">پروفایل شما مجوز اتصال ایجنت ندارد.</p> : <>
+              <button className="submit-button" onClick={createPair}>صدور کد اتصال تازه</button>
+              <AnimatePresence mode="wait">{pair && <motion.div key={pair.code} className="pair-result" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}>
+                <p>این کد را در پنجرهٔ ایجنت وارد کنید:</p><strong dir="ltr">{pair.code}</strong><small>{seconds.toLocaleString("fa-IR")} ثانیه باقی‌مانده · پس از استفاده باطل می‌شود</small>
+              </motion.div>}</AnimatePresence>
+              <p className="safety-note">توکن اتصال فقط در حافظهٔ فرایند ایجنت می‌ماند و با خروج یا قطع heartbeat از اعتبار می‌افتد.</p>
+            </>}
+          </section>
+        </div>
+        {message && <p className="admin-message" role="status" aria-live="polite">{message}</p>}
+      </div>
+    </main>
+  );
+}

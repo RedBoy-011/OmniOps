@@ -1,0 +1,85 @@
+name: Windows validation and installer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Python and web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Run core tests
+        run: python -m unittest discover -s tests -q
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Build Persian web panel
+        working-directory: web/app
+        run: |
+          npm ci
+          npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omniops-web-preview
+          path: web/app/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Windows x64 agent
+    needs: validate
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Install locked frontend dependencies
+        working-directory: agent/windows-edge
+        run: npm ci
+      - name: Check Rust agent
+        working-directory: agent/windows-edge/src-tauri
+        run: cargo check --locked
+      - name: Build NSIS installer
+        working-directory: agent/windows-edge
+        run: npm run tauri:build -- --config src-tauri/tauri.ci.conf.json
+      - name: Write installer checksum
+        shell: pwsh
+        run: |
+          $folder = 'agent/windows-edge/src-tauri/target/release/bundle/nsis'
+          $installers = @(Get-ChildItem -LiteralPath $folder -Filter '*-setup.exe' -File)
+          if ($installers.Count -ne 1) { throw "Expected one installer; found $($installers.Count)" }
+          $digest = (Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$digest  $($installers[0].Name)" | Set-Content -LiteralPath (Join-Path $folder 'SHA256SUMS.txt') -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omniops-windows-x64-unsigned-preview
+          path: |
+            agent/windows-edge/src-tauri/target/release/bundle/nsis/*-setup.exe
+            agent/windows-edge/src-tauri/target/release/bundle/nsis/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
