@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { AnimatePresence, motion } from "motion/react";
 
 type AgentProfile = { id: string; username: string; role: string; status: string; capabilities: string[] };
 type AgentStatus = { connected: boolean; profile: AgentProfile | null };
 type ChatReply = { reply: string; model: string };
+type ModelList = { models: string[] };
 type Line = { sender: "user" | "assistant"; text: string; model?: string };
 
 function digits(value: string) {
@@ -26,6 +27,12 @@ export default function App() {
   const [sending, setSending] = useState(false);
   const [compact, setCompact] = useState(false);
   const [pane, setPane] = useState<"overview" | "chat">("overview");
+  const [exitDialog, setExitDialog] = useState(false);
+  const [rememberHide, setRememberHide] = useState(false);
+  const [hideWithoutPrompt, setHideWithoutPrompt] = useState(false);
+  const [models, setModels] = useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = useState("auto");
+  const [modelError, setModelError] = useState("");
   const fields = useRef<Array<HTMLInputElement | null>>([]);
   const attempt = useRef("");
   const sessionGeneration = useRef(0);
@@ -75,6 +82,41 @@ export default function App() {
     });
   }, [phase, compact]);
 
+  useEffect(() => {
+    if (phase !== "chat" || !profile?.capabilities.includes("chat")) return;
+    let active = true;
+    void invoke<ModelList>("list_agent_models").then((result) => {
+      if (!active) return;
+      setModels(result.models);
+      setSelectedModel((current) => current === "auto" || result.models.includes(current) ? current : "auto");
+      setModelError(result.models.length ? "" : "مدل محلی نصب نشده است.");
+    }).catch(() => { if (active) { setModels([]); setModelError("فهرست مدل‌ها در دسترس نیست؛ اتصال Ollama را بررسی کنید."); } });
+    return () => { active = false; };
+  }, [phase, profile?.id]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void listen("omniops-exit-request", () => {
+      setCompact(false);
+      setExitDialog(true);
+    }).then((stop) => { if (active) unlisten = stop; else stop(); });
+    return () => { active = false; unlisten?.(); };
+  }, []);
+
+  function requestExit() {
+    if (hideWithoutPrompt) { void hideToTray(); return; }
+    setCompact(false);
+    setExitDialog(true);
+  }
+
+  async function chooseHide() {
+    setHideWithoutPrompt(rememberHide);
+    setExitDialog(false);
+    await hideToTray();
+  }
+
   async function hideToTray() {
     if (!isTauri()) return;
     try { await invoke("hide_agent"); }
@@ -99,6 +141,10 @@ export default function App() {
       setProfile(status.profile);
       setPane("overview");
       setCompact(false);
+      setHideWithoutPrompt(false);
+      setRememberHide(false);
+      setModels([]);
+      setSelectedModel("auto");
       setPhase("success");
       window.setTimeout(() => setPhase((current) => current === "success" ? "chat" : current), 1300);
     } catch (cause) {
@@ -143,6 +189,10 @@ export default function App() {
     attempt.current = "";
     setPhase("locked");
     setCompact(false);
+    setHideWithoutPrompt(false);
+    setRememberHide(false);
+    setModels([]);
+    setSelectedModel("auto");
     setError("");
   }
 
@@ -156,7 +206,7 @@ export default function App() {
     setLines((before) => [...before, { sender: "user", text }]);
     setSending(true);
     try {
-      const result = await invoke<ChatReply>("send_agent_chat", { message: text });
+      const result = await invoke<ChatReply>("send_agent_chat", { message: text, model: selectedModel });
       if (sessionGeneration.current === generation) {
         setLines((before) => [...before, { sender: "assistant", text: result.reply, model: result.model }]);
       }
@@ -178,7 +228,7 @@ export default function App() {
           <span className="compact-pulse" aria-hidden="true" /><span className="compact-open" aria-hidden="true">↗</span>
         </button>
       ) : <>
-      <div className="agent-header" data-tauri-drag-region><div className="agent-heading" data-tauri-drag-region><div className="agent-orb" data-tauri-drag-region aria-hidden="true">✦</div><span data-tauri-drag-region><strong data-tauri-drag-region>OmniOps</strong><small data-tauri-drag-region>بازوی امن ویندوز</small></span></div><div className="agent-window-controls"><span className={`state-dot ${phase === "chat" ? "on" : ""}`} aria-label={phase === "chat" ? "متصل" : "قفل"} /><button className="agent-close" type="button" title="پنهان کردن کنار ساعت" aria-label="پنهان کردن کنار ساعت" disabled={!isTauri()} onClick={() => void hideToTray()}>−</button><button className="agent-close" type="button" title={isTauri() ? "قطع ارتباط و بستن برنامه" : "پیش‌نمایش مرورگر؛ تب را ببندید"} aria-label="قطع ارتباط و بستن برنامه" disabled={!isTauri()} onClick={() => void getCurrentWindow().close().catch(() => setError("بستن برنامه ممکن نشد."))}>×</button></div></div>
+      <div className="agent-header" data-tauri-drag-region><div className="agent-heading" data-tauri-drag-region><div className="agent-orb" data-tauri-drag-region aria-hidden="true">✦</div><span data-tauri-drag-region><strong data-tauri-drag-region>OmniOps</strong><small data-tauri-drag-region>بازوی امن ویندوز</small></span></div><div className="agent-window-controls"><span className={`state-dot ${phase === "chat" ? "on" : ""}`} aria-label={phase === "chat" ? "متصل" : "قفل"} /><button className="agent-close" type="button" title="پنهان کردن کنار ساعت" aria-label="پنهان کردن کنار ساعت" disabled={!isTauri()} onClick={() => void hideToTray()}>−</button><button className="agent-close" type="button" title="انتخاب پنهان‌کردن یا خروج کامل" aria-label="انتخاب پنهان‌کردن یا خروج کامل" disabled={!isTauri()} onClick={requestExit}>×</button></div></div>
       <AnimatePresence mode="wait">
         {phase === "locked" || phase === "verifying" ? (
           <motion.section key="pin" className="pair-view" initial={{ opacity: 0, scale: .97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: .95 }} transition={{ duration: .25 }}>
@@ -208,13 +258,14 @@ export default function App() {
           <motion.section key="chat" className="chat-view" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .3 }}>
             <div className="session-line"><div><strong>{profile?.username}</strong><small>{profile?.capabilities.includes("chat") ? "گفت‌وگو فعال" : "پروفایل بدون دسترسی چت"}</small></div><button className="logout-button" onClick={() => void disconnect()}>خروج و قطع ارتباط</button></div>
             <nav className="agent-tabs" aria-label="بخش‌های ایجنت"><button className={pane === "overview" ? "selected" : ""} onClick={() => setPane("overview")} aria-current={pane === "overview" ? "page" : undefined}>نمای کلی</button><button className={pane === "chat" ? "selected" : ""} onClick={() => setPane("chat")} aria-current={pane === "chat" ? "page" : undefined}>گفت‌وگو</button><button className="compact-action" onClick={() => setCompact(true)} aria-label="جمع کردن ایجنت">جمع کردن ↑</button></nav>
-            {pane === "overview" ? <div className="overview-space"><div className="overview-symbol" aria-hidden="true">✦</div><h1>ایجنت آمادهٔ همکاری است</h1><p>نشست {profile?.username} برقرار است. پنجره را جمع کنید یا کنار ساعت پنهان کنید؛ ارتباط در حافظهٔ برنامه می‌ماند.</p><div className="overview-grid"><div className="overview-card"><span className="overview-led" />هستهٔ مرکزی<strong>متصل</strong></div><div className="overview-card"><span className="overview-led muted" />ابزارهای دستگاه<strong>در حال توسعه</strong></div></div><button className="overview-chat" onClick={() => setPane("chat")} disabled={!profile?.capabilities.includes("chat")}>رفتن به گفت‌وگو ←</button></div> : <><div className="chat-lines" aria-live="polite">{lines.length === 0 && <p className="empty-chat">با هسته گفتگو کنید.<br />برای پاسخ هوشمند، یک مدل Ollama باید روی سرور فعال باشد.</p>}{lines.map((line, index) => <div key={index} className={`chat-bubble ${line.sender}`}><p>{line.text}</p>{line.model && <small dir="ltr">{line.model}</small>}</div>)}</div><form className="chat-composer" onSubmit={send}><input aria-label="پیام" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="پیام خود را بنویسید…" disabled={!profile?.capabilities.includes("chat") || sending} /><button disabled={sending || !profile?.capabilities.includes("chat")}>{sending ? "…" : "↵"}</button></form></>}
+            {pane === "overview" ? <div className="overview-space"><div className="overview-symbol" aria-hidden="true">✦</div><h1>ایجنت آمادهٔ همکاری است</h1><p>نشست {profile?.username} برقرار است. پنجره را جمع کنید یا کنار ساعت پنهان کنید؛ ارتباط در حافظهٔ برنامه می‌ماند.</p><div className="overview-grid"><div className="overview-card"><span className="overview-led" />هستهٔ مرکزی<strong>متصل</strong></div><div className="overview-card"><span className="overview-led muted" />ابزارهای دستگاه<strong>در حال توسعه</strong></div></div><button className="overview-chat" onClick={() => setPane("chat")} disabled={!profile?.capabilities.includes("chat")}>رفتن به گفت‌وگو ←</button></div> : <><div className="model-row"><label htmlFor="agent-model">مدل</label><select id="agent-model" dir="ltr" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} disabled={sending || !profile?.capabilities.includes("chat")}><option value="auto">خودکار (اولین مدل محلی)</option>{models.map((model) => <option key={model} value={model}>{model}</option>)}</select><button type="button" onClick={() => { void invoke<ModelList>("list_agent_models").then((result) => { setModels(result.models); setSelectedModel((current) => current === "auto" || result.models.includes(current) ? current : "auto"); setModelError(result.models.length ? "" : "مدل محلی نصب نشده است."); }).catch(() => setModelError("فهرست مدل‌ها در دسترس نیست.")); }} aria-label="به‌روزرسانی فهرست مدل‌ها">↻</button></div>{modelError && <p className="model-error">{modelError}</p>}<div className="chat-lines" aria-live="polite">{lines.length === 0 && <p className="empty-chat">با هسته گفتگو کنید.<br />برای پاسخ هوشمند، یک مدل Ollama باید روی سرور فعال باشد.</p>}{lines.map((line, index) => <div key={index} className={`chat-bubble ${line.sender}`}><p>{line.text}</p>{line.model && <small dir="ltr">{line.model}</small>}</div>)}</div><form className="chat-composer" onSubmit={send}><input aria-label="پیام" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="پیام خود را بنویسید…" disabled={!profile?.capabilities.includes("chat") || sending} /><button disabled={sending || !profile?.capabilities.includes("chat")}>{sending ? "…" : "↵"}</button></form></>}
             {error && <p className="agent-error" role="alert">{error}</p>}
           </motion.section>
         )}
       </AnimatePresence>
       <div className="agent-footer">نشست فقط در حافظهٔ موقت · وضعیت اتصال با هسته بررسی می‌شود</div>
       </>}
+      {exitDialog && <div className="exit-backdrop" role="presentation"><section className="exit-dialog" role="dialog" aria-modal="true" aria-labelledby="exit-title"><h2 id="exit-title">با ایجنت چه کنیم؟</h2><p>با پنهان‌کردن، نشست در حافظه می‌ماند. خروج کامل نشست را قطع می‌کند و اتصال بعدی به کد تازه نیاز دارد.</p><label className="exit-remember"><input type="checkbox" checked={rememberHide} onChange={(event) => setRememberHide(event.target.checked)} />تا اتصال بعدی، ضربدر بدون پرسیدن کنار ساعت پنهان کند</label><div className="exit-actions"><button type="button" onClick={() => void chooseHide()}>پنهان‌کردن کنار ساعت</button><button type="button" className="exit-danger" onClick={() => void invoke("quit_agent")}>خروج کامل</button><button type="button" onClick={() => setExitDialog(false)}>انصراف</button></div></section></div>}
     </main>
   );
 }

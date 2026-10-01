@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "Main Windows agent window",
   "windows": ["main"],
-  "permissions": ["core:window:allow-close", "core:window:allow-start-dragging"]
+  "permissions": ["core:window:allow-start-dragging"]
 }

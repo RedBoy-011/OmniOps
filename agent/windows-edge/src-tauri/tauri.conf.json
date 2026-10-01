@@ -16,7 +16,7 @@
       "width": 460,
       "height": 560,
       "minWidth": 300,
-      "minHeight": 100,
+      "minHeight": 70,
       "transparent": true,
       "decorations": false,
       "alwaysOnTop": true,

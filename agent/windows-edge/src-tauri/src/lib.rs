@@ -12,7 +12,7 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, LogicalSize, Manager, PhysicalPosition, State,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State,
 };
 use zeroize::Zeroizing;
 
@@ -41,6 +41,11 @@ struct AgentStatus {
 struct ChatResponse {
     reply: String,
     model: String,
+}
+
+#[derive(Deserialize, Serialize)]
+struct ModelList {
+    models: Vec<String>,
 }
 
 struct Session {
@@ -172,6 +177,7 @@ fn session_status(state: State<'_, SharedState>) -> Result<AgentStatus, String> 
 #[tauri::command]
 async fn send_agent_chat(
     message: String,
+    model: String,
     state: State<'_, SharedState>,
 ) -> Result<ChatResponse, String> {
     if message.trim().is_empty() || message.chars().count() > 8000 {
@@ -191,7 +197,7 @@ async fn send_agent_chat(
     let response = http_client()?
         .post(format!("{origin}/api/agent/chat"))
         .bearer_auth(token.as_str())
-        .json(&serde_json::json!({ "message": message }))
+        .json(&serde_json::json!({ "message": message, "model": model }))
         .send()
         .await
         .map_err(|_| "ارتباط با هسته قطع است".to_string())?;
@@ -202,6 +208,31 @@ async fn send_agent_chat(
         .json::<ChatResponse>()
         .await
         .map_err(|_| "پاسخ گفتگو معتبر نیست".into())
+}
+
+#[tauri::command]
+async fn list_agent_models(state: State<'_, SharedState>) -> Result<ModelList, String> {
+    let (origin, token) = {
+        let guard = state.session.lock().map_err(|_| "نشست در دسترس نیست")?;
+        let session = guard.as_ref().ok_or("ابتدا متصل شوید")?;
+        if !session.profile.capabilities.iter().any(|cap| cap == "chat") {
+            return Err("پروفایل شما دسترسی گفتگو ندارد".into());
+        }
+        (session.master_url.clone(), session.token.clone())
+    };
+    let response = http_client()?
+        .get(format!("{origin}/api/agent/models"))
+        .bearer_auth(token.as_str())
+        .send()
+        .await
+        .map_err(|_| "دریافت فهرست مدل‌ها ممکن نشد".to_string())?;
+    if !response.status().is_success() {
+        return Err("فهرست مدل‌ها در دسترس نیست؛ اتصال Ollama را بررسی کنید".into());
+    }
+    response
+        .json::<ModelList>()
+        .await
+        .map_err(|_| "پاسخ مدل‌ها معتبر نیست".into())
 }
 
 #[tauri::command]
@@ -234,13 +265,19 @@ fn hide_agent(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn quit_agent(app: AppHandle) {
+    revoke_on_exit(&app);
+    app.exit(0);
+}
+
+#[tauri::command]
 fn set_compact(app: AppHandle, compact: bool) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or("پنجرهٔ ایجنت پیدا نشد")?;
     let monitor = window.current_monitor().ok().flatten();
     let (width, height) = if compact {
-        (350.0, 112.0)
+        (320.0, 76.0)
     } else if let Some(ref monitor) = monitor {
         let scale = monitor.scale_factor();
         (
@@ -260,7 +297,7 @@ fn set_compact(app: AppHandle, compact: bool) -> Result<(), String> {
     if let Some(monitor) = monitor {
         let scale = monitor.scale_factor();
         let x = monitor.position().x + ((monitor.size().width as f64 - width * scale) / 2.0) as i32;
-        let y = monitor.position().y + (24.0 * scale) as i32;
+        let y = monitor.position().y + (if compact { 0.0 } else { 16.0 } * scale) as i32;
         window
             .set_position(PhysicalPosition::new(x, y))
             .map_err(|_| "جابه‌جایی پنجره ممکن نشد".to_string())?;
@@ -273,6 +310,11 @@ fn reveal_window(app: &AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+fn ask_before_exit(app: &AppHandle) {
+    reveal_window(app);
+    let _ = app.emit_to("main", "omniops-exit-request", ());
 }
 
 fn revoke_on_exit(app: &AppHandle) {
@@ -347,10 +389,18 @@ pub fn run() {
             pair_agent,
             session_status,
             send_agent_chat,
+            list_agent_models,
             disconnect_agent,
             hide_agent,
+            quit_agent,
             set_compact
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                ask_before_exit(&window.app_handle());
+            }
+        })
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "نمایش OmniOps", true, None::<&str>)?;
             let hide = MenuItem::with_id(app, "hide", "پنهان کردن", true, None::<&str>)?;
@@ -392,8 +442,7 @@ pub fn run() {
                         }
                     }
                     "quit" => {
-                        revoke_on_exit(app);
-                        app.exit(0);
+                        ask_before_exit(app);
                     }
                     _ => {}
                 })

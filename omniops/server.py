@@ -153,10 +153,17 @@ def make_server(
                     prompt = payload.get("message")
                     if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 8000:
                         raise IdentityError("Chat message must contain 1–8000 characters")
-                    available = ollama.list_models()
+                    available = self._available_models()
                     if not available:
                         raise OllamaError("No local model is installed")
-                    model = available[0].name
+                    requested = payload.get("model", "auto")
+                    if not isinstance(requested, str):
+                        raise IdentityError("Invalid model ID")
+                    if requested == "auto":
+                        requested = next(iter(available))
+                    model = available.get(requested)
+                    if model is None:
+                        raise IdentityError("Requested local model is not installed", 404)
                     answer = ollama.chat(model, [{"role": "user", "content": prompt.strip()}])
                     self._send(200, {"reply": answer, "model": f"ollama/{model}"})
                 else:
@@ -175,6 +182,19 @@ def make_server(
                 return
             if self.path == "/health":
                 self._send(200, {"status": "up", "mode": "local-development"})
+                return
+            if self.path == "/api/agent/models":
+                principal = self._principal("agent")
+                if principal is None:
+                    return
+                if "chat" not in principal["capabilities"]:
+                    self._send(403, {"error": {"message": "Profile has no chat permission"}})
+                    return
+                try:
+                    models = self._available_models()
+                    self._send(200, {"models": list(models)})
+                except OllamaError as exc:
+                    self._send(503, {"error": {"message": str(exc)}})
                 return
             if self.path in {"/api/auth/me", "/api/admin/pending", "/api/admin/pending/count"}:
                 principal = self._principal()
