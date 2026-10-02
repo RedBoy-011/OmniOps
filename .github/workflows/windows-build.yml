@@ -24,6 +24,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+      - name: Validate one-line Ubuntu updater
+        run: bash -n scripts/update-ubuntu.sh
       - name: Run core tests
         run: python -m unittest discover -s tests -q
       - uses: actions/setup-node@v6
