@@ -13,6 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description='Queue one audited model pull from the Master root shell')
     parser.add_argument('--node-id', required=True)
     parser.add_argument('--model', required=True)
+    parser.add_argument('--action', choices=('pull', 'delete'), default='pull')
     args = parser.parse_args()
     if not hasattr(os, 'geteuid') or os.geteuid() != 0:
         parser.error('Local root shell required')
@@ -21,8 +22,10 @@ def main():
         parser.error('Master environment file must be owner-only')
     values = parse_environment_file(config)
     store = IdentityStore(values['OMNIOPS_DB_PATH'], values['OMNIOPS_SIGNING_KEY'].encode())
-    result = NodeRegistry(store).queue_model_pull_local_root(args.node_id, args.model)
-    print('Queued model download:', result['id'])
+    registry = NodeRegistry(store)
+    result = (registry.queue_model_delete_local_root if args.action == 'delete' else
+              registry.queue_model_pull_local_root)(args.node_id, args.model)
+    print('Queued model ' + args.action + ':', result['id'])
 
 
 if __name__ == '__main__':

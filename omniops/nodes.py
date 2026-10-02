@@ -170,6 +170,12 @@ class NodeRegistry:
         return self.queue_model_pull({'id': 'system:local-root', 'role': 'superadmin',
                                       'capabilities': ['profile.manage']}, node_id, model)
 
+    def queue_model_delete_local_root(self, node_id, model):
+        if not hasattr(os, 'geteuid') or os.geteuid() != 0:
+            raise IdentityError('Local root access required', 403)
+        return self.queue_model_delete({'id': 'system:local-root', 'role': 'superadmin',
+                                        'capabilities': ['profile.manage']}, node_id, model)
+
     def queue_model_pull(self, principal, node_id, model):
         return self._queue_model_job(principal, node_id, model, 'pull')
 

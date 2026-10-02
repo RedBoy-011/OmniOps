@@ -119,6 +119,9 @@ class NodeRegistryTests(unittest.TestCase):
         queued = self.nodes.queue_model_delete(self.admin, worker['id'], 'scratch:latest')
         with self.assertRaises(IdentityError):
             self.nodes.queue_model_pull(self.admin, worker['id'], 'another:latest')
+        with patch('omniops.nodes.os.geteuid', return_value=1000, create=True):
+            with self.assertRaises(IdentityError):
+                self.nodes.queue_model_delete_local_root(worker['id'], 'scratch:latest')
         job = self.nodes.claim_model_pull(worker['id'], worker['credential'])
         self.assertEqual(job['action'], 'delete')
         self.assertEqual(job['id'], queued['id'])
