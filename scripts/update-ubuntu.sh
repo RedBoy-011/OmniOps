@@ -149,9 +149,18 @@ for ((attempt=0; attempt<20; attempt++)); do
       tls_port="$(sed -n -E 's/.*OMNIOPS_PORT=([0-9]+).*/\1/p' "$tls_unit" | head -n 1)"
       [[ "$tls_port" =~ ^[0-9]+$ ]] || fail 'TLS unit port could not be read.'
       systemctl restart omniops-master-tls.service
-      curl --noproxy '*' --cacert /etc/omniops/private-pki/ca.crt -fsS --max-time 5 \
-        "https://$bind_host:$tls_port/health" | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "up"' || \
-        fail 'TLS Master health failed after update; HTTP Master remains active.'
+      tls_ready=0
+      for ((tls_attempt=0; tls_attempt<20; tls_attempt++)); do
+        if systemctl is-active --quiet omniops-master-tls.service && \
+           curl --noproxy '*' --cacert /etc/omniops/private-pki/ca.crt -fsS --max-time 3 \
+             "https://$bind_host:$tls_port/health" 2>/dev/null | \
+               python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "up"' 2>/dev/null; then
+          tls_ready=1
+          break
+        fi
+        sleep 1
+      done
+      [[ "$tls_ready" == 1 ]] || fail 'TLS Master health failed after update; HTTP Master remains active.'
       printf 'Private TLS Master is healthy at https://%s:%s/health\n' "$bind_host" "$tls_port"
     fi
     printf 'OmniOps is healthy at http://%s:%s/health\n' "$bind_host" "$port"
