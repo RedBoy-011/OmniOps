@@ -71,10 +71,18 @@ printf '%s\n' "$expected_fingerprint" > "$fingerprint_file"
 chmod 0644 "$fingerprint_file"
 cd /opt/omniops-node
 if [[ ! -e "$state" ]]; then
-  [[ -r /dev/tty ]] || fail 'An interactive terminal is required to enter the one-time grant.'
   node_name="${OMNIOPS_NODE_NAME:-$(hostname -s)}"
-  runuser -u omniops-node -- python3 -m omniops.node_client --state "$state" --ca-file "$ca_target" \
-    enroll --master "$master_url" --name "$node_name" --role worker
+  if [[ -n "${OMNIOPS_GRANT_FILE:-}" ]]; then
+    [[ "$OMNIOPS_GRANT_FILE" == /root/omniops-worker-grant && -f "$OMNIOPS_GRANT_FILE" && ! -L "$OMNIOPS_GRANT_FILE" ]] || fail 'Unexpected grant file path.'
+    [[ "$(stat -c %a "$OMNIOPS_GRANT_FILE")" == 600 && "$(stat -c %u "$OMNIOPS_GRANT_FILE")" == 0 ]] || fail 'Grant file must belong to root with mode 0600.'
+    runuser -u omniops-node -- python3 -m omniops.node_client --state "$state" --ca-file "$ca_target" \
+      enroll --master "$master_url" --name "$node_name" --role worker --grant-stdin < "$OMNIOPS_GRANT_FILE"
+    rm -f -- /root/omniops-worker-grant
+  else
+    [[ -r /dev/tty ]] || fail 'An interactive terminal is required to enter the one-time grant.'
+    runuser -u omniops-node -- python3 -m omniops.node_client --state "$state" --ca-file "$ca_target" \
+      enroll --master "$master_url" --name "$node_name" --role worker
+  fi
 fi
 runuser -u omniops-node -- python3 -m omniops.node_client --state "$state" --ca-file "$ca_target" heartbeat || \
   fail 'Enrollment or verified heartbeat failed; service not enabled.'

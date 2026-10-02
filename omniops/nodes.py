@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import json
+import os
 import math
 import re
 import secrets
@@ -46,6 +47,14 @@ class NodeRegistry:
 
     def issue(self, principal, role):
         self._admin(principal)
+        return self._issue(role, principal["id"], "node_grant_issued")
+
+    def issue_local_root(self, role):
+        if not hasattr(os, "geteuid") or os.geteuid() != 0:
+            raise IdentityError("Local root access required", 403)
+        return self._issue(role, "system:local-root", "node_grant_issued_by_local_root")
+
+    def _issue(self, role, actor_id, event):
         if role not in ("worker", "edge"):
             raise IdentityError("Invalid node role")
         raw = secrets.token_urlsafe(32)
@@ -53,8 +62,8 @@ class NodeRegistry:
         expires = self._now() + GRANT_TTL
         with self.identity._lock, self.identity._db() as db:
             db.execute("INSERT INTO node_grants VALUES (?,?,?,?,?,?,?)",
-                       (grant_id, self._digest(raw), role, expires, None, None, principal["id"]))
-            self.identity._audit(db, principal["id"], "node_grant_issued", grant_id)
+                       (grant_id, self._digest(raw), role, expires, None, None, actor_id))
+            self.identity._audit(db, actor_id, event, grant_id)
         return {"id": grant_id, "grant": raw, "role": role, "expires_at": expires}
 
     def cancel_grant(self, principal, grant_id):

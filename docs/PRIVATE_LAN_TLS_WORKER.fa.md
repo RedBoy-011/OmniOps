@@ -31,7 +31,7 @@ systemctl status omniops-master-tls.service
 python3 -m omniops.node_admin --master https://172.19.30.100:9443 --ca-file /etc/omniops/private-pki/ca.crt --role worker
 ```
 
-نام کاربری و گذرواژهٔ SuperAdmin در ورودی تعاملی گرفته می‌شوند؛ پس از تأیید، مجوز یک‌بارمصرف را فقط برای انتقال به Worker نمایش می‌دهد. آن را در تاریخچهٔ shell یا فایل دائمی ثبت نکنید. صدور مجوز روی HTTP رد می‌شود.
+نام کاربری و گذرواژهٔ SuperAdmin در ورودی تعاملی گرفته می‌شوند؛ پس از تأیید، مجوز یک‌بارمصرف را فقط برای انتقال به Worker نمایش می‌دهد. برای استقرار خودکار با کلید SSH تأییدشده، `python3 -m omniops.node_admin --local-root --role worker --raw` از شل root روی Master نیز مجوز صادر می‌کند و آن را با بازیگر `system:local-root` ممیزی می‌کند. خروجی `--raw` را فقط در لولهٔ SSH به فایل موقت `0600` روی Worker بدهید؛ نصب‌کننده با `OMNIOPS_GRANT_FILE=/root/omniops-worker-grant` آن را از stdin می‌خواند و پس از اتصال موفق حذف می‌کند. مجوز را در تاریخچهٔ shell یا فایل دائمی ثبت نکنید. صدور مجوز روی HTTP رد می‌شود.
 
 ## مرحلهٔ ۲: Worker
 

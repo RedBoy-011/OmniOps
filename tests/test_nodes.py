@@ -3,6 +3,7 @@ from contextlib import closing
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from omniops.identity import IdentityError, IdentityStore
@@ -59,6 +60,18 @@ class NodeRegistryTests(unittest.TestCase):
         self.now[0] = node['credential_expires_at']
         with self.assertRaises(IdentityError):
             self.nodes.heartbeat(node['id'], node['credential'], {})
+
+    def test_local_root_grant_has_its_own_audit_actor(self):
+        with patch('omniops.nodes.os.geteuid', return_value=1000, create=True):
+            with self.assertRaises(IdentityError) as denied:
+                self.nodes.issue_local_root('worker')
+        self.assertEqual(denied.exception.status, 403)
+        with patch('omniops.nodes.os.geteuid', return_value=0, create=True):
+            grant = self.nodes.issue_local_root('worker')
+        with closing(sqlite3.connect(self.store.path)) as db:
+            row = db.execute('SELECT actor_id, event FROM audit WHERE subject_id=?', (grant['id'],)).fetchone()
+            self.assertEqual(row, ('system:local-root', 'node_grant_issued_by_local_root'))
+        self.assertEqual(self.nodes.enroll(grant['grant'], 'worker-01', 'worker')['role'], 'worker')
 
     def test_parallel_redemption_creates_one_node(self):
         grant = self.nodes.issue(self.admin, 'worker')['grant']

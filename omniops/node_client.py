@@ -8,6 +8,7 @@ import os
 import secrets
 import ssl
 import stat
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -182,12 +183,13 @@ def main():
     enroll.add_argument('--master', required=True)
     enroll.add_argument('--name', required=True)
     enroll.add_argument('--role', choices=('worker', 'edge'), default='worker')
+    enroll.add_argument('--grant-stdin', action='store_true', help='Read grant from an already-open private file descriptor')
     actions.add_parser('heartbeat')
     actions.add_parser('run')
     args = parser.parse_args()
     if args.action == 'enroll':
         client = NodeClient(args.master, args.ca_file)
-        grant = getpass.getpass('One-time node grant: ')
+        grant = sys.stdin.readline().strip() if args.grant_stdin else getpass.getpass('One-time node grant: ')
         if Path(args.state).exists() or Path(args.state).is_symlink():
             raise ValueError('Node identity already exists; revoke or recover it before re-enrollment')
         state = client.enroll(grant, args.name, args.role)
