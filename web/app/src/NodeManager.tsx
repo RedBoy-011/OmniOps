@@ -1,9 +1,10 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type ManagedNode, type NodeGrant } from "./api";
 
 export function NodeManager() {
   const secure = window.location.protocol === "https:";
   const [nodes, setNodes] = useState<ManagedNode[]>([]);
+  const [ready, setReady] = useState(false);
   const [grant, setGrant] = useState<NodeGrant | null>(null);
   const [seconds, setSeconds] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -15,7 +16,7 @@ export function NodeManager() {
     const refresh = async () => {
       try {
         const result = await api.managedNodes();
-        if (active) setNodes(result.nodes);
+        if (active) { setNodes(result.nodes); setReady(true); setMessage(""); }
       } catch { if (active) setMessage("فهرست گره‌ها دریافت نشد."); }
     };
     void refresh();
@@ -36,7 +37,7 @@ export function NodeManager() {
   }, [grant]);
 
   async function issue(role: "worker" | "edge") {
-    if (busy) return;
+    if (busy || !ready) return;
     setBusy(true); setMessage("");
     try { setGrant(await api.issueNodeGrant(role)); }
     catch (error) { setMessage(error instanceof Error ? error.message : "صدور مجوز ممکن نشد."); }
@@ -65,7 +66,7 @@ export function NodeManager() {
   return <section className="glass admin-card operations-card" aria-label="مدیریت گره‌های ثبت‌شده">
     <div className="card-title"><div><h2>اتصال امن Worker و Edge</h2><p>مجوز اتصال یک‌بارمصرف است و ۱۰ دقیقه اعتبار دارد. آخرین حضور از خود گره گزارش می‌شود.</p></div></div>
     {!secure ? <p className="empty-note">این بخش پس از فعال‌سازی TLS 1.3 مستقیم روی Master و نصب گواهی معتبر در دسترس است. از اتصال HTTP کنونی برای انتقال مجوز گره استفاده نکنید.</p> : <>
-      <div className="pending-actions"><button type="button" className="submit-button" disabled={busy || !!grant} onClick={() => void issue("worker")}>مجوز Worker</button><button type="button" className="quiet-button" disabled={busy || !!grant} onClick={() => void issue("edge")}>مجوز Edge</button></div>
+      <div className="pending-actions"><button type="button" className="submit-button" disabled={busy || !ready || !!grant} onClick={() => void issue("worker")}>مجوز Worker</button><button type="button" className="quiet-button" disabled={busy || !ready || !!grant} onClick={() => void issue("edge")}>مجوز Edge</button></div>
       {grant && <div className="pair-result" role="status"><p>مجوز {grant.role === "worker" ? "Worker" : "Edge"} را فقط به نصب‌کنندهٔ همان گره بدهید:</p><code dir="ltr" className="node-grant">{grant.grant}</code><small>{seconds.toLocaleString("fa-IR")} ثانیه باقی مانده</small><div className="pending-actions"><button className="quiet-button" type="button" onClick={() => void navigator.clipboard.writeText(grant.grant).then(() => setMessage("مجوز کپی شد.")).catch(() => setMessage("کپی ممکن نشد؛ متن را انتخاب کنید."))}>کپی مجوز</button><button className="quiet-button danger" type="button" disabled={busy} onClick={() => void revokeGrant()}>ابطال مجوز</button></div></div>}
       {nodes.length === 0 ? <p className="empty-note">هنوز گرهی از کانال امن ثبت نشده است.</p> : <div className="node-grid">{nodes.map((node) => {
         const online = !node.revoked_at && node.last_seen != null && Date.now() / 1000 - node.last_seen < 90;
