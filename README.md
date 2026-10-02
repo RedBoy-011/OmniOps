@@ -8,6 +8,7 @@
 - [انطباق خواسته‌ها و معیار پذیرش](REQUIREMENTS_TRACE.fa.md)
 - [طرح درگاه و راه‌اندازی](docs/GATEWAY_AND_SETUP.fa.md)
 - [مرکز فرماندهی گره‌ها و مسیریابی هوشمند مدل](docs/CONTROL_PLANE_AND_ROUTING.fa.md)
+- [بررسی ۹ ابزار MCP و برنامهٔ اتصال آن‌ها](docs/MCP_INTEGRATIONS.fa.md)
 - [وضعیت پیاده‌سازی و گام‌های بعدی](docs/IMPLEMENTATION_STATUS.fa.md)
 - [نقشهٔ راه مرحله‌ای و درصدهای قابل سنجش](docs/PROGRESS_ROADMAP.fa.md)
 - [ساخت ویندوز و دریافت خروجی از GitHub Actions](docs/GITHUB_BUILD.fa.md)
