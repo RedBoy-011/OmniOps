@@ -21,6 +21,9 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
   const [selected, setSelected] = useState<Record<string, string[]>>({});
   const [operations, setOperations] = useState<Operations | null>(null);
   const [operationsError, setOperationsError] = useState("");
+  const [workerUrl, setWorkerUrl] = useState("");
+  const [workerBusy, setWorkerBusy] = useState(false);
+  const [workerMessage, setWorkerMessage] = useState("");
 
   useEffect(() => {
     if (user.role !== "superadmin") return;
@@ -29,8 +32,22 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
   }, [user.role]);
 
   async function refreshOperations() {
-    try { setOperations(await api.operations()); setOperationsError(""); }
+    try { const result = await api.operations(); setOperations(result); setWorkerUrl(result.ollama.url); setOperationsError(""); }
     catch { setOperationsError("دریافت وضعیت عملیاتی ممکن نشد."); }
+  }
+
+  async function saveWorker(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (workerBusy) return;
+    setWorkerBusy(true);
+    setWorkerMessage("در حال آزمون اتصال به Worker…");
+    try {
+      await api.saveOllamaEndpoint(workerUrl.trim());
+      await refreshOperations();
+      setWorkerMessage("اتصال Worker آزمایش و ذخیره شد.");
+    } catch (cause) {
+      setWorkerMessage(cause instanceof Error ? cause.message : "اتصال به Worker برقرار نشد؛ نشانی قبلی حفظ شد.");
+    } finally { setWorkerBusy(false); }
   }
 
   useEffect(() => {
@@ -153,7 +170,7 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
             </>}
           </section>
         </div>
-        {user.role === "superadmin" && <section className="glass admin-card operations-card"><div className="card-title"><div><h2>وضعیت هسته و مدل‌های محلی</h2><p>این وضعیت مستقیماً از هسته و Ollama دریافت می‌شود.</p></div><button className="quiet-button" onClick={() => void refreshOperations()}>به‌روزرسانی</button></div>{operationsError ? <p className="admin-message" role="alert">{operationsError}</p> : operations ? <div className="operations-summary"><p>هستهٔ مرکزی: <strong>فعال</strong></p><p>Ollama: <strong>{operations.ollama.status === "up" ? "در دسترس" : "در دسترس نیست"}</strong></p><p>مدل‌ها: {operations.ollama.models.length.toLocaleString("fa-IR")}</p>{operations.ollama.models.length > 0 && <ul>{operations.ollama.models.map((model) => <li key={model.id} dir="ltr">{model.id}</li>)}</ul>}</div> : <p className="empty-note">در حال بررسی وضعیت…</p>}</section>}
+        {user.role === "superadmin" && <section className="glass admin-card operations-card"><form className="worker-form" onSubmit={(event) => void saveWorker(event)}><label htmlFor="worker-url">نشانی خصوصی Ollama روی Worker</label><div className="worker-controls"><input id="worker-url" dir="ltr" type="url" required value={workerUrl} onChange={(event) => setWorkerUrl(event.target.value)} placeholder="http://worker-private-ip:11434" /><button className="submit-button" disabled={workerBusy} type="submit">{workerBusy ? "در حال آزمون…" : "تست و ذخیره"}</button></div><small>فقط نشانی شبکهٔ خصوصی یا localhost پذیرفته می‌شود. مدل باید روی Worker نصب و در دسترس Master باشد.</small>{workerMessage && <p className="admin-message" role="status">{workerMessage}</p>}</form><div className="card-title"><div><h2>وضعیت هسته و مدل‌های محلی</h2><p>این وضعیت مستقیماً از هسته و Ollama دریافت می‌شود.</p></div><button className="quiet-button" onClick={() => void refreshOperations()}>به‌روزرسانی</button></div>{operationsError ? <p className="admin-message" role="alert">{operationsError}</p> : operations ? <div className="operations-summary"><p>هستهٔ مرکزی: <strong>فعال</strong></p><p>نشانی فعال: <code dir="ltr">{operations.ollama.url}</code></p><p>Ollama: <strong>{operations.ollama.status === "up" ? "در دسترس" : "در دسترس نیست"}</strong></p><p>مدل‌ها: {operations.ollama.models.length.toLocaleString("fa-IR")}</p>{operations.ollama.models.length > 0 && <ul>{operations.ollama.models.map((model) => <li key={model.id} dir="ltr">{model.id}</li>)}</ul>}</div> : <p className="empty-note">در حال بررسی وضعیت…</p>}</section>}
         {message && <p className="admin-message" role="status" aria-live="polite">{message}</p>}
       </div>
     </main>

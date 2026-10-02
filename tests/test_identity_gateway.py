@@ -47,7 +47,7 @@ class IdentityGatewayTests(unittest.TestCase):
             headers["Authorization"] = f"Bearer {token}"
         req = Request(self.root + path, data=data, headers=headers, method=method)
         try:
-            with self.opener.open(req, timeout=2) as response:
+            with self.opener.open(req, timeout=12) as response:
                 return response.status, json.load(response)
         except HTTPError as error:
             try:
@@ -131,11 +131,86 @@ class IdentityGatewayTests(unittest.TestCase):
             with self.opener.open(request, timeout=3) as response:
                 operations = json.load(response)
                 self.assertEqual((code, response.status, operations["master"]), (200, 200, "up"))
-                self.assertEqual(operations["ollama"], {"status": "unreachable", "models": []})
+                self.assertEqual(operations["ollama"], {"url": "http://127.0.0.1:1", "status": "unreachable", "models": []})
         finally:
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+
+class SecondWorker(FakeOllama):
+    def do_GET(self):
+        if self.path == "/api/tags":
+            self._reply({"models": [{"name": "second:2b", "size": 456}]})
+        else:
+            self.send_error(404)
+
+    def do_POST(self):
+        if self.path != "/api/chat":
+            self.send_error(404)
+            return
+        payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        self.server.last_request = payload
+        self._reply({"message": {"role": "assistant", "content": "second worker"}})
+
+
+class WorkerEndpointTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp.name) / "identity.db"
+        self.store = IdentityStore(self.path, b"q" * 32)
+        self.store.bootstrap_admin("root-admin", "a very strong admin password", "09123456789")
+        self.first = ThreadingHTTPServer(("127.0.0.1", 0), FakeOllama)
+        self.second = ThreadingHTTPServer(("127.0.0.1", 0), SecondWorker)
+        self.workers = [threading.Thread(target=worker.serve_forever, daemon=True) for worker in (self.first, self.second)]
+        for thread in self.workers:
+            thread.start()
+        self.first_url = f"http://127.0.0.1:{self.first.server_port}"
+        self.second_url = f"http://127.0.0.1:{self.second.server_port}"
+        self.server = make_server("127.0.0.1", 0, "testing-a-unique-gateway-key-long-enough", self.first_url, self.store)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.root = f"http://127.0.0.1:{self.server.server_port}"
+        self.opener = build_opener(ProxyHandler({}))
+        self.admin = self.call("POST", "/api/auth/login", {"username": "root-admin", "password": "a very strong admin password"})[1]["token"]
+
+    def tearDown(self):
+        for server, thread in [(self.server, self.thread), (self.first, self.workers[0]), (self.second, self.workers[1])]:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+        self.temp.cleanup()
+
+    call = IdentityGatewayTests.call
+
+    def test_endpoint_requires_privilege_and_retains_previous_on_failure(self):
+        self.assertEqual(self.call("POST", "/api/admin/ollama-endpoint", {"url": self.second_url})[0], 401)
+        self.store.register("operator-two", "operator password 123!", "09128888888", "127.0.0.1")
+        member_id = self.store.pending(self.store.authenticate(self.admin, "web"))[0]["id"]
+        self.store.decide(self.store.authenticate(self.admin, "web"), member_id, True, ["chat", "agent.pair"])
+        member = self.call("POST", "/api/auth/login", {"username": "operator-two", "password": "operator password 123!"})[1]["token"]
+        self.assertEqual(self.call("POST", "/api/admin/ollama-endpoint", {"url": self.second_url}, member)[0], 403)
+        self.assertEqual(self.call("POST", "/api/admin/ollama-endpoint", {"url": "https://example.com"}, self.admin)[0], 400)
+        self.assertEqual(self.call("POST", "/api/admin/ollama-endpoint", {"url": "http://127.0.0.1:1"}, self.admin)[0], 503)
+        self.assertIsNone(self.store.ollama_endpoint())
+        self.assertEqual(self.call("POST", "/api/admin/ollama-endpoint", {"url": self.second_url}, self.admin)[0], 200)
+        self.assertEqual(self.call("POST", "/api/admin/ollama-endpoint", {"url": "http://127.0.0.1:1"}, self.admin)[0], 503)
+        self.assertEqual(IdentityStore(self.path, b"q" * 32).ollama_endpoint(), self.second_url)
+
+    def test_model_and_chat_switch_without_restarting_master(self):
+        self.assertEqual(self.call("POST", "/api/admin/ollama-endpoint", {"url": self.second_url}, self.admin)[0], 200)
+        self.assertEqual(self.call("GET", "/api/admin/operations", token=self.admin)[1]["ollama"]["url"], self.second_url)
+        self.assertEqual(self.call("GET", "/v1/models", token="testing-a-unique-gateway-key-long-enough")[1]["data"][0]["id"], "ollama/second:2b")
+        self.store.register("operator-two", "operator password 123!", "09128888888", "127.0.0.1")
+        principal = self.store.authenticate(self.admin, "web")
+        self.store.decide(principal, self.store.pending(principal)[0]["id"], True, ["chat", "agent.pair"])
+        member = self.call("POST", "/api/auth/login", {"username": "operator-two", "password": "operator password 123!"})[1]["token"]
+        pairing = self.call("POST", "/api/agent/pairing", {}, member)[1]["code"]
+        agent = self.call("POST", "/api/agent/redeem", {"code": pairing, "device_id": "pc-02"})[1]["token"]
+        self.assertEqual(self.call("GET", "/api/agent/models", token=agent)[1]["models"], ["ollama/second:2b"])
+        self.assertEqual(self.call("POST", "/api/agent/chat", {"message": "hi"}, agent)[1]["reply"], "second worker")
+        self.assertEqual(self.second.last_request["model"], "second:2b")
+        self.assertEqual(self.call("POST", "/v1/chat/completions", {"model": "ollama/second:2b", "messages": [{"role": "user", "content": "hi"}]}, "testing-a-unique-gateway-key-long-enough")[1]["choices"][0]["message"]["content"], "second worker")
 
 
 if __name__ == "__main__":

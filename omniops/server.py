@@ -41,7 +41,11 @@ def make_server(
         raise ValueError("Development gateway binds only loopback or an explicit private LAN IPv4")
     if len(api_key) < 32:
         raise ValueError("Set a unique OMNIOPS_API_KEY of at least 32 characters")
-    ollama = OllamaClient(ollama_url)
+    OllamaClient(ollama_url)
+
+    def current_ollama() -> OllamaClient:
+        endpoint = identity_store.ollama_endpoint() if identity_store else None
+        return OllamaClient(endpoint or ollama_url)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "OmniOps-Dev/0.1"
@@ -63,8 +67,8 @@ def make_server(
             self._send(401, {"error": {"message": "Valid API key required"}})
             return False
 
-        def _available_models(self) -> dict[str, str]:
-            return {f"ollama/{entry.name}": entry.name for entry in ollama.list_models()}
+        def _available_models(self, client: OllamaClient) -> dict[str, str]:
+            return {f"ollama/{entry.name}": entry.name for entry in client.list_models()}
 
         def _static(self) -> bool:
             if web_dist is None or (self.path != "/" and not self.path.startswith("/assets/")):
@@ -129,6 +133,7 @@ def make_server(
             if path not in {
                 "/api/auth/register", "/api/auth/login", "/api/auth/logout",
                 "/api/agent/pairing", "/api/agent/redeem", "/api/agent/heartbeat", "/api/agent/logout", "/api/agent/chat",
+                "/api/admin/ollama-endpoint",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
@@ -160,13 +165,29 @@ def make_server(
                     self._send(200, store.redeem_pairing(
                         payload.get("code"), payload.get("device_id"), self.client_address[0]
                     ))
+                elif path == "/api/admin/ollama-endpoint":
+                    if principal["role"] != "superadmin" or "provider.manage" not in principal["capabilities"]:
+                        raise IdentityError("Superadmin provider permission required", 403)
+                    url = payload.get("url")
+                    if not isinstance(url, str) or len(url) > 255:
+                        raise IdentityError("Invalid worker URL")
+                    try:
+                        candidate = OllamaClient(url)
+                    except ValueError as exc:
+                        raise IdentityError(str(exc)) from exc
+                    models = candidate.list_models()
+                    store.set_ollama_endpoint(principal, candidate.base_url)
+                    self._send(200, {"url": candidate.base_url, "status": "up", "models": [
+                        {"id": f"ollama/{entry.name}", "size_bytes": entry.size_bytes} for entry in models
+                    ]})
                 elif path == "/api/agent/chat":
                     if "chat" not in principal["capabilities"]:
                         raise IdentityError("Profile has no chat permission", 403)
                     prompt = payload.get("message")
                     if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 8000:
                         raise IdentityError("Chat message must contain 1–8000 characters")
-                    available = self._available_models()
+                    client = current_ollama()
+                    available = self._available_models(client)
                     if not available:
                         raise OllamaError("No local model is installed")
                     requested = payload.get("model", "auto")
@@ -177,7 +198,7 @@ def make_server(
                     model = available.get(requested)
                     if model is None:
                         raise IdentityError("Requested local model is not installed", 404)
-                    answer = ollama.chat(model, [{"role": "user", "content": prompt.strip()}])
+                    answer = client.chat(model, [{"role": "user", "content": prompt.strip()}])
                     self._send(200, {"reply": answer, "model": f"ollama/{model}"})
                 else:
                     pieces = path.split("/")
@@ -204,7 +225,7 @@ def make_server(
                     self._send(403, {"error": {"message": "Profile has no chat permission"}})
                     return
                 try:
-                    models = self._available_models()
+                    models = self._available_models(current_ollama())
                     self._send(200, {"models": list(models)})
                 except OllamaError as exc:
                     self._send(503, {"error": {"message": str(exc)}})
@@ -217,12 +238,13 @@ def make_server(
                     self._send(403, {"error": {"message": "Superadmin access required"}})
                     return
                 try:
-                    models = ollama.list_models()
-                    self._send(200, {"master": "up", "ollama": {"status": "up", "models": [
+                    client = current_ollama()
+                    models = client.list_models()
+                    self._send(200, {"master": "up", "ollama": {"url": client.base_url, "status": "up", "models": [
                         {"id": f"ollama/{entry.name}", "size_bytes": entry.size_bytes} for entry in models
                     ]}})
                 except OllamaError:
-                    self._send(200, {"master": "up", "ollama": {"status": "unreachable", "models": []}})
+                    self._send(200, {"master": "up", "ollama": {"url": current_ollama().base_url, "status": "unreachable", "models": []}})
                 return
             if self.path in {"/api/auth/me", "/api/admin/pending", "/api/admin/pending/count"}:
                 principal = self._principal()
@@ -243,7 +265,7 @@ def make_server(
             if not self._authorized():
                 return
             try:
-                models = self._available_models()
+                models = self._available_models(current_ollama())
             except OllamaError as exc:
                 self._send(503, {"error": {"message": str(exc)}})
                 return
@@ -272,12 +294,13 @@ def make_server(
                 self._send(400, {"error": {"message": "Model ID required"}})
                 return
             try:
-                available = self._available_models()
+                client = current_ollama()
+                available = self._available_models(client)
                 selected = available.get(model)
                 if selected is None:
                     self._send(404, {"error": {"message": "Requested local model is not installed"}})
                     return
-                content = ollama.chat(selected, request.get("messages"))
+                content = client.chat(selected, request.get("messages"))
             except ValueError as exc:
                 self._send(400, {"error": {"message": str(exc)}})
                 return

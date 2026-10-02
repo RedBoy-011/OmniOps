@@ -125,3 +125,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
   .tech-grid, .ambient { animation: none; }
   *, *::before, *::after { scroll-behavior: auto !important; }
 }
+
+.worker-form { display: grid; gap: 10px; margin-bottom: 22px; }
+.worker-form label { font-weight: 650; }
+.worker-form small { color: #c5b6c0; }
+.worker-controls { display: flex; flex-wrap: wrap; gap: 10px; }
+.worker-controls input { flex: 1 1 250px; min-width: 0; padding: 12px; border: 1px solid #f5a1bd7a; border-radius: 12px; background: #ffffff0b; color: white; }
+.worker-controls button { flex: 0 0 auto; }
+.operations-summary code { overflow-wrap: anywhere; }

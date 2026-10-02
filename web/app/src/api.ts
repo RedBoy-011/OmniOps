@@ -8,7 +8,7 @@ export type Profile = {
 
 export type PendingUser = { id: string; username: string; mobile: string; created_at: number };
 export type LoginResult = { token: string; user: Profile; pending_count: number };
-export type Operations = { master: "up"; ollama: { status: "up" | "unreachable"; models: { id: string; size_bytes: number | null }[] } };
+export type Operations = { master: "up"; ollama: { url: string; status: "up" | "unreachable"; models: { id: string; size_bytes: number | null }[] } };
 
 let volatileWebToken: string | null = null;
 export function keepSessionInMemory(token: string) { volatileWebToken = token; }
@@ -39,6 +39,7 @@ export const api = {
   register: (username: string, password: string, mobile: string) => request<{ status: string; message: string }>("/api/auth/register", "POST", { username, password, mobile }),
   pending: () => request<{ users: PendingUser[] }>("/api/admin/pending"),
   operations: () => request<Operations>("/api/admin/operations"),
+  saveOllamaEndpoint: (url: string) => request<Operations["ollama"]>("/api/admin/ollama-endpoint", "POST", { url }),
   approve: (id: string, capabilities: string[]) => request<{ status: string }>(`/api/admin/pending/${encodeURIComponent(id)}/approve`, "POST", { capabilities }),
   reject: (id: string) => request<{ status: string }>(`/api/admin/pending/${encodeURIComponent(id)}/reject`, "POST", {}),
   issuePairing: () => request<{ code: string; expires_at: number }>("/api/agent/pairing", "POST", {}),

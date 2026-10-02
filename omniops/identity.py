@@ -119,6 +119,10 @@ class IdentityStore:
                     id TEXT PRIMARY KEY, actor_id TEXT, event TEXT NOT NULL,
                     subject_id TEXT, created_at INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS settings (
+                    name TEXT PRIMARY KEY, value TEXT NOT NULL,
+                    changed_by TEXT NOT NULL, changed_at INTEGER NOT NULL
+                );
             """)
 
     @contextmanager
@@ -135,6 +139,21 @@ class IdentityStore:
 
     def _audit(self, db, actor: str | None, event: str, subject: str | None):
         db.execute("INSERT INTO audit VALUES (?,?,?,?,?)", (uuid.uuid4().hex, actor, event, subject, int(self.clock())))
+
+    def ollama_endpoint(self) -> str | None:
+        with self._db() as db:
+            row = db.execute("SELECT value FROM settings WHERE name=?", ("ollama_endpoint",)).fetchone()
+            return row["value"] if row else None
+
+    def set_ollama_endpoint(self, principal: dict, endpoint: str):
+        if principal.get("role") != "superadmin" or "provider.manage" not in principal.get("capabilities", []):
+            raise IdentityError("Superadmin provider permission required", 403)
+        with self._lock, self._db() as db:
+            db.execute("INSERT INTO settings (name, value, changed_by, changed_at) VALUES (?, ?, ?, ?) "
+                       "ON CONFLICT(name) DO UPDATE SET value=excluded.value, "
+                       "changed_by=excluded.changed_by, changed_at=excluded.changed_at",
+                       ("ollama_endpoint", endpoint, principal["id"], int(self.clock())))
+            self._audit(db, principal["id"], "ollama_endpoint_changed", None)
 
     def bootstrap_admin(self, username: str, password: str, mobile: str) -> str:
         display, key = _normalize_username(username)
