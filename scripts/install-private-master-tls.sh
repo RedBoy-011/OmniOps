@@ -6,14 +6,15 @@ fail() { printf 'OmniOps Master TLS stopped: %s\n' "$*" >&2; exit 1; }
 [[ -d /run/systemd/system ]] || fail 'systemd is required.'
 for binary in python3 openssl curl systemctl systemd-analyze; do command -v "$binary" >/dev/null || fail "Missing $binary"; done
 repo="$(pwd -P)"
+[[ "$repo" != *[[:space:]]* ]] || fail 'Repository path cannot contain whitespace for this systemd unit.'
 [[ -f "$repo/omniops/tls_server.py" && -d "$repo/.git" ]] || fail 'Run inside an updated OmniOps repository.'
 config=/etc/omniops/master.env
 main_unit=/etc/systemd/system/omniops-master.service
 [[ -r "$config" && -f "$main_unit" ]] || fail 'Update and start the existing Master first.'
 grep -Fxq "WorkingDirectory=$repo" "$main_unit" || fail 'The current repository does not own the running Master.'
 systemctl is-active --quiet omniops-master.service || fail 'Existing HTTP Master is not active.'
-master_ip="$(python3 -c 'from scripts.upgrade_config import parse_environment_file; print(parse_environment_file("/etc/omniops/master.env").get("OMNIOPS_BIND_HOST", "127.0.0.1"))')"
-[[ "$master_ip" != 127.0.0.1 ]] || fail 'Set a private LAN bind IP on the existing Master first.'
+settings="$(python3 -m omniops.private_tls_config "$config")" || fail 'Existing Master configuration is invalid.'
+IFS='|' read -r master_ip main_port <<< "$settings"
 if [[ -n "${OMNIOPS_TLS_PORT:-}" ]]; then
   tls_port="$OMNIOPS_TLS_PORT"
 else
@@ -22,7 +23,6 @@ else
   tls_port="${tls_port:-9443}"
 fi
 [[ "$tls_port" =~ ^[0-9]+$ ]] && (( tls_port >= 1024 && tls_port <= 65535 )) || fail 'Choose a TCP port from 1024 to 65535.'
-main_port="$(python3 -c 'from scripts.upgrade_config import parse_environment_file; print(parse_environment_file("/etc/omniops/master.env").get("OMNIOPS_PORT", "9000"))')"
 [[ "$tls_port" != "$main_port" ]] || fail 'TLS port must differ from the existing HTTP port.'
 unit=/etc/systemd/system/omniops-master-tls.service
 if [[ -f "$unit" ]]; then

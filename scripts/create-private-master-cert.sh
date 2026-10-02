@@ -18,6 +18,7 @@ command -v openssl >/dev/null || fail 'OpenSSL is required.'
 umask 077
 mkdir -p -- "$certificate_dir"
 certificate_dir="$(realpath -- "$certificate_dir")"
+[[ "$certificate_dir" != / ]] || fail 'Certificate directory must not be the filesystem root.'
 chmod 0700 "$certificate_dir"
 ca="$certificate_dir/ca.crt"
 ca_key="$certificate_dir/ca.key"
@@ -65,5 +66,5 @@ else
   chmod 0644 "$certificate_dir/ca.crt" "$leaf"
   printf 'Master certificate issued for %s.\n' "$master_ip"
 fi
-openssl x509 -in "$certificate_dir/ca.crt" -outform DER | openssl dgst -sha256
+openssl x509 -in "$certificate_dir/ca.crt" -outform DER | openssl dgst -sha256 | awk '{print tolower($NF)}'
 printf 'Share only %s/ca.crt with the Worker over verified SSH.\n' "$certificate_dir"
