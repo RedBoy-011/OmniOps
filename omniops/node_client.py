@@ -15,8 +15,9 @@ from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 
-from .server import LAN_NETWORKS
-
+LAN_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"
+))
 MAX_RESPONSE = 64 * 1024
 
 
@@ -45,18 +46,20 @@ class NodeClient:
         self.context.minimum_version = ssl.TLSVersion.TLSv1_3
         self.opener = build_opener(ProxyHandler({}), HTTPSHandler(context=self.context))
 
-    def request(self, path, body):
+    def request(self, path, body, token=None):
         data = json.dumps(body).encode('utf-8')
-        req = Request(self.master_url + path, data=data,
-                      headers={'Content-Type': 'application/json'}, method='POST')
+        headers = {'Content-Type': 'application/json'}
+        if token is not None:
+            headers['Authorization'] = 'Bearer ' + token
+        req = Request(self.master_url + path, data=data, headers=headers, method='POST')
         with self.opener.open(req, timeout=10) as response:
             raw = response.read(MAX_RESPONSE + 1)
             if len(raw) > MAX_RESPONSE:
                 raise ValueError('Master response too large')
             return json.loads(raw)
 
-    def enroll(self, grant, name):
-        return self.request('/api/nodes/enroll', {'grant': grant, 'name': name})
+    def enroll(self, grant, name, role='worker'):
+        return self.request('/api/nodes/enroll', {'grant': grant, 'name': name, 'role': role})
 
     def heartbeat(self, state, metrics):
         return self.request('/api/nodes/heartbeat', {
@@ -162,6 +165,7 @@ def main():
     enroll = actions.add_parser('enroll')
     enroll.add_argument('--master', required=True)
     enroll.add_argument('--name', required=True)
+    enroll.add_argument('--role', choices=('worker', 'edge'), default='worker')
     actions.add_parser('heartbeat')
     actions.add_parser('run')
     args = parser.parse_args()
@@ -170,7 +174,7 @@ def main():
         grant = getpass.getpass('One-time node grant: ')
         if Path(args.state).exists() or Path(args.state).is_symlink():
             raise ValueError('Node identity already exists; revoke or recover it before re-enrollment')
-        state = client.enroll(grant, args.name)
+        state = client.enroll(grant, args.name, args.role)
         state['master_url'] = client.master_url
         save_identity(args.state, state)
         print('Node enrolled:', state['id'], 'role:', state['role'])

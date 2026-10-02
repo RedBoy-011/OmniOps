@@ -157,7 +157,7 @@ def make_server(
                 return
             try:
                 if path == "/api/nodes/enroll":
-                    self._send(201, nodes.enroll(body.get("grant"), body.get("name")))
+                    self._send(201, nodes.enroll(body.get("grant"), body.get("name"), body.get("role")))
                 elif path == "/api/nodes/heartbeat":
                     self._send(200, nodes.heartbeat(body.get("id"), body.get("credential"), body.get("metrics")))
                 elif path == "/api/nodes/rotate":

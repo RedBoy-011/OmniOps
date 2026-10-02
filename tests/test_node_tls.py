@@ -9,6 +9,7 @@ import threading
 import unittest
 from pathlib import Path
 from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
+from urllib.error import HTTPError
 
 from omniops.identity import IdentityStore
 from omniops.node_client import NodeClient, save_identity, load_identity
@@ -52,6 +53,10 @@ class NodeTlsTests(unittest.TestCase):
                              'password': 'a sufficiently strong password'})[1]['token']
                 grant = send('/api/admin/nodes/grants', {'role': 'worker'}, token)[1]
                 client_node = NodeClient(root, str(certificate))
+                with self.assertRaises(HTTPError) as mismatch:
+                    client_node.enroll(grant['grant'], 'edge-01', 'edge')
+                self.assertEqual(mismatch.exception.code, 403)
+                mismatch.exception.close()
                 node = client_node.enroll(grant['grant'], 'worker-01')
                 node['master_url'] = root
                 state_path = Path(directory) / 'node.json'

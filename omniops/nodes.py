@@ -67,7 +67,7 @@ class NodeRegistry:
                 raise IdentityError("Active grant not found", 404)
             self.identity._audit(db, principal["id"], "node_grant_revoked", grant_id)
 
-    def enroll(self, grant, name):
+    def enroll(self, grant, name, requested_role=None):
         if not isinstance(grant, str) or not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", grant):
             raise IdentityError("Invalid or expired node grant", 401)
         if not isinstance(name, str) or not re.fullmatch(r"[\w. -]{1,64}", name, re.UNICODE):
@@ -81,6 +81,8 @@ class NodeRegistry:
                              "AND revoked_at IS NULL AND expires_at>?", (self._digest(grant), now)).fetchone()
             if row is None:
                 raise IdentityError("Invalid or expired node grant", 401)
+            if requested_role is not None and requested_role != row["role"]:
+                raise IdentityError("Node grant does not match this installer role", 403)
             db.execute("UPDATE node_grants SET used_at=? WHERE id=?", (now, row["id"]))
             db.execute("INSERT INTO managed_nodes VALUES (?,?,?,?,?,?,?,?,?)",
                        (node_id, row["role"], name.strip(), self._digest(credential),

@@ -50,7 +50,10 @@ class NodeRegistryTests(unittest.TestCase):
             self.nodes.enroll(expired['grant'], 'worker-01')
         with self.assertRaises(IdentityError):
             self.nodes.issue({'role': 'member', 'capabilities': ['profile.manage']}, 'worker')
-        node = self.nodes.enroll(self.nodes.issue(self.admin, 'edge')['grant'], 'edge-01')
+        edge_grant = self.nodes.issue(self.admin, 'edge')['grant']
+        with self.assertRaises(IdentityError):
+            self.nodes.enroll(edge_grant, 'worker-01', 'worker')
+        node = self.nodes.enroll(edge_grant, 'edge-01', 'edge')
         with self.assertRaises(IdentityError):
             self.nodes.heartbeat(node['id'], node['credential'], {'unknown': 1})
         self.now[0] = node['credential_expires_at']
