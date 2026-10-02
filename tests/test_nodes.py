@@ -1,4 +1,4 @@
-﻿import concurrent.futures
+import concurrent.futures
 from contextlib import closing
 import sqlite3
 import tempfile
@@ -31,12 +31,13 @@ class NodeRegistryTests(unittest.TestCase):
             self.nodes.enroll(grant['grant'], 'worker-02')
         self.nodes.heartbeat(node['id'], node['credential'], {'cpu_percent': 25, 'models': ['qwen3:0.6b']})
         self.assertEqual(self.nodes.list_nodes(self.admin)[0]['metrics']['models'], ['qwen3:0.6b'])
-        fresh = self.nodes.rotate(node['id'], node['credential'])
+        fresh = 'Z' * 43
+        self.nodes.rotate(node['id'], node['credential'], fresh)
         with self.assertRaises(IdentityError):
             self.nodes.heartbeat(node['id'], node['credential'], {})
         self.nodes.revoke(self.admin, node['id'])
         with self.assertRaises(IdentityError):
-            self.nodes.heartbeat(node['id'], fresh['credential'], {})
+            self.nodes.heartbeat(node['id'], fresh, {})
 
     def test_expiration_cancel_permissions_and_bad_metrics(self):
         canceled = self.nodes.issue(self.admin, 'edge')

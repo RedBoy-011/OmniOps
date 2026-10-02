@@ -109,21 +109,22 @@ class NodeRegistry:
             raise IdentityError("Invalid node models")
         with self.identity._lock, self.identity._db() as db:
             db.execute("BEGIN IMMEDIATE")
-            self._authenticated(db, node_id, credential)
+            node = self._authenticated(db, node_id, credential)
             db.execute("UPDATE managed_nodes SET last_seen=?, metrics=? WHERE id=?",
                        (self._now(), json.dumps(metrics), node_id))
-        return {"status": "ok", "checked_at": self._now()}
+        return {"status": "ok", "checked_at": self._now(), "credential_expires_at": node["credential_expires_at"]}
 
-    def rotate(self, node_id, credential):
-        fresh = secrets.token_urlsafe(32)
+    def rotate(self, node_id, credential, next_credential):
+        if not isinstance(next_credential, str) or not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", next_credential) or next_credential == credential:
+            raise IdentityError("Invalid replacement node credential")
         with self.identity._lock, self.identity._db() as db:
             db.execute("BEGIN IMMEDIATE")
             self._authenticated(db, node_id, credential)
             expires = self._now() + CREDENTIAL_TTL
             db.execute("UPDATE managed_nodes SET credential_hash=?, credential_expires_at=? WHERE id=?",
-                       (self._digest(fresh), expires, node_id))
+                       (self._digest(next_credential), expires, node_id))
             self.identity._audit(db, node_id, "node_credential_rotated", node_id)
-        return {"credential": fresh, "credential_expires_at": expires}
+        return {"credential_expires_at": expires}
 
     def revoke(self, principal, node_id):
         self._admin(principal)

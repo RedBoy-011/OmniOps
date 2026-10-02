@@ -1,4 +1,4 @@
-﻿"""HTTPS path uses the TLS socket and a verified Master certificate."""
+"""HTTPS path uses the TLS socket and a verified Master certificate."""
 
 import json
 import shutil
@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 
 from omniops.identity import IdentityStore
+from omniops.node_client import NodeClient, save_identity, load_identity
 from omniops.server import make_server
 
 
@@ -50,10 +51,14 @@ class NodeTlsTests(unittest.TestCase):
                 token = send('/api/auth/login', {'username': 'tls-admin',
                              'password': 'a sufficiently strong password'})[1]['token']
                 grant = send('/api/admin/nodes/grants', {'role': 'worker'}, token)[1]
-                node = send('/api/nodes/enroll', {'grant': grant['grant'], 'name': 'worker-01'})[1]
+                client_node = NodeClient(root, str(certificate))
+                node = client_node.enroll(grant['grant'], 'worker-01')
+                node['master_url'] = root
+                state_path = Path(directory) / 'node.json'
+                save_identity(state_path, node)
+                node = load_identity(state_path)
                 self.assertEqual(node['role'], 'worker')
-                self.assertEqual(send('/api/nodes/heartbeat', {'id': node['id'],
-                                 'credential': node['credential'], 'metrics': {'cpu_percent': 12}})[0], 200)
+                self.assertEqual(client_node.heartbeat(node, {'cpu_percent': 12})['status'], 'ok')
                 self.assertEqual(send('/api/admin/nodes', token=token)[1]['nodes'][0]['id'], node['id'])
                 self.assertEqual(send('/api/admin/nodes/revoke', {'id': node['id']}, token)[0], 200)
             finally:

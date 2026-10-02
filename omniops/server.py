@@ -161,7 +161,7 @@ def make_server(
                 elif path == "/api/nodes/heartbeat":
                     self._send(200, nodes.heartbeat(body.get("id"), body.get("credential"), body.get("metrics")))
                 elif path == "/api/nodes/rotate":
-                    self._send(200, nodes.rotate(body.get("id"), body.get("credential")))
+                    self._send(200, nodes.rotate(body.get("id"), body.get("credential"), body.get("next_credential")))
                 elif path == "/api/admin/nodes/grants":
                     self._send(201, nodes.issue(principal, body.get("role")))
                 elif path == "/api/admin/nodes/grants/revoke":
