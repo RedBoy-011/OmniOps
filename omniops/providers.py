@@ -103,45 +103,59 @@ def _catalog_price_per_million(value):
     return None
 
 
+def _provider_get(host, path, headers, mode, proxy_url, maximum):
+    sock = _connect_proxy(proxy_url, host) if mode == 'socks' else socket.create_connection((host, 443), timeout=8)
+    connection = http.client.HTTPSConnection(host, timeout=10)
+    try:
+        try:
+            connection.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=host)
+        except Exception:
+            sock.close()
+            raise
+        connection.request('GET', path, headers=headers)
+        response = connection.getresponse()
+        if response.status != 200:
+            raise IdentityError(f'Provider returned HTTP {response.status}', 502)
+        raw = response.read(maximum + 1)
+        if len(raw) > maximum:
+            raise IdentityError('Provider response is too large', 502)
+        return json.loads(raw)
+    finally:
+        connection.close()
+
+
 def fetch_models(kind, api_key, mode, proxy_url, with_prices=False):
     host, path, auth_header = ENDPOINTS[kind]
     try:
-        sock = _connect_proxy(proxy_url, host) if mode == 'socks' else socket.create_connection((host, 443), timeout=8)
-        connection = http.client.HTTPSConnection(host, timeout=10)
-        try:
-            connection.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=host)
-            headers = {auth_header: ('Bearer ' if auth_header == 'Authorization' else '') + api_key,
-                       'Accept': 'application/json'}
-            if kind == 'anthropic':
-                headers['anthropic-version'] = '2023-06-01'
-            connection.request('GET', path + ('?pageSize=1000' if kind == 'gemini' else ''), headers=headers)
-            response = connection.getresponse()
-            if response.status != 200:
-                raise IdentityError(f'Provider returned HTTP {response.status}', 502)
-            raw = response.read(MAX_CATALOG_BYTES + 1)
-            if len(raw) > MAX_CATALOG_BYTES:
-                raise IdentityError('Provider catalog is too large', 502)
-            document = json.loads(raw)
-            items = document.get('models' if kind == 'gemini' else 'data', [])
-            if not isinstance(items, list):
-                raise ValueError('Invalid provider catalog')
-            models = []
-            catalog_prices = {}
-            for item in items[:3000]:
-                if isinstance(item, dict):
-                    name = item.get('name' if kind == 'gemini' else 'id')
-                    if isinstance(name, str) and len(name) <= 160:
-                        name = name.removeprefix('models/') if kind == 'gemini' else name
-                        models.append(name)
-                        pricing = item.get('pricing')
-                        if kind == 'openrouter' and isinstance(pricing, dict):
-                            input_price = _catalog_price_per_million(pricing.get('prompt'))
-                            output_price = _catalog_price_per_million(pricing.get('completion'))
-                            if input_price is not None and output_price is not None:
-                                catalog_prices[name] = {'input': input_price, 'output': output_price}
-            return (models, catalog_prices) if with_prices else models
-        finally:
-            connection.close()
+        headers = {auth_header: ('Bearer ' if auth_header == 'Authorization' else '') + api_key,
+                   'Accept': 'application/json'}
+        if kind == 'anthropic':
+            headers['anthropic-version'] = '2023-06-01'
+        if kind == 'openrouter':
+            # Etebar-e kelid ra az masir-e mostanad-e khod-e provider check kon.
+            key_document = _provider_get(host, '/api/v1/key', headers, mode, proxy_url, 8192)
+            if not isinstance(key_document, dict) or not isinstance(key_document.get('data'), dict):
+                raise IdentityError('Provider key verification returned an invalid response', 502)
+        document = _provider_get(host, path + ('?pageSize=1000' if kind == 'gemini' else ''),
+                                 headers, mode, proxy_url, MAX_CATALOG_BYTES)
+        items = document.get('models' if kind == 'gemini' else 'data', [])
+        if not isinstance(items, list):
+            raise ValueError('Invalid provider catalog')
+        models = []
+        catalog_prices = {}
+        for item in items[:3000]:
+            if isinstance(item, dict):
+                name = item.get('name' if kind == 'gemini' else 'id')
+                if isinstance(name, str) and len(name) <= 160:
+                    name = name.removeprefix('models/') if kind == 'gemini' else name
+                    models.append(name)
+                    pricing = item.get('pricing')
+                    if kind == 'openrouter' and isinstance(pricing, dict):
+                        input_price = _catalog_price_per_million(pricing.get('prompt'))
+                        output_price = _catalog_price_per_million(pricing.get('completion'))
+                        if input_price is not None and output_price is not None:
+                            catalog_prices[name] = {'input': input_price, 'output': output_price}
+        return (models, catalog_prices) if with_prices else models
     except IdentityError:
         raise
     except (OSError, ValueError, TypeError, AttributeError, http.client.HTTPException) as exc:

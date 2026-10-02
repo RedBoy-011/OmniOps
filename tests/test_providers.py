@@ -1,4 +1,4 @@
-import json
+﻿import json
 import socket
 import threading
 import tempfile
@@ -64,6 +64,35 @@ class ProviderTests(unittest.TestCase):
         account = next(p for p in self.providers.list(self.admin) if p['kind'] == 'openrouter')
         self.assertIsNone(account['tested_at'])
         self.assertFalse(account['enabled'])
+
+    def test_openrouter_verifies_key_before_fetching_public_catalog(self):
+        from unittest.mock import Mock
+        class FakeResponse:
+            def __init__(self, status, body):
+                self.status, self.body = status, body
+            def read(self, length):
+                return self.body[:length]
+        connection = Mock()
+        connection.getresponse.side_effect = [FakeResponse(401, b'{}')]
+        with patch('omniops.providers.socket.create_connection'), \
+             patch('omniops.providers.ssl.create_default_context'), \
+             patch('omniops.providers.http.client.HTTPSConnection', return_value=connection):
+            with self.assertRaisesRegex(IdentityError, 'Provider returned HTTP 401'):
+                fetch_models('openrouter', 'invalid-openrouter-key', 'direct', '')
+        self.assertEqual(connection.request.call_count, 1)
+        self.assertEqual(connection.request.call_args.args[:2], ('GET', '/api/v1/key'))
+
+        connection.reset_mock()
+        connection.getresponse.side_effect = [FakeResponse(200, b'{"data": {"limit": 100}}'),
+            FakeResponse(200, b'{"data": [{"id":"example/model","pricing":{"prompt":"0.000001","completion":"0.000002"}}]}')]
+        with patch('omniops.providers.socket.create_connection'), \
+             patch('omniops.providers.ssl.create_default_context'), \
+             patch('omniops.providers.http.client.HTTPSConnection', return_value=connection):
+            models, prices = fetch_models('openrouter', 'example-openrouter-key', 'direct', '', with_prices=True)
+        self.assertEqual(models, ['example/model'])
+        self.assertEqual(prices['example/model'], {'input': '1', 'output': '2'})
+        self.assertEqual([call.args[1] for call in connection.request.call_args_list],
+                         ['/api/v1/key', '/api/v1/models'])
 
     def test_price_and_network_validation(self):
         self.providers.save(self.admin, 'openai', 'example-openai-key', 'direct', '')
