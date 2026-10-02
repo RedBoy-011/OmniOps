@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scripts.upgrade_config import prepare, parse_environment_file
+from omniops.identity import IdentityError, IdentityStore
 
 
 class UpgradeConfigTests(unittest.TestCase):
@@ -49,6 +50,36 @@ class UpgradeConfigTests(unittest.TestCase):
                     prepare(repo, root / "master.env", root / "backups", proc)
             self.assertFalse((repo / "data" / "identity.db").exists())
 
+    def test_lost_keys_rotate_only_after_backup_and_preserve_existing_admin(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            repo = root / "repo"
+            repo.mkdir()
+            (repo / "data").mkdir()
+            database = repo / "data" / "identity.db"
+            original = IdentityStore(database, b"old-key-" * 6)
+            original.bootstrap_admin("root-admin", "my secure password 123", "09123456789")
+            old_session = original.login("root-admin", "my secure password 123")["token"]
+            config = root / "settings" / "master.env"
+            proc = root / "proc"
+            proc.mkdir()
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(prepare(repo, config, root / "backups", proc), (0, 9000))
+            credentials = parse_environment_file(config)
+            self.assertNotEqual(credentials["OMNIOPS_SIGNING_KEY"], "old-key-" * 6)
+            self.assertGreaterEqual(len(credentials["OMNIOPS_SIGNING_KEY"]), 32)
+            with closing(sqlite3.connect(database)) as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM users WHERE role='superadmin'").fetchone()[0], 1)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM sessions WHERE revoked=0").fetchone()[0], 0)
+                self.assertEqual(connection.execute("SELECT event FROM audit WHERE event='signing_key_rotated_after_loss'").fetchone()[0], "signing_key_rotated_after_loss")
+            new_identity = IdentityStore(database, credentials["OMNIOPS_SIGNING_KEY"].encode())
+            with self.assertRaises(IdentityError):
+                new_identity.authenticate(old_session)
+            self.assertTrue(new_identity.login("root-admin", "my secure password 123")["token"])
+            saved_key = credentials["OMNIOPS_SIGNING_KEY"]
+            with patch.dict(os.environ, {}, clear=True):
+                prepare(repo, config, root / "backups", proc)
+            self.assertEqual(parse_environment_file(config)["OMNIOPS_SIGNING_KEY"], saved_key)
     @unittest.skipIf(os.name == "nt", "Windows unprivileged symlinks are unavailable")
     def test_running_gateway_is_authoritative_even_if_shell_keys_differ(self):
         with tempfile.TemporaryDirectory() as folder:

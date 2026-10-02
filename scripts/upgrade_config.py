@@ -3,10 +3,13 @@
 import argparse
 import json
 import os
-import re
+import secrets
 import shlex
 import sqlite3
 import sys
+import time
+import uuid
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -55,11 +58,12 @@ def parse_environment_file(path: Path) -> dict[str, str]:
 def prepare(repo: Path, config: Path, backups: Path, proc: Path = Path("/proc")) -> tuple[int, int]:
     repo = repo.resolve(strict=True)
     live = find_live_gateway(repo, proc)
+    rotation = False
     if config.exists():
         values = parse_environment_file(config)
         if live and any(values.get(key) != live[2].get(key) for key in ("OMNIOPS_API_KEY", "OMNIOPS_SIGNING_KEY")):
             raise RuntimeError("Running gateway keys differ from master.env; refusing to replace the live session")
-        if config.stat().st_mode & 0o077:
+        if os.name != "nt" and config.stat().st_mode & 0o077:
             raise RuntimeError("master.env permissions must be restricted to its owner (chmod 600)")
     else:
         values = {key: value for key, value in os.environ.items() if key in KEYS}
@@ -67,22 +71,15 @@ def prepare(repo: Path, config: Path, backups: Path, proc: Path = Path("/proc"))
             # Gateway-e dar hale ejra kelidha va masire database ra moshakhas mikonad.
             values.update(live[2])
         if len(values.get("OMNIOPS_SIGNING_KEY", "").encode()) < 32 or len(values.get("OMNIOPS_API_KEY", "").encode()) < 32:
-            raise RuntimeError("Original signing/API keys unavailable. Keep the running gateway alive or restore its original environment; no new keys were generated")
+            if live:
+                raise RuntimeError("Running gateway keys unavailable; refusing to rotate an active session")
+            rotation = True
         base = live[1] if live else repo
         database = Path(values.get("OMNIOPS_DB_PATH", "data/identity.db"))
         values["OMNIOPS_DB_PATH"] = str((base / database).resolve())
         if not Path(values["OMNIOPS_DB_PATH"]).is_file():
             raise RuntimeError(f"Existing identity database not found: {values['OMNIOPS_DB_PATH']}; stopping before update")
-        config.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(config.parent, 0o700)
-        data = "".join(f"{key}={json.dumps(values[key], ensure_ascii=False)}\n" for key in KEYS if key in values)
-        try:
-            descriptor = os.open(config, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as destination:
-                destination.write(data)
-        except FileExistsError:
-            raise RuntimeError("master.env appeared during update; retry safely") from None
-    if len(values.get("OMNIOPS_SIGNING_KEY", "").encode()) < 32 or len(values.get("OMNIOPS_API_KEY", "").encode()) < 32:
+    if not rotation and (len(values.get("OMNIOPS_SIGNING_KEY", "").encode()) < 32 or len(values.get("OMNIOPS_API_KEY", "").encode()) < 32):
         raise RuntimeError("Existing master.env has missing/short keys; original credentials required")
     try:
         port = int(values.get("OMNIOPS_PORT", "9000"))
@@ -96,6 +93,10 @@ def prepare(repo: Path, config: Path, backups: Path, proc: Path = Path("/proc"))
     database = database.resolve()
     if not database.is_file():
         raise RuntimeError(f"Existing identity database not found: {database}; stopping before update")
+    if rotation:
+        with closing(sqlite3.connect(f"file:{quote(str(database))}?mode=ro", uri=True)) as db:
+            if db.execute("SELECT COUNT(*) FROM users WHERE role='superadmin' AND status='active'").fetchone()[0] < 1:
+                raise RuntimeError("Identity database has no active SuperAdmin; refusing to rotate keys")
     backups.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(backups, 0o700)
     backup = backups / f"identity-{datetime.now(timezone.utc):%Y%m%dT%H%M%S%fZ}.db"
@@ -112,6 +113,27 @@ def prepare(repo: Path, config: Path, backups: Path, proc: Path = Path("/proc"))
     finally:
         os.umask(previous_umask)
     print(f"Identity database backed up: {backup}", file=sys.stderr)
+    if rotation:
+        print("Original signing/API keys are unavailable. Rotating keys now; existing accounts/passwords remain, previous sessions and PINs will be invalidated.", file=sys.stderr)
+        values["OMNIOPS_SIGNING_KEY"] = secrets.token_urlsafe(48)
+        values["OMNIOPS_API_KEY"] = secrets.token_urlsafe(32)
+    if not config.exists():
+        config.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(config.parent, 0o700)
+        data = "".join(f"{key}={json.dumps(values[key], ensure_ascii=False)}\n" for key in KEYS if key in values)
+        try:
+            descriptor = os.open(config, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as destination:
+                destination.write(data)
+        except FileExistsError:
+            raise RuntimeError("master.env appeared during update; retry safely") from None
+    if rotation:
+        with closing(sqlite3.connect(database)) as db:
+            with db:
+                db.execute("UPDATE sessions SET revoked=1 WHERE revoked=0")
+                db.execute("DELETE FROM pairings")
+                db.execute("INSERT INTO audit (id, actor_id, event, subject_id, created_at) VALUES (?, NULL, ?, NULL, ?)", (uuid.uuid4().hex, "signing_key_rotated_after_loss", int(time.time())))
+        print("Original keys are unavailable: new persistent keys were created. Existing accounts/passwords remain; previous web/agent sessions and pairing PINs were invalidated. Log in and pair again.", file=sys.stderr)
     return live[0] if live else 0, port
 
 
