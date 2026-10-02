@@ -8,7 +8,9 @@ export type Profile = {
 
 export type PendingUser = { id: string; username: string; mobile: string; created_at: number };
 export type LoginResult = { token: string; user: Profile; pending_count: number };
-export type Operations = { master: "up"; ollama: { url: string; status: "up" | "unreachable"; models: { id: string; size_bytes: number | null }[] } };
+export type LocalModel = { id: string; size_bytes: number | null };
+export type NodeStatus = { id: string; kind: "master" | "worker"; status: "up" | "no_models" | "unreachable"; checked_at: number; latency_ms?: number | null; models?: LocalModel[] };
+export type Operations = { master: "up"; ollama: { url: string; status: NodeStatus["status"]; models: LocalModel[] }; nodes: NodeStatus[] };
 
 let volatileWebToken: string | null = null;
 export function keepSessionInMemory(token: string) { volatileWebToken = token; }

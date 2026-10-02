@@ -74,6 +74,9 @@ class IdentityGatewayTests(unittest.TestCase):
         self.assertEqual(operations["master"], "up")
         self.assertEqual(operations["ollama"]["status"], "up")
         self.assertTrue(operations["ollama"]["models"])
+        self.assertEqual([node["kind"] for node in operations["nodes"]], ["master", "worker"])
+        self.assertEqual(operations["nodes"][1]["models"], operations["ollama"]["models"])
+        self.assertIsInstance(operations["nodes"][1]["latency_ms"], int)
         code, pending = self.call("GET", "/api/admin/pending", token=admin_token)
         self.assertEqual(code, 200)
         selected = next(u for u in pending["users"] if u["username"] == "new-operator")
@@ -132,6 +135,8 @@ class IdentityGatewayTests(unittest.TestCase):
                 operations = json.load(response)
                 self.assertEqual((code, response.status, operations["master"]), (200, 200, "up"))
                 self.assertEqual(operations["ollama"], {"url": "http://127.0.0.1:1", "status": "unreachable", "models": []})
+                self.assertEqual([node["status"] for node in operations["nodes"]], ["up", "unreachable"])
+                self.assertIsNone(operations["nodes"][1]["latency_ms"])
         finally:
             server.shutdown()
             server.server_close()
@@ -152,6 +157,14 @@ class SecondWorker(FakeOllama):
         payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         self.server.last_request = payload
         self._reply({"message": {"role": "assistant", "content": "second worker"}})
+
+
+class EmptyWorker(FakeOllama):
+    def do_GET(self):
+        if self.path == "/api/tags":
+            self._reply({"models": []})
+        else:
+            self.send_error(404)
 
 
 class WorkerEndpointTests(unittest.TestCase):
@@ -196,6 +209,23 @@ class WorkerEndpointTests(unittest.TestCase):
         self.assertEqual(self.call("POST", "/api/admin/ollama-endpoint", {"url": self.second_url}, self.admin)[0], 200)
         self.assertEqual(self.call("POST", "/api/admin/ollama-endpoint", {"url": "http://127.0.0.1:1"}, self.admin)[0], 503)
         self.assertEqual(IdentityStore(self.path, b"q" * 32).ollama_endpoint(), self.second_url)
+
+    def test_running_worker_without_models_is_distinct_from_a_disconnect(self):
+        empty = ThreadingHTTPServer(("127.0.0.1", 0), EmptyWorker)
+        thread = threading.Thread(target=empty.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{empty.server_port}"
+            self.assertEqual(self.call("POST", "/api/admin/ollama-endpoint", {"url": url}, self.admin)[0], 200)
+            code, result = self.call("GET", "/api/admin/operations", token=self.admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(result["ollama"]["status"], "no_models")
+            self.assertEqual(result["nodes"][1]["models"], [])
+            self.assertEqual(result["nodes"][0]["status"], "up")
+        finally:
+            empty.shutdown()
+            empty.server_close()
+            thread.join(timeout=2)
 
     def test_model_and_chat_switch_without_restarting_master(self):
         self.assertEqual(self.call("POST", "/api/admin/ollama-endpoint", {"url": self.second_url}, self.admin)[0], 200)

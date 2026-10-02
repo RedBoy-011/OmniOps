@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, type Operations, type PendingUser, type Profile } from "./api";
 
@@ -20,6 +20,7 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
   const [copyStatus, setCopyStatus] = useState("");
   const [selected, setSelected] = useState<Record<string, string[]>>({});
   const [operations, setOperations] = useState<Operations | null>(null);
+  const workerUrlInitialized = useRef(false);
   const [operationsError, setOperationsError] = useState("");
   const [workerUrl, setWorkerUrl] = useState("");
   const [workerBusy, setWorkerBusy] = useState(false);
@@ -29,11 +30,17 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
     if (user.role !== "superadmin") return;
     void refresh();
     void refreshOperations();
+    const timer = window.setInterval(() => void refreshOperations(), 15000);
+    return () => window.clearInterval(timer);
   }, [user.role]);
 
   async function refreshOperations() {
-    try { const result = await api.operations(); setOperations(result); setWorkerUrl(result.ollama.url); setOperationsError(""); }
-    catch { setOperationsError("دریافت وضعیت عملیاتی ممکن نشد."); }
+    try {
+      const result = await api.operations();
+      setOperations(result);
+      if (!workerUrlInitialized.current) { setWorkerUrl(result.ollama.url); workerUrlInitialized.current = true; }
+      setOperationsError("");
+    } catch { setOperations(null); setOperationsError("دریافت وضعیت عملیاتی ممکن نشد."); }
   }
 
   async function saveWorker(event: React.FormEvent<HTMLFormElement>) {
@@ -170,7 +177,21 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
             </>}
           </section>
         </div>
-        {user.role === "superadmin" && <section className="glass admin-card operations-card"><form className="worker-form" onSubmit={(event) => void saveWorker(event)}><label htmlFor="worker-url">نشانی خصوصی Ollama روی Worker</label><div className="worker-controls"><input id="worker-url" dir="ltr" type="url" required value={workerUrl} onChange={(event) => setWorkerUrl(event.target.value)} placeholder="http://worker-private-ip:11434" /><button className="submit-button" disabled={workerBusy} type="submit">{workerBusy ? "در حال آزمون…" : "تست و ذخیره"}</button></div><small>فقط نشانی شبکهٔ خصوصی یا localhost پذیرفته می‌شود. مدل باید روی Worker نصب و در دسترس Master باشد.</small>{workerMessage && <p className="admin-message" role="status">{workerMessage}</p>}</form><div className="card-title"><div><h2>وضعیت هسته و مدل‌های محلی</h2><p>این وضعیت مستقیماً از هسته و Ollama دریافت می‌شود.</p></div><button className="quiet-button" onClick={() => void refreshOperations()}>به‌روزرسانی</button></div>{operationsError ? <p className="admin-message" role="alert">{operationsError}</p> : operations ? <div className="operations-summary"><p>هستهٔ مرکزی: <strong>فعال</strong></p><p>نشانی فعال: <code dir="ltr">{operations.ollama.url}</code></p><p>Ollama: <strong>{operations.ollama.status === "up" ? "در دسترس" : "در دسترس نیست"}</strong></p><p>مدل‌ها: {operations.ollama.models.length.toLocaleString("fa-IR")}</p>{operations.ollama.models.length > 0 && <ul>{operations.ollama.models.map((model) => <li key={model.id} dir="ltr">{model.id}</li>)}</ul>}</div> : <p className="empty-note">در حال بررسی وضعیت…</p>}</section>}
+        {user.role === "superadmin" && <section className="glass admin-card operations-card">
+          <div className="card-title"><div><h2>وضعیت گره‌ها و مدل‌های محلی</h2><p>بررسی خودکار هر ۱۵ ثانیه از Master و Ollama.</p></div><button className="quiet-button" onClick={() => void refreshOperations()}>بررسی دوباره</button></div>
+          {operationsError && <p className="admin-message" role="alert">{operationsError}</p>}
+          {operations && <div className="node-grid" aria-live="polite">{operations.nodes.map((node) => (
+            <article className="node-tile" key={node.id}>
+              <div className="node-heading"><strong>{node.kind === "master" ? "هستهٔ مرکزی" : "Worker مدل محلی"}</strong><span className={`node-badge node-${node.status}`}>{node.status === "up" ? "در دسترس" : node.status === "no_models" ? "بدون مدل" : "قطع"}</span></div>
+              <small>آخرین بررسی: {new Date(node.checked_at * 1000).toLocaleTimeString("fa-IR")}</small>
+              {node.kind === "worker" && <><p>مدل‌های نصب‌شده: {(node.models?.length ?? 0).toLocaleString("fa-IR")}</p>
+                {node.latency_ms != null && <small>پاسخ فهرست مدل: {node.latency_ms.toLocaleString("fa-IR")} میلی‌ثانیه</small>}
+                {node.models && node.models.length > 0 && <ul className="node-models">{node.models.map((model) => <li key={model.id} dir="ltr">{model.id} {model.size_bytes != null && <small>({(model.size_bytes / 1024 ** 3).toFixed(2)} GiB)</small>}</li>)}</ul>}</>}
+            </article>
+          ))}</div>}
+          {!operations && !operationsError && <p className="empty-note">در حال بررسی وضعیت…</p>}
+          <form className="worker-form" onSubmit={(event) => void saveWorker(event)}><label htmlFor="worker-url">نشانی خصوصی Ollama روی Worker</label><div className="worker-controls"><input id="worker-url" dir="ltr" type="url" required value={workerUrl} onChange={(event) => setWorkerUrl(event.target.value)} placeholder="http://worker-private-ip:11434" /><button className="submit-button" disabled={workerBusy} type="submit">{workerBusy ? "در حال آزمون…" : "تست و ذخیره"}</button></div><small>فقط شبکهٔ خصوصی یا localhost پذیرفته می‌شود. نصب مدل و اتصال امن گره در مراحل بعدی انجام می‌شوند.</small>{workerMessage && <p className="admin-message" role="status">{workerMessage}</p>}</form>
+        </section>}
         {message && <p className="admin-message" role="status" aria-live="polite">{message}</p>}
       </div>
     </main>

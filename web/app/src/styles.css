@@ -133,3 +133,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 .worker-controls input { flex: 1 1 250px; min-width: 0; padding: 12px; border: 1px solid #f5a1bd7a; border-radius: 12px; background: #ffffff0b; color: white; }
 .worker-controls button { flex: 0 0 auto; }
 .operations-summary code { overflow-wrap: anywhere; }
+
+.node-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: 14px; margin: 17px 0 22px; }
+.node-tile { border: 1px solid #f5a1bd42; border-radius: 17px; background: #ffffff0a; padding: 15px; min-width: 0; }
+.node-tile p, .node-tile small { color: #d9c8d2; font-size: 12px; }
+.node-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.node-badge { border-radius: 20px; padding: 4px 10px; font-size: 11px; }
+.node-up { color: #a4eac0; background: #3a9e6533; }
+.node-no_models { color: #ffe2ad; background: #a878233a; }
+.node-unreachable { color: #ffadbe; background: #a835533b; }
+.node-models { padding: 0 18px 0 0; margin: 8px 0 0; list-style: disc; overflow-wrap: anywhere; }
+.node-models li { padding: 3px 0; text-align: left; }

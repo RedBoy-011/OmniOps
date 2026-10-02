@@ -237,14 +237,25 @@ def make_server(
                 if principal["role"] != "superadmin":
                     self._send(403, {"error": {"message": "Superadmin access required"}})
                     return
+                client = current_ollama()
+                checked_at = int(time.time())
+                started = time.monotonic()
                 try:
-                    client = current_ollama()
                     models = client.list_models()
-                    self._send(200, {"master": "up", "ollama": {"url": client.base_url, "status": "up", "models": [
-                        {"id": f"ollama/{entry.name}", "size_bytes": entry.size_bytes} for entry in models
-                    ]}})
+                    model_list = [{"id": f"ollama/{entry.name}", "size_bytes": entry.size_bytes} for entry in models]
+                    worker_status = "up" if model_list else "no_models"
+                    latency_ms = round((time.monotonic() - started) * 1000)
                 except OllamaError:
-                    self._send(200, {"master": "up", "ollama": {"url": current_ollama().base_url, "status": "unreachable", "models": []}})
+                    model_list = []
+                    worker_status = "unreachable"
+                    latency_ms = None
+                self._send(200, {"master": "up", "ollama": {
+                    "url": client.base_url, "status": worker_status, "models": model_list,
+                }, "nodes": [
+                    {"id": "master", "kind": "master", "status": "up", "checked_at": checked_at},
+                    {"id": "ollama-worker", "kind": "worker", "status": worker_status,
+                     "checked_at": checked_at, "latency_ms": latency_ms, "models": model_list},
+                ]})
                 return
             if self.path in {"/api/auth/me", "/api/admin/pending", "/api/admin/pending/count"}:
                 principal = self._principal()
