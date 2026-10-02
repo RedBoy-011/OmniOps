@@ -10,6 +10,13 @@ export type PendingUser = { id: string; username: string; mobile: string; create
 export type LoginResult = { token: string; user: Profile; pending_count: number };
 export type LocalModel = { id: string; size_bytes: number | null };
 export type NodeStatus = { id: string; kind: "master" | "worker"; status: "up" | "no_models" | "unreachable"; checked_at: number; latency_ms?: number | null; models?: LocalModel[] };
+export type ManagedNode = {
+  id: string; role: "worker" | "edge"; name: string; created_at: number;
+  last_seen: number | null; revoked_at: number | null; credential_expires_at: number;
+  metrics: { version?: string; cpu_percent?: number; ram_percent?: number;
+             disk_percent?: number; models?: string[] } | null;
+};
+export type NodeGrant = { id: string; role: "worker" | "edge"; grant: string; expires_at: number };
 export type Operations = { master: "up"; ollama: { url: string; status: NodeStatus["status"]; models: LocalModel[] }; nodes: NodeStatus[] };
 
 let volatileWebToken: string | null = null;
@@ -41,6 +48,10 @@ export const api = {
   register: (username: string, password: string, mobile: string) => request<{ status: string; message: string }>("/api/auth/register", "POST", { username, password, mobile }),
   pending: () => request<{ users: PendingUser[] }>("/api/admin/pending"),
   operations: () => request<Operations>("/api/admin/operations"),
+  managedNodes: () => request<{ nodes: ManagedNode[] }>("/api/admin/nodes"),
+  issueNodeGrant: (role: "worker" | "edge") => request<NodeGrant>("/api/admin/nodes/grants", "POST", { role }),
+  revokeNodeGrant: (id: string) => request<{ status: string }>("/api/admin/nodes/grants/revoke", "POST", { id }),
+  revokeNode: (id: string) => request<{ status: string }>("/api/admin/nodes/revoke", "POST", { id }),
   saveOllamaEndpoint: (url: string) => request<Operations["ollama"]>("/api/admin/ollama-endpoint", "POST", { url }),
   approve: (id: string, capabilities: string[]) => request<{ status: string }>(`/api/admin/pending/${encodeURIComponent(id)}/approve`, "POST", { capabilities }),
   reject: (id: string) => request<{ status: string }>(`/api/admin/pending/${encodeURIComponent(id)}/reject`, "POST", {}),

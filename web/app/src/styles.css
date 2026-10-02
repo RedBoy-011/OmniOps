@@ -144,3 +144,4 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 .node-unreachable { color: #ffadbe; background: #a835533b; }
 .node-models { padding: 0 18px 0 0; margin: 8px 0 0; list-style: disc; overflow-wrap: anywhere; }
 .node-models li { padding: 3px 0; text-align: left; }
+.node-grant { display: block; direction: ltr; unicode-bidi: isolate; font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; user-select: all; color: #ffe2ea; }

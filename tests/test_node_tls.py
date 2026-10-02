@@ -39,7 +39,7 @@ class NodeTlsTests(unittest.TestCase):
             try:
                 client = ssl.create_default_context(cafile=str(certificate))
                 opener = build_opener(ProxyHandler({}), HTTPSHandler(context=client))
-                root = f'https://localhost:{server.server_port}'
+                root = f'https://127.0.0.1:{server.server_port}'
                 def send(path, body=None, token=None):
                     headers = {'Content-Type': 'application/json'}
                     if token:

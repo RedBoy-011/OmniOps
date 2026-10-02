@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, type Operations, type PendingUser, type Profile } from "./api";
+import { NodeManager } from "./NodeManager";
 
 const choices = [
   ["chat", "گفت‌وگو"], ["skill.use", "مهارت‌ها"], ["tool.read", "مشاهدهٔ ابزار"],
@@ -192,6 +193,7 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
           {!operations && !operationsError && <p className="empty-note">در حال بررسی وضعیت…</p>}
           <form className="worker-form" onSubmit={(event) => void saveWorker(event)}><label htmlFor="worker-url">نشانی خصوصی Ollama روی Worker</label><div className="worker-controls"><input id="worker-url" dir="ltr" type="url" required value={workerUrl} onChange={(event) => setWorkerUrl(event.target.value)} placeholder="http://worker-private-ip:11434" /><button className="submit-button" disabled={workerBusy} type="submit">{workerBusy ? "در حال آزمون…" : "تست و ذخیره"}</button></div><small>فقط شبکهٔ خصوصی یا localhost پذیرفته می‌شود. نصب مدل و اتصال امن گره در مراحل بعدی انجام می‌شوند.</small>{workerMessage && <p className="admin-message" role="status">{workerMessage}</p>}</form>
         </section>}
+        {user.role === "superadmin" && <NodeManager />}
         {message && <p className="admin-message" role="status" aria-live="polite">{message}</p>}
       </div>
     </main>
