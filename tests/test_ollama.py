@@ -1,4 +1,5 @@
 import json
+import time
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,6 +34,12 @@ class FakeOllama(BaseHTTPRequestHandler):
         self._reply({"message": {"role": "assistant", "content": "پاسخ واقعی آزمایشی"}})
 
 
+class SlowColdOllama(FakeOllama):
+    def do_POST(self):
+        time.sleep(0.08)
+        super().do_POST()
+
+
 class OllamaAdapterTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -54,6 +61,19 @@ class OllamaAdapterTests(unittest.TestCase):
         content = self.client.chat("test:1b", [{"role": "user", "content": "سلام"}])
         self.assertEqual(content, "پاسخ واقعی آزمایشی")
         self.assertFalse(self.server.last_request["stream"])
+
+    def test_chat_has_a_longer_deadline_than_health_checks(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), SlowColdOllama)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            client = OllamaClient(f"http://127.0.0.1:{server.server_port}", timeout_seconds=0.02,
+                                  chat_timeout_seconds=2)
+            self.assertEqual(client.chat("test:1b", [{"role": "user", "content": "سلام"}]), "پاسخ واقعی آزمایشی")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_failure_is_reported_instead_of_fabricated_answer(self):
         with self.assertRaises(OllamaError):

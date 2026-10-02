@@ -55,7 +55,7 @@ def inspect(config: Path) -> tuple[dict, int]:
     endpoint = endpoint or values.get("OMNIOPS_OLLAMA_URL", "http://127.0.0.1:11434")
     try:
         models = OllamaClient(endpoint, timeout_seconds=4).list_models()
-        result["worker"] = "up"
+        result["worker"] = "up" if models else "no_models"
         result["models"] = [model.name for model in models]
     except (OllamaError, ValueError):
         result["worker"] = "unreachable"

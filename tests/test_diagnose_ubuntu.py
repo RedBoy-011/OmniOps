@@ -21,7 +21,7 @@ class HealthyServices(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        body = b'{"status":"up"}' if self.path == "/health" else b'{"models":[{"name":"test:1b","size":1}]}'
+        body = b'{"status":"up"}' if self.path == "/health" else getattr(self.server, "models_body", b'{"models":[{"name":"test:1b","size":1}]}')
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -52,6 +52,10 @@ class UbuntuDiagnosticsTests(unittest.TestCase):
                 self.assertEqual(result["models"], ["test:1b"])
                 self.assertEqual(result["database"], "ok")
                 self.assertNotIn("secret-value", str(result))
+                worker.models_body = b'{"models":[]}'
+                with patch.object(diagnose.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="active\n")):
+                    empty, status = diagnose.inspect(config)
+                self.assertEqual((status, empty["worker"]), (2, "no_models"))
                 worker.shutdown()
                 worker.server_close()
                 threads[1].join(timeout=2)

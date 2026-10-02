@@ -29,7 +29,7 @@ _INTERNAL_NETWORKS = tuple(
 
 
 class OllamaClient:
-    def __init__(self, base_url: str, timeout_seconds: float = 8.0):
+    def __init__(self, base_url: str, timeout_seconds: float = 8.0, chat_timeout_seconds: float = 120.0):
         url = urlsplit(base_url)
         if url.scheme not in {"http", "https"} or not url.hostname or url.username or url.password:
             raise ValueError("Ollama URL must be an HTTP(S) host without embedded credentials")
@@ -42,14 +42,15 @@ class OllamaClient:
             raise ValueError("Ollama worker must use a local or private-network IP address")
         if url.path not in {"", "/"} or url.query or url.fragment:
             raise ValueError("Ollama URL must be an origin, without a path or query")
-        if timeout_seconds <= 0:
-            raise ValueError("Timeout must be positive")
+        if timeout_seconds <= 0 or chat_timeout_seconds <= 0:
+            raise ValueError("Timeouts must be positive")
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.chat_timeout_seconds = chat_timeout_seconds
         # Worker-e dakheli nabayad proxy-ye khorooji-e host ra ers bebarad.
         self._opener = build_opener(ProxyHandler({}), _NoRedirect())
 
-    def _json_request(self, path: str, payload: dict | None = None) -> dict:
+    def _json_request(self, path: str, payload: dict | None = None, timeout_seconds: float | None = None) -> dict:
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         request = Request(
             self.base_url + path,
@@ -58,7 +59,7 @@ class OllamaClient:
             method="POST" if body is not None else "GET",
         )
         try:
-            with self._opener.open(request, timeout=self.timeout_seconds) as response:
+            with self._opener.open(request, timeout=timeout_seconds or self.timeout_seconds) as response:
                 raw = response.read(8 * 1024 * 1024 + 1)
         except HTTPError as exc:
             exc.close()
@@ -98,7 +99,7 @@ class OllamaClient:
         ):
             raise ValueError("Messages must have a supported role and text content")
         response = self._json_request(
-            "/api/chat", {"model": model, "messages": messages, "stream": False}
+            "/api/chat", {"model": model, "messages": messages, "stream": False}, self.chat_timeout_seconds
         )
         message = response.get("message")
         if not isinstance(message, dict) or not isinstance(message.get("content"), str):
