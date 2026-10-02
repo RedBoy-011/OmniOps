@@ -39,6 +39,22 @@ if [[ -z "$repo" ]]; then
     if [[ "$candidate" == "$(realpath "$PWD")" ]]; then repo="$candidate"; break; fi
   done
 fi
+if [[ -z "$repo" && -f /etc/systemd/system/omniops-master.service ]]; then
+  service_directory="$(sed -n 's/^WorkingDirectory=//p' /etc/systemd/system/omniops-master.service | head -n 1)"
+  for candidate in "${repositories[@]}"; do
+    if [[ "$candidate" == "$service_directory" ]]; then repo="$candidate"; break; fi
+  done
+  [[ -n "$repo" ]] || fail "Existing service references an unrecognized repository: $service_directory"
+fi
+if [[ -z "$repo" ]]; then
+  # Neshani-e clone-e faal-e in nasb; clone-e dar /root/OmniOps parent-e aan ast.
+  for candidate in "${repositories[@]}"; do
+    if [[ "$candidate" == /root/OmniOps/OmniOps && -f "$candidate/data/identity.db" ]]; then
+      repo="$candidate"
+      break
+    fi
+  done
+fi
 if [[ -z "$repo" ]]; then
   for candidate in "${repositories[@]}"; do
     if [[ -f "$candidate/data/identity.db" ]]; then
@@ -47,7 +63,7 @@ if [[ -z "$repo" ]]; then
     fi
   done
 fi
-[[ -n "$repo" ]] || fail 'More than one clone found; run the one-line updater from the active repository.'
+[[ -n "$repo" ]] || fail 'No single active installation found; open an SSH terminal in the active repository and retry.'
 cd "$repo"
 printf 'Updating OmniOps in %s\n' "$repo"
 [[ "$(git branch --show-current)" == main ]] || fail 'The checkout must be on its main branch.'
