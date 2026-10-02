@@ -73,6 +73,18 @@ class NodeRegistryTests(unittest.TestCase):
             self.assertEqual(row, ('system:local-root', 'node_grant_issued_by_local_root'))
         self.assertEqual(self.nodes.enroll(grant['grant'], 'worker-01', 'worker')['role'], 'worker')
 
+    def test_local_root_model_pull_is_audited(self):
+        worker = self.nodes.enroll(self.nodes.issue(self.admin, 'worker')['grant'], 'worker-01')
+        self.nodes.heartbeat(worker['id'], worker['credential'], {})
+        with patch('omniops.nodes.os.geteuid', return_value=1000, create=True):
+            with self.assertRaises(IdentityError):
+                self.nodes.queue_model_pull_local_root(worker['id'], 'small:latest')
+        with patch('omniops.nodes.os.geteuid', return_value=0, create=True):
+            job = self.nodes.queue_model_pull_local_root(worker['id'], 'small:latest')
+        with closing(sqlite3.connect(self.store.path)) as db:
+            self.assertEqual(db.execute('select created_by from model_pulls where id=?', (job['id'],)).fetchone()[0], 'system:local-root')
+            self.assertEqual(db.execute('select actor_id from audit where subject_id=?', (job['id'],)).fetchone()[0], 'system:local-root')
+
     def test_model_pull_is_authorized_and_reports_progress(self):
         grant = self.nodes.issue(self.admin, 'worker')['grant']
         worker = self.nodes.enroll(grant, 'worker-01')
