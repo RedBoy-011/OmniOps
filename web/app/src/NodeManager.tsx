@@ -66,6 +66,17 @@ export function NodeManager() {
     finally { setBusy(false); }
   }
 
+  async function deleteModel(node: ManagedNode, selected: string) {
+    if (busy || !window.confirm(`مدل «${selected}» از Worker «${node.name}» حذف شود؟ فایل‌های مدل پاک می‌شوند.`)) return;
+    setBusy(true); setMessage("");
+    try {
+      await api.deleteModel(node.id, selected);
+      setJobs((await api.modelPulls()).jobs);
+      setMessage("درخواست حذف ثبت شد. موجودی Worker به‌زودی تازه می‌شود.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "حذف مدل ممکن نشد."); }
+    finally { setBusy(false); }
+  }
+
   async function revokeNode(node: ManagedNode) {
     if (busy || !window.confirm(`اتصال گره «${node.name}» را قطع و اعتبارنامه‌اش را باطل می‌کنید؟`)) return;
     setBusy(true);
@@ -87,14 +98,14 @@ export function NodeManager() {
         return <article className="node-tile" key={node.id}>
           <div className="node-heading"><strong>{node.name} · {node.role === "worker" ? "Worker" : "Edge"}</strong><span className={`node-badge node-${online ? "up" : "unreachable"}`}>{node.revoked_at ? "باطل‌شده" : online ? "متصل" : "بدون heartbeat"}</span></div>
           <small>آخرین حضور: {node.last_seen ? new Date(node.last_seen * 1000).toLocaleString("fa-IR") : "هنوز ثبت نشده"}</small>
-          {node.metrics && <><p>CPU {node.metrics.cpu_percent ?? "—"}٪ · RAM {node.metrics.ram_percent ?? "—"}٪ · دیسک {node.metrics.disk_percent ?? "—"}٪</p><small>نسخه: {node.metrics.version || "نامشخص"}</small>{node.metrics.models?.length ? <ul className="node-models">{node.metrics.models.map((model) => <li key={model} dir="ltr">{model}</li>)}</ul> : null}</>}
+          {node.metrics && <><p>CPU {node.metrics.cpu_percent ?? "—"}٪ · RAM {node.metrics.ram_percent ?? "—"}٪ · دیسک {node.metrics.disk_percent ?? "—"}٪</p><small>نسخه: {node.metrics.version || "نامشخص"}</small>{node.metrics.models?.length ? <ul className="node-models">{node.metrics.models.map((installed) => <li key={installed}><bdi dir="ltr">{installed}</bdi><button type="button" className="quiet-button danger" disabled={busy || !online || jobs.some((job) => job.node_id === node.id && (job.status === "queued" || job.status === "running"))} onClick={() => void deleteModel(node, installed)} aria-label={`حذف ${installed}`}>حذف</button></li>)}</ul> : null}</>}
           {node.role === "worker" && !node.revoked_at && <div className="node-pull">
             <label htmlFor={`model-${node.id}`}>نام مدل Ollama برای دریافت</label>
             <input id={`model-${node.id}`} dir="ltr" value={model} onChange={(event) => setModel(event.target.value)} placeholder="مثلاً nomic-embed-text" maxLength={128} />
             <button type="button" className="quiet-button" disabled={busy || !online || !model.trim() || jobs.some((job) => job.node_id === node.id && (job.status === "queued" || job.status === "running"))} onClick={() => void installModel(node)}>دریافت روی این Worker</button>
             {jobs.filter((job) => job.node_id === node.id).slice(0, 3).map((job) => <div className="node-pull-status" key={job.id} role="status">
-              <bdi dir="ltr">{job.model}</bdi> · {job.status === "queued" ? "در صف" : job.status === "running" ? "در حال دریافت" : job.status === "completed" ? "آماده" : "ناموفق"}
-              <progress max={100} value={job.progress ?? undefined} aria-label={`پیشرفت دریافت ${job.model}`} />
+              <bdi dir="ltr">{job.model}</bdi> · {job.status === "queued" ? "در صف" : job.status === "running" ? (job.action === "delete" ? "در حال حذف" : "در حال دریافت") : job.status === "completed" ? (job.action === "delete" ? "حذف شد" : "آماده") : "ناموفق"}
+              {job.action === "pull" && <progress max={100} value={job.progress ?? undefined} aria-label={`پیشرفت دریافت ${job.model}`} />}
               <small>{job.progress == null ? "پیشرفت نامشخص" : `${job.progress.toLocaleString("fa-IR")}٪`} · {job.detail}</small>
             </div>)}
           </div>}

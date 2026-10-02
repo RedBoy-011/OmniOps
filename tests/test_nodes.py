@@ -113,6 +113,27 @@ class NodeRegistryTests(unittest.TestCase):
         self.assertEqual(self.nodes.queue_model_pull(self.admin, worker['id'], 'second:latest')['status'], 'queued')
         self.assertEqual(queued['id'], job['id'])
 
+    def test_model_delete_queue_claim_and_audit(self):
+        worker = self.nodes.enroll(self.nodes.issue(self.admin, 'worker')['grant'], 'worker-delete')
+        self.nodes.heartbeat(worker['id'], worker['credential'], {'models': ['scratch:latest']})
+        queued = self.nodes.queue_model_delete(self.admin, worker['id'], 'scratch:latest')
+        with self.assertRaises(IdentityError):
+            self.nodes.queue_model_pull(self.admin, worker['id'], 'another:latest')
+        job = self.nodes.claim_model_pull(worker['id'], worker['credential'])
+        self.assertEqual(job['action'], 'delete')
+        self.assertEqual(job['id'], queued['id'])
+        self.nodes.report_model_pull(worker['id'], worker['credential'], job['id'], 'completed', 100, 'deleted')
+        self.assertEqual(self.nodes.list_model_pulls(self.admin)[0]['action'], 'delete')
+
+    def test_delete_is_not_repeated_after_worker_disappears(self):
+        worker = self.nodes.enroll(self.nodes.issue(self.admin, 'worker')['grant'], 'worker-delete')
+        self.nodes.heartbeat(worker['id'], worker['credential'], {})
+        self.nodes.queue_model_delete(self.admin, worker['id'], 'scratch:latest')
+        self.nodes.claim_model_pull(worker['id'], worker['credential'])
+        self.now[0] += 301
+        self.assertIsNone(self.nodes.claim_model_pull(worker['id'], worker['credential']))
+        self.assertEqual(self.nodes.list_model_pulls(self.admin)[0]['status'], 'failed')
+
     def test_model_pull_retries_after_worker_restart_and_rejects_edge(self):
         edge = self.nodes.enroll(self.nodes.issue(self.admin, 'edge')['grant'], 'edge-01')
         self.nodes.heartbeat(edge['id'], edge['credential'], {})

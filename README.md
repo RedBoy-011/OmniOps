@@ -7,6 +7,7 @@
 - [طرح محصول](PRODUCT_BLUEPRINT.fa.md)
 - [انطباق خواسته‌ها و معیار پذیرش](REQUIREMENTS_TRACE.fa.md)
 - [طرح درگاه و راه‌اندازی](docs/GATEWAY_AND_SETUP.fa.md)
+- [مدیریت مدل و Provider روی شبکهٔ خصوصی](docs/PRIVATE_MODEL_PROVIDER.fa.md)
 - [برنامهٔ نصب Master، Worker و Edge و معیارهای امنیتی](docs/INSTALLATION_ROLES_AND_ACCEPTANCE.fa.md)
 - [نصب Worker محلی و تشخیص استقرار](docs/WORKER_DEPLOYMENT.fa.md)
 - [مرکز فرماندهی گره‌ها و مسیریابی هوشمند مدل](docs/CONTROL_PLANE_AND_ROUTING.fa.md)

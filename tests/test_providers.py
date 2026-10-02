@@ -1,0 +1,107 @@
+import json
+import socket
+import threading
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from omniops.identity import IdentityError, IdentityStore
+from omniops.providers import ProviderRegistry, _proxy, _connect_proxy, fetch_models
+from omniops.server import make_server
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+
+
+class ProviderTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.store = IdentityStore(Path(self.temp.name) / 'db.sqlite', b'v' * 32)
+        self.store.bootstrap_admin('admin', 'a sufficiently strong password', '09123456789')
+        self.admin = self.store.authenticate(self.store.login('admin', 'a sufficiently strong password')['token'])
+        self.providers = ProviderRegistry(self.store)
+
+    def test_secret_never_returned_and_test_enables_provider(self):
+        self.providers.save(self.admin, 'gemini', 'secret-example-key', 'socks', 'socks5h://172.16.20.250:7890')
+        raw = Path(self.store.path).read_bytes()
+        self.assertNotIn(b'secret-example-key', raw)
+        with patch('omniops.providers.fetch_models', return_value=['gemini-example']) as fetch:
+            self.assertEqual(self.providers.test(self.admin, 'gemini')['models'], ['gemini-example'])
+            fetch.assert_called_once_with('gemini', 'secret-example-key', 'socks', 'socks5h://172.16.20.250:7890')
+        self.providers.enable(self.admin, 'gemini', True)
+        self.providers.price(self.admin, 'gemini', 'gemini-example', '0.25', '1.75')
+        response = self.providers.list(self.admin)
+        self.assertNotIn('secret-example-key', json.dumps(response))
+        self.assertTrue(next(p for p in response if p['kind'] == 'gemini')['enabled'])
+        self.assertEqual(next(p for p in response if p['kind'] == 'gemini')['prices']['gemini-example']['input'], '0.25')
+        self.providers.save(self.admin, 'gemini', None, 'direct', '')
+        self.assertFalse(next(p for p in self.providers.list(self.admin) if p['kind'] == 'gemini')['enabled'])
+
+    def test_price_and_network_validation(self):
+        self.providers.save(self.admin, 'openai', 'example-openai-key', 'direct', '')
+        for price in ('NaN', '-1', '1.2345678', 'Infinity'):
+            with self.assertRaises(IdentityError):
+                self.providers.price(self.admin, 'openai', 'some-model', price, '0')
+        for proxy in ('socks5://127.0.0.1:1080', 'socks5h://example.com:1080',
+                      'socks5h://127.0.0.1:1080/path', 'socks5h://127.0.0.1:1080@evil.com'):
+            with self.assertRaises(IdentityError):
+                _proxy(proxy, 'socks')
+        with self.assertRaises(IdentityError):
+            self.providers.enable(self.admin, 'openai', True)
+        with self.assertRaises(IdentityError):
+            self.providers.save({'id': 'not-admin', 'role': 'member', 'capabilities': []},
+                                'gemini', 'secret-key', 'direct', '')
+
+    def test_socks5h_sends_target_hostname_to_proxy(self):
+        listener = socket.socket()
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(1)
+        captured = []
+        def accept():
+            conn, _ = listener.accept()
+            with conn:
+                captured.append(conn.recv(3))
+                conn.sendall(b'\x05\x00')
+                captured.append(conn.recv(4))
+                count = conn.recv(1)[0]
+                captured.append(conn.recv(count))
+                captured.append(conn.recv(2))
+                conn.sendall(b'\x05\x00\x00\x01' + b'\x00' * 4 + b'\x01\xbb')
+        thread = threading.Thread(target=accept, daemon=True)
+        thread.start()
+        try:
+            connection = _connect_proxy(f'socks5h://127.0.0.1:{listener.getsockname()[1]}', 'api.openai.com')
+            connection.close()
+            thread.join(timeout=2)
+            self.assertEqual(captured, [b'\x05\x01\x00', b'\x05\x01\x00\x03',
+                                        b'api.openai.com', b'\x01\xbb'])
+        finally:
+            listener.close()
+
+    def test_provider_secrets_rejected_on_plain_http(self):
+        server = make_server('127.0.0.1', 0, 'a-test-api-key-at-least-32-characters',
+                             'http://127.0.0.1:11434', self.store)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            token = self.store.login('admin', 'a sufficiently strong password')['token']
+            request = Request(f'http://127.0.0.1:{server.server_port}/api/admin/providers/save',
+                              data=json.dumps({'kind': 'gemini', 'api_key': 'example-gemini-key',
+                                               'network_mode': 'direct', 'proxy_url': ''}).encode(),
+                              headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+                              method='POST')
+            with self.assertRaises(HTTPError) as failed:
+                urlopen(request, timeout=3)
+            self.assertEqual(failed.exception.code, 426)
+            failed.exception.close()
+            self.assertFalse(next(p for p in self.providers.list(self.admin) if p['kind'] == 'gemini')['configured'])
+        finally:
+            server.shutdown(); server.server_close(); thread.join(timeout=2)
+
+    def test_failed_socks_connection_never_falls_back_to_direct(self):
+        with patch('omniops.providers._connect_proxy', side_effect=OSError('unavailable')), \
+             patch('omniops.providers.socket.create_connection') as direct:
+            with self.assertRaises(IdentityError):
+                fetch_models('openai', 'secret-example-key', 'socks', 'socks5h://127.0.0.1:1')
+            direct.assert_not_called()

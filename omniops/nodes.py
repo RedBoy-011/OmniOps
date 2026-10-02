@@ -40,6 +40,9 @@ class NodeRegistry:
                     metrics TEXT, revoked_at INTEGER
                 );
             """)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(model_pulls)")}
+            if "action" not in columns:
+                db.execute("ALTER TABLE model_pulls ADD COLUMN action TEXT NOT NULL DEFAULT 'pull'")
 
     def _now(self):
         return int(self.identity.clock())
@@ -168,7 +171,15 @@ class NodeRegistry:
                                       'capabilities': ['profile.manage']}, node_id, model)
 
     def queue_model_pull(self, principal, node_id, model):
+        return self._queue_model_job(principal, node_id, model, 'pull')
+
+    def queue_model_delete(self, principal, node_id, model):
+        return self._queue_model_job(principal, node_id, model, 'delete')
+
+    def _queue_model_job(self, principal, node_id, model, action):
         self._admin(principal)
+        if action not in ('pull', 'delete'):
+            raise IdentityError('Invalid model action')
         if not isinstance(node_id, str) or not re.fullmatch(r"[0-9a-f]{32}", node_id):
             raise IdentityError("Invalid worker ID")
         if not isinstance(model, str) or len(model) > 128 or not re.fullmatch(
@@ -185,18 +196,18 @@ class NodeRegistry:
             existing = db.execute("SELECT 1 FROM model_pulls WHERE node_id=? AND status IN ('queued','running')",
                                   (node_id,)).fetchone()
             if existing:
-                raise IdentityError("Worker already has a model download", 409)
+                raise IdentityError("Worker already has a model operation", 409)
             job_id = uuid.uuid4().hex
             now = self._now()
-            db.execute("INSERT INTO model_pulls VALUES (?,?,?,?,?,?,?,?,?)",
-                       (job_id, node_id, model, 'queued', None, 'در صف', now, now, principal['id']))
-            self.identity._audit(db, principal['id'], 'model_pull_queued', job_id)
+            db.execute("INSERT INTO model_pulls (id,node_id,model,status,progress,detail,created_at,updated_at,created_by,action) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                       (job_id, node_id, model, 'queued', None, 'در صف', now, now, principal['id'], action))
+            self.identity._audit(db, principal['id'], 'model_' + action + '_queued', job_id)
         return {'id': job_id, 'status': 'queued'}
 
     def list_model_pulls(self, principal):
         self._admin(principal)
         with self.identity._db() as db:
-            rows = db.execute("SELECT id, node_id, model, status, progress, detail, created_at, updated_at "
+            rows = db.execute("SELECT id, node_id, model, status, progress, detail, created_at, updated_at, action "
                               "FROM model_pulls ORDER BY created_at DESC LIMIT 100").fetchall()
             return [dict(row) for row in rows]
 
@@ -208,17 +219,20 @@ class NodeRegistry:
                 raise IdentityError('Worker role required', 403)
             # Job-e ghat shodeh bad az panj daghigheh dobareh dar saf gharar migirad.
             db.execute("UPDATE model_pulls SET status='queued', detail='تلاش دوباره پس از قطع Worker', "
-                       "updated_at=? WHERE node_id=? AND status='running' AND updated_at<?",
+                       "updated_at=? WHERE node_id=? AND status='running' AND updated_at<? AND action='pull'",
+                       (self._now(), node_id, self._now()-300))
+            db.execute("UPDATE model_pulls SET status='failed', detail='Delete result unknown after Worker disconnect; check inventory', "
+                       "updated_at=? WHERE node_id=? AND status='running' AND updated_at<? AND action='delete'",
                        (self._now(), node_id, self._now()-300))
             active = db.execute("SELECT id FROM model_pulls WHERE node_id=? AND status='running'", (node_id,)).fetchone()
             if active:
                 return None
-            row = db.execute("SELECT id, model FROM model_pulls WHERE node_id=? AND status='queued' "
+            row = db.execute("SELECT id, model, action FROM model_pulls WHERE node_id=? AND status='queued' "
                              "ORDER BY created_at LIMIT 1", (node_id,)).fetchone()
             if row is None:
                 return None
-            db.execute("UPDATE model_pulls SET status='running', detail='شروع دریافت', updated_at=? WHERE id=?",
-                       (self._now(), row['id']))
+            db.execute("UPDATE model_pulls SET status='running', detail=?, updated_at=? WHERE id=?",
+                       ('Starting deletion' if row['action'] == 'delete' else 'Starting download', self._now(), row['id']))
             return dict(row)
 
     def report_model_pull(self, node_id, credential, job_id, status, progress, detail):
@@ -239,5 +253,6 @@ class NodeRegistry:
             if not changed:
                 raise IdentityError('Active model download not found', 404)
             if status != 'running':
-                self.identity._audit(db, node_id, 'model_pull_' + status, job_id)
+                action = db.execute('SELECT action FROM model_pulls WHERE id=?', (job_id,)).fetchone()['action']
+                self.identity._audit(db, node_id, 'model_' + action + '_' + status, job_id)
         return {'status': status}

@@ -201,6 +201,27 @@ def pull_model(client, state_path, job):
             pass
 
 
+def delete_model(client, state_path, job):
+    try:
+        opener = build_opener(ProxyHandler({}))
+        origin = local_ollama_url()
+        tags = Request(origin + '/api/tags', method='GET')
+        with opener.open(tags, timeout=15) as response:
+            installed = json.loads(response.read(MAX_RESPONSE + 1)).get('models', [])
+        if not any(item.get('name') == job['model'] for item in installed if isinstance(item, dict)):
+            raise ValueError('Model is no longer installed on this Worker')
+        request = Request(origin + '/api/delete', data=json.dumps({'model': job['model']}).encode('utf-8'),
+                          headers={'Content-Type': 'application/json'}, method='DELETE')
+        with opener.open(request, timeout=120) as response:
+            response.read(MAX_RESPONSE + 1)
+        client.report_model_pull(load_identity(state_path), job, 'completed', 100, 'Model deleted')
+    except (OSError, ValueError, HTTPError) as exc:
+        try:
+            client.report_model_pull(load_identity(state_path), job, 'failed', None, 'Model deletion failed: ' + str(exc)[:130])
+        except (OSError, ValueError, HTTPError):
+            pass
+
+
 def heartbeat_once(client, state, path, metrics):
     # Ghabl az charkhesh, kelid-e jadid ro rooye disk negah midarim ta crash ghabel-e bazyaabi bashe.
     if 'next_credential' not in state and state['credential_expires_at'] - time.time() < 7 * 86400:
@@ -258,7 +279,7 @@ def main():
         if state.get('role') == 'worker' and (pull_thread is None or not pull_thread.is_alive()):
             job = client.claim_model_pull(state)
             if job:
-                pull_thread = threading.Thread(target=pull_model, args=(client, args.state, job), daemon=True)
+                pull_thread = threading.Thread(target=delete_model if job.get('action') == 'delete' else pull_model, args=(client, args.state, job), daemon=True)
                 pull_thread.start()
         time.sleep(30)
 

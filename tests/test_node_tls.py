@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 from urllib.error import HTTPError
+from unittest.mock import patch
 
 from omniops.identity import IdentityStore
 from omniops.node_client import NodeClient, save_identity, load_identity
@@ -51,6 +52,15 @@ class NodeTlsTests(unittest.TestCase):
                         return response.status, json.load(response)
                 token = send('/api/auth/login', {'username': 'tls-admin',
                              'password': 'a sufficiently strong password'})[1]['token']
+                with patch('omniops.providers.fetch_models', return_value=['gemini-example']):
+                    self.assertEqual(send('/api/admin/providers/save', {'kind': 'gemini',
+                        'api_key': 'example-gemini-key', 'network_mode': 'socks',
+                        'proxy_url': 'socks5h://172.16.20.250:7890'}, token)[0], 200)
+                    self.assertEqual(send('/api/admin/providers/test', {'kind': 'gemini'}, token)[1]['models'], ['gemini-example'])
+                self.assertEqual(send('/api/admin/providers/enable', {'kind': 'gemini', 'enabled': True}, token)[0], 200)
+                self.assertEqual(send('/api/admin/providers/price', {'kind': 'gemini', 'model': 'gemini-example',
+                    'input': '0.01', 'output': '0.02'}, token)[0], 200)
+                self.assertNotIn('example-gemini-key', json.dumps(send('/api/admin/providers', token=token)[1]))
                 grant = send('/api/admin/nodes/grants', {'role': 'worker'}, token)[1]
                 client_node = NodeClient(root, str(certificate))
                 with self.assertRaises(HTTPError) as mismatch:

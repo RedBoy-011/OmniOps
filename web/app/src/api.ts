@@ -16,9 +16,13 @@ export type ManagedNode = {
   metrics: { version?: string; cpu_percent?: number; ram_percent?: number;
              disk_percent?: number; models?: string[] } | null;
 };
-export type ModelPull = { id: string; node_id: string; model: string;
+export type ModelPull = { id: string; node_id: string; model: string; action: "pull" | "delete";
   status: "queued" | "running" | "completed" | "failed"; progress: number | null;
   detail: string; created_at: number; updated_at: number };
+export type ApiProvider = { kind: "openai" | "gemini" | "anthropic"; configured: boolean;
+  enabled: boolean; network_mode: "direct" | "socks"; proxy_url: string;
+  models: string[]; tested_at: number | null;
+  prices: Record<string, { input: string; output: string }> };
 export type NodeGrant = { id: string; role: "worker" | "edge"; grant: string; expires_at: number };
 export type Operations = { master: "up"; ollama: { url: string; status: NodeStatus["status"]; models: LocalModel[] }; nodes: NodeStatus[] };
 
@@ -56,6 +60,14 @@ export const api = {
   managedNodes: () => request<{ nodes: ManagedNode[] }>("/api/admin/nodes"),
   modelPulls: () => request<{ jobs: ModelPull[] }>("/api/admin/nodes/model-pulls"),
   createModelPull: (node_id: string, model: string) => request<{ id: string; status: string }>("/api/admin/nodes/model-pulls", "POST", { node_id, model }),
+  deleteModel: (node_id: string, model: string) => request<{ id: string; status: string }>("/api/admin/nodes/model-delete", "POST", { node_id, model }),
+  providers: () => request<{ providers: ApiProvider[] }>("/api/admin/providers"),
+  saveProvider: (kind: string, api_key: string | null, network_mode: "direct" | "socks", proxy_url: string) =>
+    request<{ status: string }>("/api/admin/providers/save", "POST", { kind, api_key, network_mode, proxy_url }),
+  testProvider: (kind: string) => request<{ models: string[]; network_mode: string }>("/api/admin/providers/test", "POST", { kind }),
+  enableProvider: (kind: string, enabled: boolean) => request<{ enabled: boolean }>("/api/admin/providers/enable", "POST", { kind, enabled }),
+  priceProvider: (kind: string, model: string, input: string, output: string) =>
+    request<{ model: string }>("/api/admin/providers/price", "POST", { kind, model, input, output }),
   issueNodeGrant: (role: "worker" | "edge") => request<NodeGrant>("/api/admin/nodes/grants", "POST", { role }),
   revokeNodeGrant: (id: string) => request<{ status: string }>("/api/admin/nodes/grants/revoke", "POST", { id }),
   revokeNode: (id: string) => request<{ status: string }>("/api/admin/nodes/revoke", "POST", { id }),

@@ -102,6 +102,12 @@ if ! command -v node >/dev/null || ! command -v npm >/dev/null || [[ ! "$(node -
   fi
   nvm install 24
 fi
+if ! python3 -c 'from cryptography.fernet import Fernet' 2>/dev/null; then
+  command -v apt-get >/dev/null || fail 'Install python3-cryptography for the encrypted Provider vault.'
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y python3-cryptography
+  python3 -c 'from cryptography.fernet import Fernet' || fail 'Provider encryption dependency unavailable.'
+fi
 (cd web/app && npm ci && npm run build)
 python3 -m unittest discover -s tests -q
 

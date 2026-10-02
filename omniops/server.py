@@ -19,6 +19,7 @@ from .identity import IdentityError, IdentityStore
 from .ollama import OllamaClient, OllamaError
 from .local_routing import choose_local_chat_model
 from .nodes import NodeRegistry
+from .providers import ProviderRegistry
 
 MAX_BODY_BYTES = 64 * 1024
 LAN_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
@@ -46,6 +47,7 @@ def make_server(
         raise ValueError("Set a unique OMNIOPS_API_KEY of at least 32 characters")
     OllamaClient(ollama_url)
     nodes = NodeRegistry(identity_store) if identity_store else None
+    providers = ProviderRegistry(identity_store) if identity_store else None
 
     def current_ollama() -> OllamaClient:
         endpoint = identity_store.ollama_endpoint() if identity_store else None
@@ -172,7 +174,7 @@ def make_server(
             path = self.path
             if path not in {"/api/nodes/enroll", "/api/nodes/heartbeat", "/api/nodes/rotate",
                             "/api/admin/nodes/grants", "/api/admin/nodes/grants/revoke",
-                            "/api/admin/nodes/revoke", "/api/admin/nodes/model-pulls",
+                            "/api/admin/nodes/revoke", "/api/admin/nodes/model-pulls", "/api/admin/nodes/model-delete",
                             "/api/nodes/model-pulls/claim", "/api/nodes/model-pulls/report"}:
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
@@ -195,6 +197,8 @@ def make_server(
                     self._send(201, nodes.issue(principal, body.get("role")))
                 elif path == "/api/admin/nodes/model-pulls":
                     self._send(201, nodes.queue_model_pull(principal, body.get("node_id"), body.get("model")))
+                elif path == "/api/admin/nodes/model-delete":
+                    self._send(201, nodes.queue_model_delete(principal, body.get("node_id"), body.get("model")))
                 elif path == "/api/nodes/model-pulls/claim":
                     self._send(200, {"job": nodes.claim_model_pull(body.get("id"), body.get("credential"))})
                 elif path == "/api/nodes/model-pulls/report":
@@ -217,7 +221,8 @@ def make_server(
             if path not in {
                 "/api/auth/register", "/api/auth/login", "/api/auth/logout",
                 "/api/agent/pairing", "/api/agent/redeem", "/api/agent/heartbeat", "/api/agent/logout", "/api/agent/chat", "/api/web/chat",
-                "/api/admin/ollama-endpoint",
+                "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
+                "/api/admin/providers/enable", "/api/admin/providers/price",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
@@ -238,7 +243,23 @@ def make_server(
             if payload is None:
                 return
             try:
-                if path == "/api/auth/register":
+                if path.startswith('/api/admin/providers/'):
+                    if not self._node_channel():
+                        return
+                    if providers is None:
+                        raise IdentityError('Provider registry unavailable', 503)
+                    if path.endswith('/save'):
+                        result = providers.save(principal, payload.get('kind'), payload.get('api_key'),
+                                                payload.get('network_mode'), payload.get('proxy_url'))
+                    elif path.endswith('/test'):
+                        result = providers.test(principal, payload.get('kind'))
+                    elif path.endswith('/enable'):
+                        result = providers.enable(principal, payload.get('kind'), payload.get('enabled'))
+                    else:
+                        result = providers.price(principal, payload.get('kind'), payload.get('model'),
+                                                 payload.get('input'), payload.get('output'))
+                    self._send(200, result)
+                elif path == "/api/auth/register":
                     store.register(payload.get("username"), payload.get("password"), payload.get("mobile"), self.client_address[0])
                     self._send(202, {"status": "pending", "message": "درخواست شما ثبت شد و در انتظار تأیید مدیر سیستم است."})
                 elif path == "/api/auth/login":
@@ -278,6 +299,17 @@ def make_server(
                 self._send(503, {"error": {"message": str(exc)}})
 
         def do_GET(self):
+            if self.path == '/api/admin/providers':
+                if not self._node_channel():
+                    return
+                principal = self._principal()
+                if principal is None:
+                    return
+                try:
+                    self._send(200, {'providers': providers.list(principal)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                return
             if self.path == "/api/admin/nodes/model-pulls":
                 if not self._node_channel():
                     return
