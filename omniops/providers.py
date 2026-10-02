@@ -181,7 +181,7 @@ def _provider_post(host, path, key, mode, proxy_url, payload):
             connection.request('POST', path, body=body, headers=headers)
             response = connection.getresponse()
             if response.status != 200:
-                raise IdentityError(f'Provider chat returned HTTP {response.status}', 502)
+                raise IdentityError(f'Provider chat returned HTTP {response.status}; check model availability and quota', 502)
             raw = response.read(1024 * 1024 + 1)
             if len(raw) > 1024 * 1024:
                 raise IdentityError('Provider chat response is too large', 502)
@@ -360,8 +360,8 @@ class ProviderRegistry:
     def fallback_model(self, principal):
         models = self.chat_models(principal)
         # Fallback-e mahdood: faghat Gemini flash, sepas model-e rayegan-e OpenRouter.
-        for prefix in ('gemini/gemini-3.1-flash-lite', 'gemini/gemini-2.5-flash-lite',
-                       'gemini/gemini-3-flash', 'gemini/gemini-2.5-flash'):
+        for prefix in ('gemini/gemini-3.5-flash-lite', 'gemini/gemini-3.1-flash-lite',
+                       'gemini/gemini-3.5-flash', 'gemini/gemini-3.1-flash'):
             if prefix in models:
                 return prefix
         return next((model for model in models if model.startswith('openrouter/') and model.endswith(':free')), None)

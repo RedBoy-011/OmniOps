@@ -61,6 +61,17 @@ class NodeTlsTests(unittest.TestCase):
                 self.assertEqual(send('/api/admin/providers/price', {'kind': 'gemini', 'model': 'gemini-example',
                     'input': '0.01', 'output': '0.02'}, token)[0], 200)
                 self.assertNotIn('example-gemini-key', json.dumps(send('/api/admin/providers', token=token)[1]))
+                self.assertIn('gemini/gemini-example', send('/api/web/models', token=token)[1]['models'])
+                with patch('omniops.providers._provider_post', return_value={
+                    'candidates': [{'content': {'parts': [{'text': 'verified TLS reply'}]}}]}) as outbound:
+                    result = send('/api/web/chat', {'message': 'hello', 'model': 'gemini/gemini-example',
+                                                    'allow_external': True}, token)[1]
+                    self.assertEqual(result['reply'], 'verified TLS reply')
+                    self.assertEqual(outbound.call_args.args[3:5], ('socks', 'socks5h://172.16.20.250:7890'))
+                with self.assertRaises(HTTPError) as denied:
+                    send('/api/web/chat', {'message': 'hello', 'model': 'gemini/gemini-example'}, token)
+                self.assertEqual(denied.exception.code, 403)
+                denied.exception.close()
                 grant = send('/api/admin/nodes/grants', {'role': 'worker'}, token)[1]
                 client_node = NodeClient(root, str(certificate))
                 with self.assertRaises(HTTPError) as mismatch:

@@ -117,6 +117,14 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaises(IdentityError):
             self.providers.complete(member, 'gemini/gemini-example', 'test')
 
+    def test_fallback_prefers_current_gemini_flash_lite(self):
+        self.providers.save(self.admin, 'gemini', 'example-gemini-key', 'direct', '')
+        with patch('omniops.providers.fetch_models', return_value=[
+            'gemini-2.5-flash-lite', 'gemini-3.5-flash-lite']):
+            self.providers.test(self.admin, 'gemini')
+        self.providers.enable(self.admin, 'gemini', True)
+        self.assertEqual(self.providers.fallback_model(self.admin), 'gemini/gemini-3.5-flash-lite')
+
     def test_external_chat_rejected_from_plain_http_even_with_consent(self):
         self.providers.save(self.admin, 'gemini', 'example-gemini-key', 'socks', 'socks5h://172.19.30.99:17890')
         with patch('omniops.providers.fetch_models', return_value=['gemini-example']):
