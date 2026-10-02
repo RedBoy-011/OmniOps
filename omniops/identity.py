@@ -23,7 +23,7 @@ PASSWORD_N, PASSWORD_R, PASSWORD_P = 1 << 14, 8, 5
 DEFAULT_CAPABILITIES = ("chat",)
 ADMIN_CAPABILITIES = (
     "chat", "skill.use", "tool.read", "action.request", "action.approve",
-    "agent.pair", "user.approve", "profile.manage", "provider.manage",
+    "agent.pair", "user.approve", "profile.manage", "provider.manage", "provider.use",
 )
 
 

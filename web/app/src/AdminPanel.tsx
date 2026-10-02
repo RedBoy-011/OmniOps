@@ -6,7 +6,7 @@ import { ProviderManager } from "./ProviderManager";
 import { ChatRoom } from "./ChatRoom";
 
 const choices = [
-  ["chat", "گفت‌وگو"], ["skill.use", "مهارت‌ها"], ["tool.read", "مشاهدهٔ ابزار"],
+  ["chat", "گفت‌وگو"], ["provider.use", "مدل API بیرونی"], ["skill.use", "مهارت‌ها"], ["tool.read", "مشاهدهٔ ابزار"],
   ["action.request", "درخواست اقدام"], ["action.approve", "تأیید اقدام"], ["agent.pair", "اتصال ایجنت"],
 ] as const;
 

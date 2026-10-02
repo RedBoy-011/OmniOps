@@ -57,7 +57,7 @@ export const api = {
   pending: () => request<{ users: PendingUser[] }>("/api/admin/pending"),
   operations: () => request<Operations>("/api/admin/operations"),
   webModels: () => request<{ models: string[] }>("/api/web/models"),
-  webChat: (message: string, model: string) => request<{ reply: string; model: string }>("/api/web/chat", "POST", { message, model }),
+  webChat: (message: string, model: string, allow_external = false) => request<{ reply: string; model: string }>("/api/web/chat", "POST", { message, model, allow_external }),
   managedNodes: () => request<{ nodes: ManagedNode[] }>("/api/admin/nodes"),
   modelPulls: () => request<{ jobs: ModelPull[] }>("/api/admin/nodes/model-pulls"),
   createModelPull: (node_id: string, model: string) => request<{ id: string; status: string }>("/api/admin/nodes/model-pulls", "POST", { node_id, model }),

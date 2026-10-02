@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from omniops.identity import IdentityError, IdentityStore
-from omniops.providers import ProviderRegistry, _proxy, _connect_proxy, fetch_models, _catalog_price_per_million
+from omniops.providers import ProviderRegistry, _proxy, _connect_proxy, fetch_models, _provider_post, _catalog_price_per_million
 from omniops.server import make_server
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
@@ -94,6 +94,54 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual([call.args[1] for call in connection.request.call_args_list],
                          ['/api/v1/key', '/api/v1/models'])
 
+    def test_external_chat_uses_verified_model_saved_socks_route_and_permission(self):
+        self.providers.save(self.admin, 'gemini', 'example-gemini-key', 'socks', 'socks5h://172.19.30.99:17890')
+        with patch('omniops.providers.fetch_models', return_value=['gemini-example']):
+            self.providers.test(self.admin, 'gemini')
+        self.providers.enable(self.admin, 'gemini', True)
+        member = {'id': 'test-member', 'role': 'member', 'capabilities': ['chat']}
+        with self.assertRaisesRegex(IdentityError, 'external provider permission'):
+            self.providers.complete(member, 'gemini/gemini-example', 'test')
+        member['capabilities'].append('provider.use')
+        with patch('omniops.providers._provider_post', return_value={
+            'candidates': [{'content': {'parts': [{'text': 'ok'}]}}]}) as send:
+            result = self.providers.complete(member, 'gemini/gemini-example', 'test')
+        self.assertEqual(result, {'reply': 'ok', 'model': 'gemini/gemini-example'})
+        self.assertEqual(send.call_args.args[:5],
+                         ('generativelanguage.googleapis.com', '/v1beta/models/gemini-example:generateContent',
+                          'example-gemini-key', 'socks', 'socks5h://172.19.30.99:17890'))
+        self.assertEqual(send.call_args.args[5]['generationConfig']['maxOutputTokens'], 256)
+        with self.assertRaisesRegex(IdentityError, 'not enabled and verified'):
+            self.providers.complete(member, 'gemini/other-model', 'test')
+        self.providers.enable(self.admin, 'gemini', False)
+        with self.assertRaises(IdentityError):
+            self.providers.complete(member, 'gemini/gemini-example', 'test')
+
+    def test_external_chat_rejected_from_plain_http_even_with_consent(self):
+        self.providers.save(self.admin, 'gemini', 'example-gemini-key', 'socks', 'socks5h://172.19.30.99:17890')
+        with patch('omniops.providers.fetch_models', return_value=['gemini-example']):
+            self.providers.test(self.admin, 'gemini')
+        self.providers.enable(self.admin, 'gemini', True)
+        server = make_server('127.0.0.1', 0, 'a-test-api-key-at-least-32-characters',
+                             'http://127.0.0.1:11434', self.store)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            token = self.store.login('admin', 'a sufficiently strong password')['token']
+            request = Request(f'http://127.0.0.1:{server.server_port}/api/web/chat',
+                              data=json.dumps({'message': 'hello', 'model': 'gemini/gemini-example',
+                                               'allow_external': True}).encode(),
+                              headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+                              method='POST')
+            with patch('omniops.providers._provider_post') as outbound:
+                with self.assertRaises(HTTPError) as failed:
+                    urlopen(request, timeout=3)
+                self.assertEqual(failed.exception.code, 426)
+                failed.exception.close()
+                outbound.assert_not_called()
+        finally:
+            server.shutdown(); server.server_close(); thread.join(timeout=2)
+
     def test_price_and_network_validation(self):
         self.providers.save(self.admin, 'openai', 'example-openai-key', 'direct', '')
         for price in ('NaN', '-1', '1.2345678', 'Infinity'):
@@ -154,6 +202,15 @@ class ProviderTests(unittest.TestCase):
             self.assertFalse(next(p for p in self.providers.list(self.admin) if p['kind'] == 'gemini')['configured'])
         finally:
             server.shutdown(); server.server_close(); thread.join(timeout=2)
+
+    def test_failed_socks_chat_never_falls_back_to_direct(self):
+        with patch('omniops.providers._connect_proxy', side_effect=OSError('unavailable')), \
+             patch('omniops.providers.socket.create_connection') as direct:
+            with self.assertRaises(IdentityError):
+                _provider_post('generativelanguage.googleapis.com', '/v1beta/models/example:generateContent',
+                               'example-key', 'socks', 'socks5h://172.19.30.99:17890',
+                               {'contents': [{'parts': [{'text': 'hello'}]}]})
+            direct.assert_not_called()
 
     def test_failed_socks_connection_never_falls_back_to_direct(self):
         with patch('omniops.providers._connect_proxy', side_effect=OSError('unavailable')), \

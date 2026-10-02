@@ -81,19 +81,40 @@ def make_server(
                 raise IdentityError('Profile has no chat permission', 403)
             prompt = payload.get('message')
             if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 8000:
-                raise IdentityError('Chat message must contain 1–8000 characters')
+                raise IdentityError('Chat message must contain 1-8000 characters')
             requested = payload.get('model', 'auto')
             if not isinstance(requested, str):
                 raise IdentityError('Invalid model ID')
-            client = current_ollama()
-            models = client.list_chat_models()
+            allow_external = payload.get('allow_external', False)
+            if type(allow_external) is not bool:
+                raise IdentityError('External consent must be a boolean')
+
+            def external(model):
+                if not allow_external:
+                    raise IdentityError('Explicit external data consent required', 403)
+                if not isinstance(self.connection, ssl.SSLSocket) or self.connection.version() != 'TLSv1.3':
+                    raise IdentityError('Direct TLS 1.3 required for external chat', 426)
+                if providers is None:
+                    raise IdentityError('Provider registry unavailable', 503)
+                return providers.complete(principal, model, prompt.strip())
+
+            if requested.startswith(('gemini/', 'openrouter/')):
+                return external(requested)
             try:
+                client = current_ollama()
+                models = client.list_chat_models()
                 selected = choose_local_chat_model(models, requested, prompt.strip())
-            except ValueError as exc:
+                candidates = [selected] if requested != 'auto' else [selected] + [
+                    item.name for item in models if item.name != selected
+                ]
+            except (ValueError, OllamaError) as exc:
+                if requested == 'auto' and allow_external and providers is not None:
+                    candidate = providers.fallback_model(principal)
+                    if candidate:
+                        return external(candidate)
+                if isinstance(exc, OllamaError):
+                    raise
                 raise IdentityError(str(exc), 404) from exc
-            candidates = [selected] if requested != 'auto' else [selected] + [
-                item.name for item in models if item.name != selected
-            ]
             last_error = None
             for candidate in candidates:
                 try:
@@ -101,6 +122,10 @@ def make_server(
                     return {'reply': answer, 'model': f'ollama/{candidate}'}
                 except OllamaError as exc:
                     last_error = exc
+            if requested == 'auto' and allow_external and providers is not None:
+                candidate = providers.fallback_model(principal)
+                if candidate:
+                    return external(candidate)
             raise last_error or OllamaError('No local chat model is available')
 
         def _static(self) -> bool:
@@ -345,10 +370,18 @@ def make_server(
                     self._send(403, {"error": {"message": "Profile has no chat permission"}})
                     return
                 try:
-                    models = self._available_models(current_ollama())
-                    self._send(200, {"models": list(models)})
+                    models = list(self._available_models(current_ollama()))
                 except OllamaError as exc:
-                    self._send(503, {"error": {"message": str(exc)}})
+                    if self.path == '/api/agent/models':
+                        self._send(503, {"error": {"message": str(exc)}})
+                        return
+                    models = []
+                if self.path == '/api/web/models' and isinstance(self.connection, ssl.SSLSocket) and providers:
+                    models.extend(providers.chat_models(principal))
+                if not models:
+                    self._send(503, {"error": {"message": "No chat model available"}})
+                else:
+                    self._send(200, {"models": models})
                 return
             if self.path == "/api/admin/operations":
                 principal = self._principal()

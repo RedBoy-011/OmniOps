@@ -8,12 +8,15 @@ const suggestions = ["وضعیت امروز سیستم را خلاصه کن", "�
 export function ChatRoom() {
   const [models, setModels] = useState<string[]>([]);
   const [selected, setSelected] = useState("auto");
+  const [externalConsent, setExternalConsent] = useState(false);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const localModels = models.filter(model => model.startsWith("ollama/"));
+  const externalModels = models.filter(model => model.startsWith("gemini/") || model.startsWith("openrouter/"));
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [entries, busy]);
 
@@ -22,7 +25,7 @@ export function ChatRoom() {
       const result = await api.webModels();
       setModels(result.models);
       setSelected((previous) => previous === "auto" || result.models.includes(previous) ? previous : "auto");
-      setError(result.models.length ? "" : "مدل مناسب گفت‌وگو روی Worker پیدا نشد.");
+      setError(result.models.length ? "" : "مدل مناسبی برای گفت‌وگو در دسترس نیست.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "فهرست مدل‌ها در دسترس نیست."); }
   }
 
@@ -31,11 +34,11 @@ export function ChatRoom() {
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const message = draft.trim();
-    if (!message || busy || !models.length) return;
+    if (!message || busy || (!localModels.length && !(externalConsent && externalModels.length))) return;
     setDraft(""); setBusy(true); setError("");
     setEntries((before) => [...before, { role: "user", text: message, time: new Date().toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" }) }]);
     try {
-      const result = await api.webChat(message, selected);
+      const result = await api.webChat(message, selected, externalConsent);
       setEntries((before) => [...before, { role: "assistant", text: result.reply, model: result.model, time: new Date().toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" }) }]);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "پاسخ مدل دریافت نشد."); }
     finally { setBusy(false); }
@@ -48,9 +51,10 @@ export function ChatRoom() {
   }
 
   return <section className="glass admin-card operations-card web-chat" aria-label="گفت‌وگو با هسته">
-    <div className="web-chat-top"><div className="web-chat-title"><span className="chat-core" aria-hidden="true">✦</span><div><h2>گفت‌وگو با هسته</h2><p>پاسخ از مدل محلی Worker خصوصی · پیام‌ها در این صفحه موقت‌اند</p></div></div>
+    <div className="web-chat-top"><div className="web-chat-title"><span className="chat-core" aria-hidden="true">✦</span><div><h2>گفت‌وگو با هسته</h2><p>مدل محلی در اولویت است · خروج متن به API بیرونی فقط با اجازهٔ همین صفحه</p></div></div>
       <span className={`chat-presence ${models.length ? "connected" : ""}`}><i aria-hidden="true" />{models.length ? "مدل آماده" : "در حال بررسی"}</span></div>
-    <div className="web-chat-controls"><label htmlFor="web-chat-model">مدل پاسخ‌گو</label><select id="web-chat-model" dir="ltr" value={selected} disabled={busy} onChange={(event) => setSelected(event.target.value)}><option value="auto">انتخاب هوشمند محلی</option>{models.map((model) => <option value={model} key={model}>{model}</option>)}</select><button className="quiet-button" type="button" onClick={() => void refresh()} aria-label="تازه‌سازی مدل‌ها">↻ <span>تازه‌سازی</span></button></div>
+    <div className="web-chat-controls"><label htmlFor="web-chat-model">مدل پاسخ‌گو</label><select id="web-chat-model" dir="ltr" value={selected} disabled={busy} onChange={event => setSelected(event.target.value)}><option value="auto">محلی، با جایگزین بیرونی در صورت اجازه</option>{localModels.map(model => <option value={model} key={model}>{model}</option>)}{externalModels.map(model => <option value={model} key={model} disabled={!externalConsent}>{model}</option>)}</select><button className="quiet-button" type="button" onClick={() => void refresh()} aria-label="تازه‌سازی مدل‌ها">↻ <span>تازه‌سازی</span></button></div>
+    {externalModels.length > 0 && <label className="chat-external-consent"><input type="checkbox" checked={externalConsent} disabled={busy} onChange={event => { setExternalConsent(event.target.checked); if (!event.target.checked && !selected.startsWith("ollama/")) setSelected("auto"); }} /><span><strong>اجازهٔ ارسال پیام به مدل‌های API بیرونی</strong><small>در انتخاب خودکار ابتدا مدل محلی امتحان می‌شود. با فعال‌کردن این گزینه، متن پیام در صورت انتخاب مدل بیرونی یا خرابی همهٔ مدل‌های محلی به Provider ارسال می‌شود و ممکن است هزینه داشته باشد.</small></span></label>}
     <div className="web-chat-history" role="log" aria-live="polite" aria-relevant="additions text">
       {entries.length === 0 && <div className="chat-welcome"><span className="chat-welcome-icon" aria-hidden="true">✧</span><strong>از اینجا شروع کنیم</strong><p>یک سؤال بپرسید یا یکی از پیشنهادها را انتخاب کنید.</p><div className="chat-suggestions">{suggestions.map(text => <button type="button" className="quiet-button" key={text} onClick={() => setDraft(text)}>{text}</button>)}</div></div>}
       <AnimatePresence initial={false}>{entries.map((entry, index) => <motion.article className={`web-chat-entry ${entry.role}`} key={index} initial={{ opacity: 0, y: 12, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: .25 }}>
@@ -59,7 +63,7 @@ export function ChatRoom() {
       {busy && <div className="web-chat-entry assistant chat-thinking" role="status"><span className="chat-entry-label">OmniOps</span><span className="chat-typing" aria-hidden="true"><i /><i /><i /></span><span>در حال دریافت پاسخ از مدل…</span></div>}
       <div ref={endRef} />
     </div>
-    <form className="web-chat-form" ref={formRef} onSubmit={(event) => void send(event)}><label className="sr-only" htmlFor="web-chat-input">پیام</label><div className="chat-composer"><textarea id="web-chat-input" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onKeyDown} maxLength={8000} rows={2} placeholder="پیام خود را بنویسید…" disabled={busy} /><div className="chat-composer-foot"><small>{draft.length.toLocaleString("fa-IR")} / ۸٬۰۰۰ · Enter ارسال، Shift+Enter خط جدید</small><button className="submit-button" disabled={busy || !draft.trim() || models.length === 0}>{busy ? "در حال پاسخ…" : "ارسال پیام ↗"}</button></div></div></form>
+    <form className="web-chat-form" ref={formRef} onSubmit={(event) => void send(event)}><label className="sr-only" htmlFor="web-chat-input">پیام</label><div className="chat-composer"><textarea id="web-chat-input" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onKeyDown} maxLength={8000} rows={2} placeholder="پیام خود را بنویسید…" disabled={busy} /><div className="chat-composer-foot"><small>{draft.length.toLocaleString("fa-IR")} / ۸٬۰۰۰ · Enter ارسال، Shift+Enter خط جدید</small><button className="submit-button" disabled={busy || !draft.trim() || (!localModels.length && !(externalConsent && externalModels.length))}>{busy ? "در حال پاسخ…" : "ارسال پیام ↗"}</button></div></div></form>
     {error && <p className="admin-message" role="alert">{error}</p>}
   </section>;
 }

@@ -9,7 +9,7 @@ import re
 import socket
 import ssl
 from decimal import Decimal, InvalidOperation
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from .identity import IdentityError
 
@@ -162,6 +162,44 @@ def fetch_models(kind, api_key, mode, proxy_url, with_prices=False):
         raise IdentityError('Provider connection failed; check credentials, proxy and network', 502) from exc
 
 
+def _provider_post(host, path, key, mode, proxy_url, payload):
+    body = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+    if len(body) > 20000:
+        raise IdentityError('External prompt exceeds request limit')
+    headers = {'Content-Type': 'application/json', 'Accept': 'application/json',
+               'x-goog-api-key' if host == ENDPOINTS['gemini'][0] else 'Authorization':
+                   key if host == ENDPOINTS['gemini'][0] else 'Bearer ' + key}
+    try:
+        sock = _connect_proxy(proxy_url, host) if mode == 'socks' else socket.create_connection((host, 443), timeout=8)
+        connection = http.client.HTTPSConnection(host, timeout=60)
+        try:
+            try:
+                connection.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=host)
+            except Exception:
+                sock.close()
+                raise
+            connection.request('POST', path, body=body, headers=headers)
+            response = connection.getresponse()
+            if response.status != 200:
+                raise IdentityError(f'Provider chat returned HTTP {response.status}', 502)
+            raw = response.read(1024 * 1024 + 1)
+            if len(raw) > 1024 * 1024:
+                raise IdentityError('Provider chat response is too large', 502)
+            return json.loads(raw)
+        finally:
+            connection.close()
+    except IdentityError:
+        raise
+    except (OSError, ValueError, TypeError, AttributeError, http.client.HTTPException) as exc:
+        raise IdentityError('Provider chat connection failed; check proxy and network', 502) from exc
+
+
+def _external_use(principal):
+    return 'chat' in principal.get('capabilities', []) and (
+        'provider.use' in principal['capabilities'] or
+        (principal.get('role') == 'superadmin' and 'provider.manage' in principal['capabilities']))
+
+
 class ProviderRegistry:
     def __init__(self, identity):
         self.identity = identity
@@ -262,6 +300,71 @@ class ProviderRegistry:
             db.execute('UPDATE provider_accounts SET enabled=? WHERE kind=?', (int(enabled), kind))
             self.identity._audit(db, principal['id'], 'provider_enabled' if enabled else 'provider_disabled', kind)
         return {'enabled': enabled}
+
+    def chat_models(self, principal):
+        if not _external_use(principal):
+            return []
+        with self.identity._db() as db:
+            accounts = db.execute("""SELECT kind,models_json FROM provider_accounts
+                WHERE kind IN ('gemini','openrouter') AND enabled=1 AND tested_at IS NOT NULL""").fetchall()
+        return [f"{row['kind']}/{model}" for row in accounts
+                for model in json.loads(row['models_json'])
+                if row['kind'] != 'gemini' or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,159}', model)]
+
+    def complete(self, principal, requested, prompt):
+        if not _external_use(principal):
+            raise IdentityError('Profile has no external provider permission', 403)
+        if not isinstance(requested, str) or '/' not in requested:
+            raise IdentityError('Choose a provider model', 400)
+        kind, model = requested.split('/', 1)
+        if kind not in ('gemini', 'openrouter') or not model:
+            raise IdentityError('Unsupported chat provider model', 404)
+        if kind == 'gemini' and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,159}', model):
+            raise IdentityError('Invalid Gemini model', 400)
+        if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 8000:
+            raise IdentityError('Chat message must contain 1-8000 characters')
+        with self.identity._db() as db:
+            row = db.execute('SELECT * FROM provider_accounts WHERE kind=? AND enabled=1 AND tested_at IS NOT NULL', (kind,)).fetchone()
+        if row is None or model not in json.loads(row['models_json']):
+            raise IdentityError('External model is not enabled and verified', 404)
+        from cryptography.fernet import InvalidToken
+        try:
+            key = _cipher(self.identity.signing_key).decrypt(row['secret'].encode()).decode()
+        except (InvalidToken, UnicodeError) as exc:
+            raise IdentityError('Provider key cannot be decrypted', 409) from exc
+        with self.identity._lock, self.identity._db() as db:
+            self.identity._audit(db, principal['id'], 'external_chat_requested', requested)
+        if kind == 'gemini':
+            document = _provider_post(ENDPOINTS[kind][0], '/v1beta/models/' + quote(model, safe='') + ':generateContent',
+                                      key, row['network_mode'], row['proxy_url'],
+                                      {'contents': [{'role': 'user', 'parts': [{'text': prompt.strip()}]}],
+                                       'generationConfig': {'maxOutputTokens': 256}})
+            try:
+                parts = document['candidates'][0]['content']['parts']
+                text = ''.join(part['text'] for part in parts if isinstance(part.get('text'), str))
+            except (KeyError, IndexError, TypeError) as exc:
+                raise IdentityError('Gemini returned no text response', 502) from exc
+        else:
+            document = _provider_post(ENDPOINTS[kind][0], '/api/v1/chat/completions',
+                                      key, row['network_mode'], row['proxy_url'],
+                                      {'model': model, 'messages': [{'role': 'user', 'content': prompt.strip()}],
+                                       'max_tokens': 256, 'stream': False})
+            try:
+                text = document['choices'][0]['message']['content']
+            except (KeyError, IndexError, TypeError) as exc:
+                raise IdentityError('OpenRouter returned no text response', 502) from exc
+        if not isinstance(text, str) or not text.strip():
+            raise IdentityError('Provider returned an empty text response', 502)
+        return {'reply': text, 'model': requested}
+
+    def fallback_model(self, principal):
+        models = self.chat_models(principal)
+        # Fallback-e mahdood: faghat Gemini flash, sepas model-e rayegan-e OpenRouter.
+        for prefix in ('gemini/gemini-3.1-flash-lite', 'gemini/gemini-2.5-flash-lite',
+                       'gemini/gemini-3-flash', 'gemini/gemini-2.5-flash'):
+            if prefix in models:
+                return prefix
+        return next((model for model in models if model.startswith('openrouter/') and model.endswith(':free')), None)
 
     def price(self, principal, kind, model, input_price, output_price):
         _admin(principal)
