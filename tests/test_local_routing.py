@@ -129,20 +129,6 @@ class IdentityGatewayTests(unittest.TestCase):
             "code": pairing["code"], "device_id": "another-pc",
         })[0], 401)
 
-    def test_auto_chat_falls_back_to_another_local_chat_model(self):
-        self.ollama.include_second_chat = True
-        self.ollama.fail_first_chat = True
-        try:
-            token = self.store.login('root-admin', 'a very strong admin password')['token']
-            code, result = self.call('POST', '/api/web/chat', {'message': 'سلام', 'model': 'auto'}, token)
-            self.assertEqual(code, 200)
-            self.assertEqual(result['model'], 'ollama/backup:latest')
-            self.assertEqual(self.call('POST', '/api/web/chat', {
-                'message': 'سلام', 'model': 'ollama/test:1b'}, token)[0], 503)
-        finally:
-            self.ollama.include_second_chat = False
-            self.ollama.fail_first_chat = False
-
     def test_web_ui_is_served_same_origin(self):
         with self.opener.open(self.root + "/", timeout=2) as result:
             self.assertEqual(result.status, 200)

@@ -88,6 +88,18 @@ class OllamaClient:
             models.append(LocalModel(item["name"], size if isinstance(size, int) else None))
         return tuple(models)
 
+    def list_chat_models(self) -> tuple[LocalModel, ...]:
+        result = []
+        for model in self.list_models():
+            try:
+                metadata = self._json_request('/api/show', {'model': model.name})
+            except OllamaError:
+                continue
+            capabilities = metadata.get('capabilities')
+            if isinstance(capabilities, list) and 'completion' in capabilities:
+                result.append(model)
+        return tuple(result)
+
     def chat(self, model: str, messages: list[dict[str, str]]) -> str:
         if not model or not messages:
             raise ValueError("A model and at least one message are required")

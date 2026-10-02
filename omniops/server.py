@@ -17,6 +17,7 @@ from pathlib import Path
 
 from .identity import IdentityError, IdentityStore
 from .ollama import OllamaClient, OllamaError
+from .local_routing import choose_local_chat_model
 from .nodes import NodeRegistry
 
 MAX_BODY_BYTES = 64 * 1024
@@ -71,7 +72,34 @@ def make_server(
             return False
 
         def _available_models(self, client: OllamaClient) -> dict[str, str]:
-            return {f"ollama/{entry.name}": entry.name for entry in client.list_models()}
+            return {f"ollama/{entry.name}": entry.name for entry in client.list_chat_models()}
+
+        def _answer_chat(self, principal: dict, payload: dict) -> dict:
+            if 'chat' not in principal['capabilities']:
+                raise IdentityError('Profile has no chat permission', 403)
+            prompt = payload.get('message')
+            if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 8000:
+                raise IdentityError('Chat message must contain 1–8000 characters')
+            requested = payload.get('model', 'auto')
+            if not isinstance(requested, str):
+                raise IdentityError('Invalid model ID')
+            client = current_ollama()
+            models = client.list_chat_models()
+            try:
+                selected = choose_local_chat_model(models, requested, prompt.strip())
+            except ValueError as exc:
+                raise IdentityError(str(exc), 404) from exc
+            candidates = [selected] if requested != 'auto' else [selected] + [
+                item.name for item in models if item.name != selected
+            ]
+            last_error = None
+            for candidate in candidates:
+                try:
+                    answer = client.chat(candidate, [{'role': 'user', 'content': prompt.strip()}])
+                    return {'reply': answer, 'model': f'ollama/{candidate}'}
+                except OllamaError as exc:
+                    last_error = exc
+            raise last_error or OllamaError('No local chat model is available')
 
         def _static(self) -> bool:
             if web_dist is None or (self.path != "/" and not self.path.startswith("/assets/") and self.path != "/fonts/Vazirmatn-OFL.txt"):
@@ -188,7 +216,7 @@ def make_server(
             path = self.path
             if path not in {
                 "/api/auth/register", "/api/auth/login", "/api/auth/logout",
-                "/api/agent/pairing", "/api/agent/redeem", "/api/agent/heartbeat", "/api/agent/logout", "/api/agent/chat",
+                "/api/agent/pairing", "/api/agent/redeem", "/api/agent/heartbeat", "/api/agent/logout", "/api/agent/chat", "/api/web/chat",
                 "/api/admin/ollama-endpoint",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
                 self._send(404, {"error": {"message": "Route not found"}})
@@ -236,26 +264,8 @@ def make_server(
                     self._send(200, {"url": candidate.base_url, "status": "up", "models": [
                         {"id": f"ollama/{entry.name}", "size_bytes": entry.size_bytes} for entry in models
                     ]})
-                elif path == "/api/agent/chat":
-                    if "chat" not in principal["capabilities"]:
-                        raise IdentityError("Profile has no chat permission", 403)
-                    prompt = payload.get("message")
-                    if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 8000:
-                        raise IdentityError("Chat message must contain 1–8000 characters")
-                    client = current_ollama()
-                    available = self._available_models(client)
-                    if not available:
-                        raise OllamaError("No local model is installed")
-                    requested = payload.get("model", "auto")
-                    if not isinstance(requested, str):
-                        raise IdentityError("Invalid model ID")
-                    if requested == "auto":
-                        requested = next(iter(available))
-                    model = available.get(requested)
-                    if model is None:
-                        raise IdentityError("Requested local model is not installed", 404)
-                    answer = client.chat(model, [{"role": "user", "content": prompt.strip()}])
-                    self._send(200, {"reply": answer, "model": f"ollama/{model}"})
+                elif path in ('/api/agent/chat', '/api/web/chat'):
+                    self._send(200, self._answer_chat(principal, payload))
                 else:
                     pieces = path.split("/")
                     if len(pieces) != 6 or not pieces[4]:
@@ -295,8 +305,8 @@ def make_server(
             if self.path == "/health":
                 self._send(200, {"status": "up", "mode": "local-development"})
                 return
-            if self.path == "/api/agent/models":
-                principal = self._principal("agent")
+            if self.path in ('/api/agent/models', '/api/web/models'):
+                principal = self._principal('agent' if self.path == '/api/agent/models' else 'web')
                 if principal is None:
                     return
                 if "chat" not in principal["capabilities"]:

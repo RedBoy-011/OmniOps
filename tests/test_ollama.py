@@ -21,16 +21,27 @@ class FakeOllama(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/tags":
-            self._reply({"models": [{"name": "test:1b", "size": 123}]})
+            models = [{"name": "test:1b", "size": 123}]
+            if getattr(self.server, 'include_embedding', False):
+                models.insert(0, {"name": "embed:latest", "size": 33})
+            if getattr(self.server, 'include_second_chat', False):
+                models.append({"name": "backup:latest", "size": 999})
+            self._reply({"models": models})
         else:
             self.send_error(404)
 
     def do_POST(self):
-        if self.path != "/api/chat":
+        if self.path not in ('/api/chat', '/api/show'):
             self.send_error(404)
             return
         payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path == '/api/show':
+            self._reply({'capabilities': ['embedding'] if payload['model'].startswith('embed:') else ['completion']})
+            return
         self.server.last_request = payload
+        if getattr(self.server, 'fail_first_chat', False) and payload['model'] == 'test:1b':
+            self.send_error(503)
+            return
         self._reply({"message": {"role": "assistant", "content": "پاسخ واقعی آزمایشی"}})
 
 
@@ -56,6 +67,14 @@ class OllamaAdapterTests(unittest.TestCase):
 
     def test_discovers_models_from_http_response(self):
         self.assertEqual(self.client.list_models()[0].name, "test:1b")
+
+    def test_embedding_model_is_excluded_from_chat_choices(self):
+        self.server.include_embedding = True
+        try:
+            self.assertEqual([model.name for model in self.client.list_chat_models()], ['test:1b'])
+            self.assertEqual(len(self.client.list_models()), 2)
+        finally:
+            self.server.include_embedding = False
 
     def test_sends_nostream_chat_and_returns_actual_response(self):
         content = self.client.chat("test:1b", [{"role": "user", "content": "سلام"}])

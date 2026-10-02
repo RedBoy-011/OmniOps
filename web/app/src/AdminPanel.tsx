@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, type Operations, type PendingUser, type Profile } from "./api";
 import { NodeManager } from "./NodeManager";
+import { ChatRoom } from "./ChatRoom";
 
 const choices = [
   ["chat", "گفت‌وگو"], ["skill.use", "مهارت‌ها"], ["tool.read", "مشاهدهٔ ابزار"],
@@ -178,6 +179,7 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
             </>}
           </section>
         </div>
+        {user.capabilities.includes("chat") && <ChatRoom />}
         {user.role === "superadmin" && <section className="glass admin-card operations-card">
           <div className="card-title"><div><h2>وضعیت گره‌ها و مدل‌های محلی</h2><p>بررسی خودکار هر ۱۵ ثانیه از Master و Ollama.</p></div><button className="quiet-button" onClick={() => void refreshOperations()}>بررسی دوباره</button></div>
           {operationsError && <p className="admin-message" role="alert">{operationsError}</p>}
