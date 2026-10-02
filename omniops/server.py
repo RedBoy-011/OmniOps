@@ -9,6 +9,7 @@ import ipaddress
 import json
 import mimetypes
 import os
+import ssl
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,6 +17,7 @@ from pathlib import Path
 
 from .identity import IdentityError, IdentityStore
 from .ollama import OllamaClient, OllamaError
+from .nodes import NodeRegistry
 
 MAX_BODY_BYTES = 64 * 1024
 LAN_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
@@ -42,6 +44,7 @@ def make_server(
     if len(api_key) < 32:
         raise ValueError("Set a unique OMNIOPS_API_KEY of at least 32 characters")
     OllamaClient(ollama_url)
+    nodes = NodeRegistry(identity_store) if identity_store else None
 
     def current_ollama() -> OllamaClient:
         endpoint = identity_store.ollama_endpoint() if identity_store else None
@@ -124,6 +127,51 @@ def make_server(
             except (UnicodeDecodeError, ValueError):
                 self._send(400, {"error": {"message": "Invalid JSON object"}})
                 return None
+
+        def _node_channel(self) -> bool:
+            # Hoviat-e TLS az socket gerefte mishavad, na az header-e proxy.
+            if isinstance(self.connection, ssl.SSLSocket) and self.connection.version() == "TLSv1.3":
+                return True
+            self._send(426, {"error": {"message": "Direct TLS 1.3 is required for node identity"}})
+            return False
+
+        def _node_post(self):
+            if not self._node_channel():
+                return
+            if nodes is None:
+                self._send(503, {"error": {"message": "Node registry unavailable"}})
+                return
+            path = self.path
+            if path not in {"/api/nodes/enroll", "/api/nodes/heartbeat", "/api/nodes/rotate",
+                            "/api/admin/nodes/grants", "/api/admin/nodes/grants/revoke",
+                            "/api/admin/nodes/revoke"}:
+                self._send(404, {"error": {"message": "Route not found"}})
+                return
+            principal = None
+            if path.startswith("/api/admin/"):
+                principal = self._principal()
+                if principal is None:
+                    return
+            body = self._body()
+            if body is None:
+                return
+            try:
+                if path == "/api/nodes/enroll":
+                    self._send(201, nodes.enroll(body.get("grant"), body.get("name")))
+                elif path == "/api/nodes/heartbeat":
+                    self._send(200, nodes.heartbeat(body.get("id"), body.get("credential"), body.get("metrics")))
+                elif path == "/api/nodes/rotate":
+                    self._send(200, nodes.rotate(body.get("id"), body.get("credential")))
+                elif path == "/api/admin/nodes/grants":
+                    self._send(201, nodes.issue(principal, body.get("role")))
+                elif path == "/api/admin/nodes/grants/revoke":
+                    nodes.cancel_grant(principal, body.get("id"))
+                    self._send(200, {"status": "revoked"})
+                else:
+                    nodes.revoke(principal, body.get("id"))
+                    self._send(200, {"status": "revoked"})
+            except IdentityError as exc:
+                self._send(exc.status, {"error": {"message": str(exc)}})
 
         def _identity_post(self):
             store = self._identity()
@@ -212,6 +260,17 @@ def make_server(
                 self._send(503, {"error": {"message": str(exc)}})
 
         def do_GET(self):
+            if self.path == "/api/admin/nodes":
+                if not self._node_channel():
+                    return
+                principal = self._principal()
+                if principal is None:
+                    return
+                try:
+                    self._send(200, {"nodes": nodes.list_nodes(principal)})
+                except IdentityError as exc:
+                    self._send(exc.status, {"error": {"message": str(exc)}})
+                return
             if self._static():
                 return
             if self.path == "/health":
@@ -286,6 +345,9 @@ def make_server(
             )
 
         def do_POST(self):
+            if self.path.startswith("/api/nodes/") or self.path.startswith("/api/admin/nodes/"):
+                self._node_post()
+                return
             if self.path.startswith("/api/"):
                 self._identity_post()
                 return
@@ -347,7 +409,16 @@ def main():
         raise SystemExit("Hesab-e SuperAdmin sakhte nashodeh; aval python3 -m omniops.bootstrap ra ejra konid.")
     web_dist = Path(__file__).resolve().parents[1] / "web" / "app" / "dist"
     with make_server(host, port, api_key, ollama_url, identity, web_dist if web_dist.is_dir() else None) as server:
-        print(f"OmniOps development gateway listening on http://{host}:{server.server_port}/v1")
+        cert = os.environ.get("OMNIOPS_TLS_CERT")
+        key = os.environ.get("OMNIOPS_TLS_KEY")
+        if bool(cert) != bool(key):
+            raise ValueError("Set both OMNIOPS_TLS_CERT and OMNIOPS_TLS_KEY")
+        if cert:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_3
+            context.load_cert_chain(cert, key)
+            server.socket = context.wrap_socket(server.socket, server_side=True)
+        print(f"OmniOps gateway listening on {'https' if cert else 'http'}://{host}:{server.server_port}/v1")
         server.serve_forever()
 
 

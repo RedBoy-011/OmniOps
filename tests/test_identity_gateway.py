@@ -55,6 +55,18 @@ class IdentityGatewayTests(unittest.TestCase):
             finally:
                 error.close()
 
+    def test_node_identity_endpoints_reject_http_even_with_forwarded_header(self):
+        token = self.store.login("root-admin", "a very strong admin password")["token"]
+        self.assertEqual(self.call("POST", "/api/admin/nodes/grants", {"role": "worker"}, token)[0], 426)
+        self.assertEqual(self.call("POST", "/api/nodes/enroll", {"grant": "fake"})[0], 426)
+        self.assertEqual(self.call("GET", "/api/admin/nodes", token=token)[0], 426)
+        req = Request(self.root + "/api/nodes/heartbeat", data=b"{}",
+                      headers={"X-Forwarded-Proto": "https"}, method="POST")
+        with self.assertRaises(HTTPError) as error:
+            self.opener.open(req)
+        self.assertEqual(error.exception.code, 426)
+        error.exception.close()
+
     def test_full_registration_approval_and_agent_pairing(self):
         code, signup = self.call("POST", "/api/auth/register", {
             "username": "new-operator", "password": "operator password 123!", "mobile": "09129999999",
