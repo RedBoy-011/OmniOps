@@ -102,6 +102,22 @@ def load_identity(path):
     return state
 
 
+def local_ollama_url():
+    raw = os.environ.get('OMNIOPS_LOCAL_OLLAMA_URL', 'http://127.0.0.1:11434')
+    parts = urlsplit(raw)
+    if parts.scheme != 'http' or parts.username or parts.password or parts.path not in ('', '/') or parts.query or parts.fragment:
+        raise ValueError('Ollama telemetry requires a local private HTTP origin')
+    try:
+        address = ipaddress.IPv4Address(parts.hostname or '')
+        if not (address.is_loopback or any(address in network for network in LAN_NETWORKS)):
+            raise ValueError('Ollama telemetry must stay on a private address')
+        if parts.port is None or not 1 <= parts.port <= 65535:
+            raise ValueError('Ollama telemetry requires a port')
+    except (ValueError, ipaddress.AddressValueError) as exc:
+        raise ValueError('Ollama telemetry requires a local private IPv4 origin') from exc
+    return raw.rstrip('/')
+
+
 def local_metrics():
     def cpu_sample():
         with open('/proc/stat', encoding='ascii') as file:
@@ -121,7 +137,7 @@ def local_metrics():
                'ram_percent': round(max(0, min(ram, 100)), 1),
                'disk_percent': round(max(0, min(disk_percent, 100)), 1)}
     try:
-        with build_opener(ProxyHandler({})).open('http://127.0.0.1:11434/api/tags', timeout=2) as response:
+        with build_opener(ProxyHandler({})).open(local_ollama_url() + '/api/tags', timeout=2) as response:
             raw = response.read(1024 * 1024 + 1)
         if len(raw) <= 1024 * 1024:
             entries = json.loads(raw).get('models', [])

@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import tempfile
 import time
@@ -7,10 +7,19 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from omniops.node_client import heartbeat_once, load_identity, save_identity, validate_master_url
+from omniops.node_client import heartbeat_once, load_identity, save_identity, validate_master_url, local_ollama_url
 
 
 class NodeClientTests(unittest.TestCase):
+    def test_local_ollama_origin_stays_private(self):
+        from unittest.mock import patch
+        with patch.dict(os.environ, {'OMNIOPS_LOCAL_OLLAMA_URL': 'http://172.19.30.99:11434'}):
+            self.assertEqual(local_ollama_url(), 'http://172.19.30.99:11434')
+        for url in ('http://8.8.8.8:11434', 'http://example.org:11434',
+                    'https://172.19.30.99:11434', 'http://172.19.30.99:11434/path'):
+            with patch.dict(os.environ, {'OMNIOPS_LOCAL_OLLAMA_URL': url}), self.assertRaises(ValueError):
+                local_ollama_url()
+
     def test_master_must_be_private_verified_https_origin(self):
         self.assertEqual(validate_master_url('https://172.19.30.100:9000/'), 'https://172.19.30.100:9000')
         for url in ('http://172.19.30.100:9000', 'https://8.8.8.8',

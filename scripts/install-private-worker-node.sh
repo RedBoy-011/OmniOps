@@ -4,7 +4,7 @@ set -Eeuo pipefail
 fail() { printf 'OmniOps Worker stopped: %s\n' "$*" >&2; exit 1; }
 [[ "$(id -u)" == 0 ]] || fail 'Run as root on the intended Worker.'
 [[ -d /run/systemd/system ]] || fail 'systemd is required.'
-for binary in python3 openssl systemctl runuser useradd; do command -v "$binary" >/dev/null || fail "Missing $binary"; done
+for binary in python3 openssl curl systemctl runuser useradd; do command -v "$binary" >/dev/null || fail "Missing $binary"; done
 repo="$(pwd -P)"
 [[ -f "$repo/omniops/node_client.py" && -f "$repo/omniops/__init__.py" ]] || fail 'Run from an updated OmniOps repository.'
 if [[ -n "${OMNIOPS_MASTER_URL:-}" ]]; then
@@ -78,6 +78,20 @@ if [[ ! -e "$state" ]]; then
 fi
 runuser -u omniops-node -- python3 -m omniops.node_client --state "$state" --ca-file "$ca_target" heartbeat || \
   fail 'Enrollment or verified heartbeat failed; service not enabled.'
+ollama_url=http://127.0.0.1:11434
+for candidate in 127.0.0.1 $(hostname -I); do
+  [[ "$candidate" =~ ^[0-9.]+$ ]] || continue
+  if curl --noproxy '*' -fsS --max-time 2 "http://$candidate:11434/api/tags" >/dev/null 2>&1; then
+    ollama_url="http://$candidate:11434"
+    break
+  fi
+done
+python3 - "$ollama_url" <<'PY' || fail 'Ollama URL discovered outside the private network.'
+from omniops.node_client import local_ollama_url
+import os, sys
+os.environ['OMNIOPS_LOCAL_OLLAMA_URL'] = sys.argv[1]
+local_ollama_url()
+PY
 python_path="$(command -v python3)"
 unit=/etc/systemd/system/omniops-worker-node.service
 if [[ -f "$unit" ]] && ! grep -Fxq 'WorkingDirectory=/opt/omniops-node' "$unit"; then
@@ -96,6 +110,7 @@ Group=omniops-node
 WorkingDirectory=/opt/omniops-node
 StateDirectory=omniops-node
 StateDirectoryMode=0700
+Environment=OMNIOPS_LOCAL_OLLAMA_URL=$ollama_url
 ExecStart=$python_path -m omniops.node_client --state $state --ca-file $ca_target run
 Restart=on-failure
 RestartSec=5
