@@ -66,6 +66,9 @@ jobs:
       - name: Check Rust agent
         working-directory: agent/windows-edge/src-tauri
         run: cargo check --locked
+      - name: Test Rust agent URL validation
+        working-directory: agent/windows-edge/src-tauri
+        run: cargo test --locked
       - name: Build NSIS installer
         working-directory: agent/windows-edge
         run: npm run tauri:build -- --config src-tauri/tauri.ci.conf.json
