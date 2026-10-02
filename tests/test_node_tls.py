@@ -13,6 +13,7 @@ from urllib.error import HTTPError
 from unittest.mock import patch
 
 from omniops.identity import IdentityStore
+from omniops.ollama import OllamaError
 from omniops.node_client import NodeClient, save_identity, load_identity
 from omniops.server import make_server
 
@@ -52,11 +53,11 @@ class NodeTlsTests(unittest.TestCase):
                         return response.status, json.load(response)
                 token = send('/api/auth/login', {'username': 'tls-admin',
                              'password': 'a sufficiently strong password'})[1]['token']
-                with patch('omniops.providers.fetch_models', return_value=['gemini-example']):
+                with patch('omniops.providers.fetch_models', return_value=['gemini-example', 'gemini-3.5-flash-lite']):
                     self.assertEqual(send('/api/admin/providers/save', {'kind': 'gemini',
                         'api_key': 'example-gemini-key', 'network_mode': 'socks',
                         'proxy_url': 'socks5h://172.16.20.250:7890'}, token)[0], 200)
-                    self.assertEqual(send('/api/admin/providers/test', {'kind': 'gemini'}, token)[1]['models'], ['gemini-example'])
+                    self.assertEqual(send('/api/admin/providers/test', {'kind': 'gemini'}, token)[1]['models'], ['gemini-example', 'gemini-3.5-flash-lite'])
                 self.assertEqual(send('/api/admin/providers/enable', {'kind': 'gemini', 'enabled': True}, token)[0], 200)
                 self.assertEqual(send('/api/admin/providers/price', {'kind': 'gemini', 'model': 'gemini-example',
                     'input': '0.01', 'output': '0.02'}, token)[0], 200)
@@ -68,6 +69,12 @@ class NodeTlsTests(unittest.TestCase):
                                                     'allow_external': True}, token)[1]
                     self.assertEqual(result['reply'], 'verified TLS reply')
                     self.assertEqual(outbound.call_args.args[3:5], ('socks', 'socks5h://172.16.20.250:7890'))
+                with patch('omniops.ollama.OllamaClient.list_chat_models', side_effect=OllamaError('local unavailable')), \
+                     patch('omniops.providers._provider_post', return_value={
+                         'candidates': [{'content': {'parts': [{'text': 'auto external reply'}]}}]}):
+                    fallback = send('/api/web/chat', {'message': 'hello', 'model': 'auto',
+                                                       'allow_external': True}, token)[1]
+                self.assertEqual(fallback['model'], 'gemini/gemini-3.5-flash-lite')
                 with self.assertRaises(HTTPError) as denied:
                     send('/api/web/chat', {'message': 'hello', 'model': 'gemini/gemini-example'}, token)
                 self.assertEqual(denied.exception.code, 403)
