@@ -20,8 +20,9 @@ ENDPOINTS = {
     'openai': ('api.openai.com', '/v1/models', 'Authorization'),
     'gemini': ('generativelanguage.googleapis.com', '/v1beta/models', 'x-goog-api-key'),
     'anthropic': ('api.anthropic.com', '/v1/models', 'x-api-key'),
+    'openrouter': ('openrouter.ai', '/api/v1/models', 'Authorization'),
 }
-MAX_CATALOG_BYTES = 512 * 1024
+MAX_CATALOG_BYTES = 8 * 1024 * 1024
 
 
 def _cipher(signing_key):
@@ -92,7 +93,17 @@ def _connect_proxy(url, host):
         raise
 
 
-def fetch_models(kind, api_key, mode, proxy_url):
+def _catalog_price_per_million(value):
+    try:
+        amount = Decimal(str(value)) * 1000000
+        if amount.is_finite() and 0 <= amount <= 1000000:
+            return str(amount.quantize(Decimal('0.000001')).normalize())
+    except (InvalidOperation, ValueError):
+        pass
+    return None
+
+
+def fetch_models(kind, api_key, mode, proxy_url, with_prices=False):
     host, path, auth_header = ENDPOINTS[kind]
     try:
         sock = _connect_proxy(proxy_url, host) if mode == 'socks' else socket.create_connection((host, 443), timeout=8)
@@ -103,7 +114,7 @@ def fetch_models(kind, api_key, mode, proxy_url):
                        'Accept': 'application/json'}
             if kind == 'anthropic':
                 headers['anthropic-version'] = '2023-06-01'
-            connection.request('GET', path, headers=headers)
+            connection.request('GET', path + ('?pageSize=1000' if kind == 'gemini' else ''), headers=headers)
             response = connection.getresponse()
             if response.status != 200:
                 raise IdentityError(f'Provider returned HTTP {response.status}', 502)
@@ -115,12 +126,20 @@ def fetch_models(kind, api_key, mode, proxy_url):
             if not isinstance(items, list):
                 raise ValueError('Invalid provider catalog')
             models = []
-            for item in items[:500]:
+            catalog_prices = {}
+            for item in items[:3000]:
                 if isinstance(item, dict):
                     name = item.get('name' if kind == 'gemini' else 'id')
                     if isinstance(name, str) and len(name) <= 160:
-                        models.append(name.removeprefix('models/') if kind == 'gemini' else name)
-            return models
+                        name = name.removeprefix('models/') if kind == 'gemini' else name
+                        models.append(name)
+                        pricing = item.get('pricing')
+                        if kind == 'openrouter' and isinstance(pricing, dict):
+                            input_price = _catalog_price_per_million(pricing.get('prompt'))
+                            output_price = _catalog_price_per_million(pricing.get('completion'))
+                            if input_price is not None and output_price is not None:
+                                catalog_prices[name] = {'input': input_price, 'output': output_price}
+            return (models, catalog_prices) if with_prices else models
         finally:
             connection.close()
     except IdentityError:
@@ -146,6 +165,9 @@ class ProviderRegistry:
                     PRIMARY KEY(kind, model)
                 );
             ''')
+            columns = {row[1] for row in db.execute('PRAGMA table_info(provider_accounts)')}
+            if 'catalog_prices_json' not in columns:
+                db.execute("ALTER TABLE provider_accounts ADD COLUMN catalog_prices_json TEXT NOT NULL DEFAULT '{}'")
 
     def list(self, principal):
         _admin(principal)
@@ -161,7 +183,8 @@ class ProviderRegistry:
                  'proxy_url': accounts[kind]['proxy_url'] if kind in accounts else '',
                  'models': json.loads(accounts[kind]['models_json']) if kind in accounts else [],
                  'tested_at': accounts[kind]['tested_at'] if kind in accounts else None,
-                 'prices': prices.get(kind, {})} for kind in ENDPOINTS]
+                 'prices': prices.get(kind, {}),
+                 'catalog_prices': json.loads(accounts[kind]['catalog_prices_json']) if kind in accounts else {}} for kind in ENDPOINTS]
 
     def save(self, principal, kind, key, mode, proxy_url):
         _admin(principal)
@@ -180,7 +203,7 @@ class ProviderRegistry:
             db.execute('''INSERT INTO provider_accounts (kind,secret,network_mode,proxy_url,updated_at)
                 VALUES (?,?,?,?,?) ON CONFLICT(kind) DO UPDATE SET secret=excluded.secret,
                 network_mode=excluded.network_mode,proxy_url=excluded.proxy_url,
-                enabled=0,models_json='[]',tested_at=NULL,updated_at=excluded.updated_at''',
+                enabled=0,models_json='[]',catalog_prices_json='{}',tested_at=NULL,updated_at=excluded.updated_at''',
                 (kind, secret, mode, proxy_url, int(self.identity.clock())))
             self.identity._audit(db, principal['id'], 'provider_configured', kind)
         return {'status': 'saved'}
@@ -198,10 +221,18 @@ class ProviderRegistry:
             key = _cipher(self.identity.signing_key).decrypt(row['secret'].encode()).decode()
         except (InvalidToken, UnicodeError) as exc:
             raise IdentityError('Provider key cannot be decrypted; enter a new API key', 409) from exc
-        models = fetch_models(kind, key, row['network_mode'], row['proxy_url'])
+        if kind == 'openrouter':
+            models, catalog_prices = fetch_models(kind, key, row['network_mode'], row['proxy_url'], with_prices=True)
+        else:
+            models = fetch_models(kind, key, row['network_mode'], row['proxy_url'])
+            catalog_prices = {}
         with self.identity._lock, self.identity._db() as db:
-            db.execute('UPDATE provider_accounts SET models_json=?,tested_at=? WHERE kind=? AND secret=?',
-                       (json.dumps(models), int(self.identity.clock()), kind, row['secret']))
+            updated = db.execute('''UPDATE provider_accounts SET models_json=?,catalog_prices_json=?,tested_at=?
+                WHERE kind=? AND secret=? AND network_mode=? AND proxy_url=?''',
+                (json.dumps(models), json.dumps(catalog_prices), int(self.identity.clock()), kind,
+                 row['secret'], row['network_mode'], row['proxy_url']))
+            if updated.rowcount != 1:
+                raise IdentityError('Provider changed during test; retry', 409)
             self.identity._audit(db, principal['id'], 'provider_tested', kind)
         return {'models': models, 'network_mode': row['network_mode']}
 

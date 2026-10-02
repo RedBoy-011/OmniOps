@@ -19,10 +19,11 @@ export type ManagedNode = {
 export type ModelPull = { id: string; node_id: string; model: string; action: "pull" | "delete";
   status: "queued" | "running" | "completed" | "failed"; progress: number | null;
   detail: string; created_at: number; updated_at: number };
-export type ApiProvider = { kind: "openai" | "gemini" | "anthropic"; configured: boolean;
+export type ApiProvider = { kind: "openai" | "gemini" | "anthropic" | "openrouter"; configured: boolean;
   enabled: boolean; network_mode: "direct" | "socks"; proxy_url: string;
   models: string[]; tested_at: number | null;
-  prices: Record<string, { input: string; output: string }> };
+  prices: Record<string, { input: string; output: string }>;
+  catalog_prices: Record<string, { input: string; output: string }> };
 export type NodeGrant = { id: string; role: "worker" | "edge"; grant: string; expires_at: number };
 export type Operations = { master: "up"; ollama: { url: string; status: NodeStatus["status"]; models: LocalModel[] }; nodes: NodeStatus[] };
 

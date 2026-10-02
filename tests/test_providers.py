@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from omniops.identity import IdentityError, IdentityStore
-from omniops.providers import ProviderRegistry, _proxy, _connect_proxy, fetch_models
+from omniops.providers import ProviderRegistry, _proxy, _connect_proxy, fetch_models, _catalog_price_per_million
 from omniops.server import make_server
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
@@ -37,6 +37,33 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(next(p for p in response if p['kind'] == 'gemini')['prices']['gemini-example']['input'], '0.25')
         self.providers.save(self.admin, 'gemini', None, 'direct', '')
         self.assertFalse(next(p for p in self.providers.list(self.admin) if p['kind'] == 'gemini')['enabled'])
+
+    def test_openrouter_catalog_prices_are_opt_in_and_not_credentials(self):
+        self.providers.save(self.admin, 'openrouter', 'example-openrouter-key', 'direct', '')
+        catalog = {'openai/gpt-example': {'input': '0.3', 'output': '1.2'}}
+        with patch('omniops.providers.fetch_models', return_value=(['openai/gpt-example'], catalog)) as fetch:
+            result = self.providers.test(self.admin, 'openrouter')
+            fetch.assert_called_once_with('openrouter', 'example-openrouter-key', 'direct', '', with_prices=True)
+        self.assertEqual(result['models'], ['openai/gpt-example'])
+        listed = next(p for p in self.providers.list(self.admin) if p['kind'] == 'openrouter')
+        self.assertEqual(listed['catalog_prices'], catalog)
+        self.assertEqual(listed['prices'], {})
+        self.assertEqual(_catalog_price_per_million('0.0000003'), '0.3')
+        self.assertIsNone(_catalog_price_per_million('NaN'))
+        self.providers.price(self.admin, 'openrouter', 'openai/gpt-example', '0.3', '1.2')
+        self.assertEqual(next(p for p in self.providers.list(self.admin) if p['kind'] == 'openrouter')['prices']['openai/gpt-example']['output'], '1.2')
+
+    def test_catalog_test_does_not_reenable_reconfigured_route(self):
+        self.providers.save(self.admin, 'openrouter', 'example-openrouter-key', 'direct', '')
+        def switched_route(*args, **kwargs):
+            self.providers.save(self.admin, 'openrouter', None, 'socks', 'socks5h://172.16.20.250:7890')
+            return ['openai/gpt-example'], {}
+        with patch('omniops.providers.fetch_models', side_effect=switched_route):
+            with self.assertRaisesRegex(IdentityError, 'changed during test'):
+                self.providers.test(self.admin, 'openrouter')
+        account = next(p for p in self.providers.list(self.admin) if p['kind'] == 'openrouter')
+        self.assertIsNone(account['tested_at'])
+        self.assertFalse(account['enabled'])
 
     def test_price_and_network_validation(self):
         self.providers.save(self.admin, 'openai', 'example-openai-key', 'direct', '')
