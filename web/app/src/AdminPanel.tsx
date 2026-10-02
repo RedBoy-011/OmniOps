@@ -154,10 +154,10 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
         </motion.div>
       )}</AnimatePresence>
       <div className="admin-wrap">
-        <header className="admin-header glass"><div className="flex items-center gap-3"><span className="brand-mark">✦</span><strong>OmniOps</strong><span className="text-white/45 text-xs">/ فضای مدیریت سازمان</span></div><div className="flex items-center gap-4"><span className="text-sm text-white/65">{user.username}</span><button className="quiet-button" onClick={onLogout}>خروج امن</button></div></header>
-        <div className="admin-hero"><span className="form-eyebrow">CONTROL PLANE / ACCESS</span><h1>مدیریت دسترسی و ایجنت‌ها</h1><p>هر قابلیت بر اساس پروفایل کاربر فعال می‌شود. تأیید ثبت‌نام به‌تنهایی اجازهٔ اجرای ابزار نمی‌دهد.</p></div>
+        <header className="admin-header glass"><div className="flex items-center gap-3"><span className="brand-mark">✦</span><strong>OmniOps</strong><span className="text-white/45 text-xs">{user.role === "superadmin" ? "/ مدیریت سازمان" : "/ فضای کار شخصی"}</span></div><div className="flex items-center gap-4"><span className="text-sm text-white/65">{user.username}</span><button className="quiet-button" onClick={onLogout}>خروج امن</button></div></header>
+        <div className="admin-hero"><span className="form-eyebrow">CONTROL PLANE / ACCESS</span><h1>{user.role === "superadmin" ? "مدیریت دسترسی و ایجنت‌ها" : "فضای گفت‌وگو و ایجنت شما"}</h1><p>{user.role === "superadmin" ? "هر قابلیت بر اساس پروفایل کاربر فعال می‌شود." : "گفت‌وگو، حافظه و دستگاه‌های متصل به پروفایل شما وابسته‌اند."}</p></div>
         <div className="admin-grid">
-          <section className="glass admin-card"><div className="card-title"><div><h2>درخواست‌های ثبت‌نام</h2><p>نام کاربری و موبایل پس از درخواست مدیر نمایش داده می‌شوند.</p></div><span className="count-pill">{count.toLocaleString("fa-IR")} در انتظار</span></div>
+          {user.role === "superadmin" && <section className="glass admin-card"><div className="card-title"><div><h2>درخواست‌های ثبت‌نام</h2><p>نام کاربری و موبایل پس از درخواست مدیر نمایش داده می‌شوند.</p></div><span className="count-pill">{count.toLocaleString("fa-IR")} در انتظار</span></div>
             {user.role !== "superadmin" ? <p className="empty-note">این بخش تنها برای مدیر کل با مجوز تأیید نمایش داده می‌شود.</p> : pending.length === 0 ? <p className="empty-note">درخواستی در انتظار تأیید نیست.</p> : (
               <div className="pending-list">{pending.map((person) => (
                 <article className="pending-user" key={person.id}>
@@ -169,7 +169,7 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
                 </article>
               ))}</div>
             )}
-          </section>
+          </section>}
           <section className="glass admin-card"><div className="card-title"><div><h2>اتصال موقت ایجنت ویندوز</h2><p>کد یک‌بارمصرف ۶ رقمی فقط ۲ دقیقه اعتبار دارد.</p></div></div>
             {!user.capabilities.includes("agent.pair") ? <p className="empty-note">پروفایل شما مجوز اتصال ایجنت ندارد.</p> : <>
               <button className="submit-button" onClick={createPair}>صدور کد اتصال تازه</button>

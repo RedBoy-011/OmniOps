@@ -20,6 +20,7 @@ from .ollama import OllamaClient, OllamaError
 from .local_routing import choose_local_chat_model
 from .nodes import NodeRegistry
 from .providers import ProviderRegistry
+from .profile_memory import ProfileMemory
 
 MAX_BODY_BYTES = 64 * 1024
 LAN_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
@@ -48,6 +49,7 @@ def make_server(
     OllamaClient(ollama_url)
     nodes = NodeRegistry(identity_store) if identity_store else None
     providers = ProviderRegistry(identity_store) if identity_store else None
+    memory = ProfileMemory(identity_store) if identity_store else None
 
     def current_ollama() -> OllamaClient:
         endpoint = identity_store.ollama_endpoint() if identity_store else None
@@ -89,6 +91,15 @@ def make_server(
             if type(allow_external) is not bool:
                 raise IdentityError('External consent must be a boolean')
 
+            save_history = payload.get('save_history', False)
+            if type(save_history) is not bool:
+                raise IdentityError('History choice must be a boolean')
+
+            def completed(result):
+                if save_history and memory is not None:
+                    memory.remember_chat(principal, prompt.strip(), result['reply'], result['model'])
+                return result
+
             def external(model):
                 if not allow_external:
                     raise IdentityError('Explicit external data consent required', 403)
@@ -96,7 +107,7 @@ def make_server(
                     raise IdentityError('Direct TLS 1.3 required for external chat', 426)
                 if providers is None:
                     raise IdentityError('Provider registry unavailable', 503)
-                return providers.complete(principal, model, prompt.strip())
+                return completed(providers.complete(principal, model, prompt.strip()))
 
             if requested.startswith(('gemini/', 'openrouter/')):
                 return external(requested)
@@ -119,7 +130,7 @@ def make_server(
             for candidate in candidates:
                 try:
                     answer = client.chat(candidate, [{'role': 'user', 'content': prompt.strip()}])
-                    return {'reply': answer, 'model': f'ollama/{candidate}'}
+                    return completed({'reply': answer, 'model': f'ollama/{candidate}'})
                 except OllamaError as exc:
                     last_error = exc
             if requested == 'auto' and allow_external and providers is not None:
@@ -246,12 +257,14 @@ def make_server(
             if path not in {
                 "/api/auth/register", "/api/auth/login", "/api/auth/logout",
                 "/api/agent/pairing", "/api/agent/redeem", "/api/agent/heartbeat", "/api/agent/logout", "/api/agent/chat", "/api/web/chat",
+                "/api/chat/history/clear", "/api/chat/memory/add", "/api/chat/memory/remove",
+                "/api/agent/history/clear", "/api/agent/memory/add", "/api/agent/memory/remove",
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/enable", "/api/admin/providers/price",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
-            audience = "agent" if path in {"/api/agent/heartbeat", "/api/agent/logout", "/api/agent/chat"} else "web"
+            audience = "agent" if path.startswith("/api/agent/") and path != "/api/agent/pairing" else "web"
             principal = None
             if path not in {"/api/auth/register", "/api/auth/login", "/api/agent/redeem"}:
                 principal = self._principal(audience)
@@ -310,6 +323,14 @@ def make_server(
                     self._send(200, {"url": candidate.base_url, "status": "up", "models": [
                         {"id": f"ollama/{entry.name}", "size_bytes": entry.size_bytes} for entry in models
                     ]})
+                elif path in ('/api/chat/history/clear', '/api/agent/history/clear'):
+                    memory.delete_history(principal)
+                    self._send(200, {'status': 'cleared'})
+                elif path in ('/api/chat/memory/add', '/api/agent/memory/add'):
+                    self._send(201, {'id': memory.add_note(principal, payload.get('content'))})
+                elif path in ('/api/chat/memory/remove', '/api/agent/memory/remove'):
+                    memory.remove_note(principal, payload.get('id'))
+                    self._send(200, {'status': 'removed'})
                 elif path in ('/api/agent/chat', '/api/web/chat'):
                     self._send(200, self._answer_chat(principal, payload))
                 else:
@@ -324,6 +345,18 @@ def make_server(
                 self._send(503, {"error": {"message": str(exc)}})
 
         def do_GET(self):
+            if self.path in ('/api/chat/history', '/api/chat/memory', '/api/agent/history', '/api/agent/memory'):
+                principal = self._principal('agent' if self.path.startswith('/api/agent/') else 'web')
+                if principal is None:
+                    return
+                try:
+                    if self.path.endswith('/history'):
+                        self._send(200, {'entries': memory.history(principal)})
+                    else:
+                        self._send(200, {'notes': memory.notes(principal)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                return
             if self.path == '/api/admin/providers':
                 if not self._node_channel():
                     return

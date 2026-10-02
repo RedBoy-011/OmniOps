@@ -256,3 +256,15 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 @media (max-width: 470px) { .provider-price-fields { grid-template-columns: 1fr; } .provider-card-heading { flex-wrap: wrap; } .provider-state { margin-inline-start: 0; } .chat-presence { margin-right: auto; } .web-chat-entry { max-width: 96%; } .web-chat-controls select { flex-basis: 100%; } .chat-composer-foot button { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .chat-typing i, .chat-presence.connected i { animation: none; } .provider-card { transition: none; } }
 .chat-external-consent { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border: 1px solid #e9a1bd55; border-radius: 14px; background: #2615229e; font-size: 12px; cursor: pointer; } .chat-external-consent input { width: 17px; height: 17px; accent-color: #d96489; margin-top: 3px; } .chat-external-consent span { display: grid; gap: 5px; } .chat-external-consent small { color: #dac1cf; font-size: 11px; line-height: 1.7; }
+
+/* Hafeeze-ye har profile dar panel-e chat. */
+.chat-memory-tools { border: 1px solid rgba(255,255,255,.09); border-radius: 20px; background: rgba(18,18,25,.36); padding: 16px; display: grid; gap: 12px; }
+.chat-memory-heading { display: flex; align-items: baseline; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+.chat-memory-heading small { color: rgba(255,255,255,.55); }
+.chat-memory-form { display: flex; gap: 8px; }
+.chat-memory-form input { flex: 1; min-width: 0; padding: 10px 14px; border: 1px solid rgba(255,255,255,.17); border-radius: 14px; background: rgba(0,0,0,.22); color: #fff; }
+.chat-memory-list { display: grid; gap: 6px; max-height: 160px; overflow: auto; }
+.chat-memory-item, .chat-history-options { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.chat-memory-item { justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 6px; overflow-wrap: anywhere; }
+.chat-history-options label { display: inline-flex; align-items: center; gap: 7px; margin-inline-end: auto; }
+@media (max-width: 600px) { .chat-memory-form, .chat-history-options { width: 100%; } .chat-memory-tools { padding: 12px; } }

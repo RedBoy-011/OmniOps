@@ -7,6 +7,8 @@ type AgentProfile = { id: string; username: string; role: string; status: string
 type AgentStatus = { connected: boolean; profile: AgentProfile | null };
 type ChatReply = { reply: string; model: string };
 type ModelList = { models: string[] };
+type MemoryNote = { id: string; content: string; created_at: number };
+type HistoryEntry = { id: string; prompt: string; reply: string; model: string; created_at: number };
 type Line = { sender: "user" | "assistant"; text: string; model?: string };
 
 function digits(value: string) {
@@ -32,6 +34,11 @@ export default function App() {
   const [prompt, setPrompt] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
   const [sending, setSending] = useState(false);
+  const [saveHistory, setSaveHistory] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [memoryBusy, setMemoryBusy] = useState(false);
+  const [memoryNotes, setMemoryNotes] = useState<MemoryNote[]>([]);
+  const [memoryDraft, setMemoryDraft] = useState("");
   const [compact, setCompact] = useState(false);
   const [pane, setPane] = useState<"overview" | "chat">("overview");
   const [exitDialog, setExitDialog] = useState(false);
@@ -61,6 +68,10 @@ export default function App() {
             connected.current = false;
             sessionGeneration.current += 1;
             setLines([]);
+            setMemoryNotes([]);
+            setMemoryOpen(false);
+            setSaveHistory(false);
+            setMemoryDraft("");
             setPrompt("");
             setSending(false);
           }
@@ -203,6 +214,10 @@ export default function App() {
     catch { /* Khoroje mahalli bayad hata ba khataye shabake anjam shavad. */ }
     setProfile(null);
     setLines([]);
+    setMemoryNotes([]);
+    setMemoryOpen(false);
+    setSaveHistory(false);
+    setMemoryDraft("");
     setPrompt("");
     setPin("");
     attempt.current = "";
@@ -225,7 +240,7 @@ export default function App() {
     setLines((before) => [...before, { sender: "user", text }]);
     setSending(true);
     try {
-      const result = await invoke<ChatReply>("send_agent_chat", { message: text, model: selectedModel });
+      const result = await invoke<ChatReply>("send_agent_chat", { message: text, model: selectedModel, saveHistory });
       if (sessionGeneration.current === generation) {
         setLines((before) => [...before, { sender: "assistant", text: result.reply, model: result.model }]);
       }
@@ -238,6 +253,69 @@ export default function App() {
     }
   }
 
+  async function showMemory() {
+    if (memoryOpen) { setMemoryOpen(false); return; }
+    setMemoryBusy(true);
+    const generation = sessionGeneration.current;
+    try {
+      const result = await invoke<{ notes: MemoryNote[] }>("agent_memory");
+      if (generation === sessionGeneration.current) { setMemoryNotes(result.notes); setMemoryOpen(true); setError(""); }
+    } catch { if (generation === sessionGeneration.current) setError("حافظهٔ حساب دریافت نشد."); }
+    finally { if (generation === sessionGeneration.current) setMemoryBusy(false); }
+  }
+
+  async function addMemory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const content = memoryDraft.trim();
+    if (!content || memoryBusy) return;
+    const generation = sessionGeneration.current;
+    setMemoryBusy(true);
+    try {
+      await invoke("agent_add_memory", { content });
+      const result = await invoke<{ notes: MemoryNote[] }>("agent_memory");
+      if (generation === sessionGeneration.current) { setMemoryNotes(result.notes); setMemoryDraft(""); setError(""); }
+    } catch { if (generation === sessionGeneration.current) setError("یادداشت ثبت نشد."); }
+    finally { if (generation === sessionGeneration.current) setMemoryBusy(false); }
+  }
+
+  async function removeMemory(id: string) {
+    const generation = sessionGeneration.current;
+    setMemoryBusy(true);
+    try {
+      await invoke("agent_remove_memory", { id });
+      const result = await invoke<{ notes: MemoryNote[] }>("agent_memory");
+      if (generation === sessionGeneration.current) { setMemoryNotes(result.notes); setError(""); }
+    } catch { if (generation === sessionGeneration.current) setError("حذف یادداشت ممکن نشد."); }
+    finally { if (generation === sessionGeneration.current) setMemoryBusy(false); }
+  }
+
+  async function loadHistory() {
+    const generation = sessionGeneration.current;
+    setMemoryBusy(true);
+    try {
+      const result = await invoke<{ entries: HistoryEntry[] }>("agent_history");
+      if (generation === sessionGeneration.current) {
+        setLines(result.entries.flatMap(entry => [
+          { sender: "user" as const, text: entry.prompt },
+          { sender: "assistant" as const, text: entry.reply, model: entry.model },
+        ]));
+        setMemoryOpen(false);
+        setError("");
+      }
+    } catch { if (generation === sessionGeneration.current) setError("تاریخچه دریافت نشد."); }
+    finally { if (generation === sessionGeneration.current) setMemoryBusy(false); }
+  }
+
+  async function clearHistory() {
+    if (!window.confirm("تاریخچهٔ ذخیره‌شدهٔ این حساب حذف شود؟")) return;
+    const generation = sessionGeneration.current;
+    setMemoryBusy(true);
+    try {
+      await invoke("agent_clear_history");
+      if (generation === sessionGeneration.current) { setLines([]); setError(""); }
+    } catch { if (generation === sessionGeneration.current) setError("حذف تاریخچه ممکن نشد."); }
+    finally { if (generation === sessionGeneration.current) setMemoryBusy(false); }
+  }
   return (
     <main className={`agent-frame ${compact && phase === "chat" ? "agent-frame--compact" : ""}`} dir="rtl">
       {compact && phase === "chat" ? (
@@ -278,7 +356,10 @@ export default function App() {
           <motion.section key="chat" className="chat-view" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .3 }}>
             <div className="session-line"><div><strong>{profile?.username}</strong><small>{profile?.capabilities.includes("chat") ? "گفت‌وگو فعال" : "پروفایل بدون دسترسی چت"}</small></div><button className="logout-button" onClick={() => void disconnect()}>خروج و قطع ارتباط</button></div>
             <nav className="agent-tabs" aria-label="بخش‌های ایجنت"><button className={pane === "overview" ? "selected" : ""} onClick={() => setPane("overview")} aria-current={pane === "overview" ? "page" : undefined}>نمای کلی</button><button className={pane === "chat" ? "selected" : ""} onClick={() => setPane("chat")} aria-current={pane === "chat" ? "page" : undefined}>گفت‌وگو</button><button className="compact-action" onClick={() => setCompact(true)} aria-label="جمع کردن ایجنت">جمع کردن ↑</button></nav>
-            {pane === "overview" ? <div className="overview-space"><div className="overview-symbol" aria-hidden="true">✦</div><h1>ایجنت آمادهٔ همکاری است</h1><p>نشست {profile?.username} برقرار است. پنجره را جمع کنید یا کنار ساعت پنهان کنید؛ ارتباط در حافظهٔ برنامه می‌ماند.</p><div className="overview-grid"><div className="overview-card"><span className="overview-led" />هستهٔ مرکزی<strong>متصل</strong></div><div className="overview-card"><span className="overview-led muted" />ابزارهای دستگاه<strong>در حال توسعه</strong></div></div><button className="overview-chat" onClick={() => setPane("chat")} disabled={!profile?.capabilities.includes("chat")}>رفتن به گفت‌وگو ←</button></div> : <><div className="model-row"><label htmlFor="agent-model">مدل</label><select id="agent-model" dir="ltr" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} disabled={sending || !profile?.capabilities.includes("chat")}><option value="auto">هوشمند محلی (مدل مناسب گفت‌وگو)</option>{models.map((model) => <option key={model} value={model}>{model}</option>)}</select><button type="button" onClick={() => { void invoke<ModelList>("list_agent_models").then((result) => { setModels(result.models); setSelectedModel((current) => current === "auto" || result.models.includes(current) ? current : "auto"); setModelError(result.models.length ? "" : "مدل محلی نصب نشده است."); }).catch(() => setModelError("فهرست مدل‌ها در دسترس نیست.")); }} aria-label="به‌روزرسانی فهرست مدل‌ها">↻</button></div>{modelError && <p className="model-error">{modelError}</p>}<div className="chat-lines" aria-live="polite">{lines.length === 0 && <p className="empty-chat">با هسته گفتگو کنید.<br />برای پاسخ هوشمند، یک مدل Ollama باید روی سرور فعال باشد.</p>}{lines.map((line, index) => <div key={index} className={`chat-bubble ${line.sender}`}><p>{line.text}</p>{line.model && <small dir="ltr">{line.model}</small>}</div>)}</div><form className="chat-composer" onSubmit={send}><input aria-label="پیام" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="پیام خود را بنویسید…" disabled={!profile?.capabilities.includes("chat") || sending} /><button disabled={sending || !profile?.capabilities.includes("chat")}>{sending ? "…" : "↵"}</button></form></>}
+            {pane === "overview" ? <div className="overview-space"><div className="overview-symbol" aria-hidden="true">✦</div><h1>ایجنت آمادهٔ همکاری است</h1><p>نشست {profile?.username} برقرار است. پنجره را جمع کنید یا کنار ساعت پنهان کنید؛ ارتباط در حافظهٔ برنامه می‌ماند.</p><div className="overview-grid"><div className="overview-card"><span className="overview-led" />هستهٔ مرکزی<strong>متصل</strong></div><div className="overview-card"><span className="overview-led muted" />ابزارهای دستگاه<strong>در حال توسعه</strong></div></div><button className="overview-chat" onClick={() => setPane("chat")} disabled={!profile?.capabilities.includes("chat")}>رفتن به گفت‌وگو ←</button></div> : <><div className="model-row"><label htmlFor="agent-model">مدل</label><select id="agent-model" dir="ltr" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} disabled={sending || !profile?.capabilities.includes("chat")}><option value="auto">هوشمند محلی (مدل مناسب گفت‌وگو)</option>{models.map((model) => <option key={model} value={model}>{model}</option>)}</select><button type="button" onClick={() => { void invoke<ModelList>("list_agent_models").then((result) => { setModels(result.models); setSelectedModel((current) => current === "auto" || result.models.includes(current) ? current : "auto"); setModelError(result.models.length ? "" : "مدل محلی نصب نشده است."); }).catch(() => setModelError("فهرست مدل‌ها در دسترس نیست.")); }} aria-label="به‌روزرسانی فهرست مدل‌ها">↻</button></div>{modelError && <p className="model-error">{modelError}</p>}
+            <div className="agent-memory-controls"><label><input type="checkbox" checked={saveHistory} onChange={event => setSaveHistory(event.target.checked)} /> ذخیرهٔ گفتگوهای بعدی</label><button type="button" disabled={memoryBusy || !profile?.capabilities.includes("chat")} onClick={() => void showMemory()}>{memoryOpen ? "بستن حافظه" : "حافظهٔ من"}</button><button type="button" disabled={memoryBusy || !profile?.capabilities.includes("chat")} onClick={() => void loadHistory()}>تاریخچه</button><button type="button" disabled={memoryBusy || !profile?.capabilities.includes("chat")} onClick={() => void clearHistory()}>پاک‌کردن</button></div>
+            {memoryOpen && <section className="agent-memory-panel" aria-label="یادداشت‌های شخصی"><small>یادداشت‌ها فقط در حساب شما هستند و فعلاً به مدل فرستاده نمی‌شوند.</small><form onSubmit={(event) => void addMemory(event)}><input aria-label="یادداشت شخصی" value={memoryDraft} maxLength={500} onChange={event => setMemoryDraft(event.target.value)} placeholder="یک نکته برای پروفایل خود…" /><button disabled={memoryBusy || !memoryDraft.trim()} type="submit">ثبت</button></form><div className="agent-memory-list">{memoryNotes.map(note => <div key={note.id}><span>{note.content}</span><button type="button" disabled={memoryBusy} onClick={() => void removeMemory(note.id)} aria-label="حذف یادداشت">حذف</button></div>)}</div></section>}
+            <div className="chat-lines" aria-live="polite">{lines.length === 0 && <p className="empty-chat">با هسته گفتگو کنید.<br />برای پاسخ هوشمند، یک مدل Ollama باید روی سرور فعال باشد.</p>}{lines.map((line, index) => <div key={index} className={`chat-bubble ${line.sender}`}><p>{line.text}</p>{line.model && <small dir="ltr">{line.model}</small>}</div>)}</div><form className="chat-composer" onSubmit={send}><input aria-label="پیام" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="پیام خود را بنویسید…" disabled={!profile?.capabilities.includes("chat") || sending} /><button disabled={sending || !profile?.capabilities.includes("chat")}>{sending ? "…" : "↵"}</button></form></>}
             {error && <p className="agent-error" role="alert">{error}</p>}
           </motion.section>
         )}

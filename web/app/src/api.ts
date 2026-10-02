@@ -6,6 +6,8 @@ export type Profile = {
   capabilities: string[];
 };
 
+export type ChatHistory = { id: string; prompt: string; reply: string; model: string; created_at: number };
+export type MemoryNote = { id: string; content: string; created_at: number };
 export type PendingUser = { id: string; username: string; mobile: string; created_at: number };
 export type LoginResult = { token: string; user: Profile; pending_count: number };
 export type LocalModel = { id: string; size_bytes: number | null };
@@ -57,7 +59,12 @@ export const api = {
   pending: () => request<{ users: PendingUser[] }>("/api/admin/pending"),
   operations: () => request<Operations>("/api/admin/operations"),
   webModels: () => request<{ models: string[] }>("/api/web/models"),
-  webChat: (message: string, model: string, allow_external = false) => request<{ reply: string; model: string }>("/api/web/chat", "POST", { message, model, allow_external }),
+  webChat: (message: string, model: string, allow_external = false, save_history = false) => request<{ reply: string; model: string }>("/api/web/chat", "POST", { message, model, allow_external, save_history }),
+  chatHistory: () => request<{ entries: ChatHistory[] }>("/api/chat/history"),
+  clearChatHistory: () => request<{ status: string }>("/api/chat/history/clear", "POST", {}),
+  memoryNotes: () => request<{ notes: MemoryNote[] }>("/api/chat/memory"),
+  addMemory: (content: string) => request<{ id: string }>("/api/chat/memory/add", "POST", { content }),
+  removeMemory: (id: string) => request<{ status: string }>("/api/chat/memory/remove", "POST", { id }),
   managedNodes: () => request<{ nodes: ManagedNode[] }>("/api/admin/nodes"),
   modelPulls: () => request<{ jobs: ModelPull[] }>("/api/admin/nodes/model-pulls"),
   createModelPull: (node_id: string, model: string) => request<{ id: string; status: string }>("/api/admin/nodes/model-pulls", "POST", { node_id, model }),

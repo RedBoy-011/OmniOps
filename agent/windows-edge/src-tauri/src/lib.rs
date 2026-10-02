@@ -202,6 +202,7 @@ fn session_status(state: State<'_, SharedState>) -> Result<AgentStatus, String> 
 async fn send_agent_chat(
     message: String,
     model: String,
+    save_history: bool,
     state: State<'_, SharedState>,
 ) -> Result<ChatResponse, String> {
     if message.trim().is_empty() || message.chars().count() > 8000 {
@@ -221,7 +222,7 @@ async fn send_agent_chat(
     let response = http_client()?
         .post(format!("{origin}/api/agent/chat"))
         .bearer_auth(token.as_str())
-        .json(&serde_json::json!({ "message": message, "model": model }))
+        .json(&serde_json::json!({ "message": message, "model": model, "save_history": save_history }))
         .send()
         .await
         .map_err(|_| "ارتباط با هسته قطع است".to_string())?;
@@ -232,6 +233,101 @@ async fn send_agent_chat(
         .json::<ChatResponse>()
         .await
         .map_err(|_| "پاسخ گفتگو معتبر نیست".into())
+}
+
+async fn memory_call(
+    state: State<'_, SharedState>,
+    method: reqwest::Method,
+    route: &'static str,
+    body: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let (origin, token, generation) = {
+        let guard = state.session.lock().map_err(|_| "Session unavailable")?;
+        let session = guard.as_ref().ok_or("Sign in first")?;
+        if !session.profile.capabilities.iter().any(|cap| cap == "chat") {
+            return Err("Chat permission required".into());
+        }
+        (
+            session.master_url.clone(),
+            session.token.clone(),
+            session.generation,
+        )
+    };
+    let client = http_client()?;
+    let mut request = client
+        .request(method, format!("{origin}{route}"))
+        .bearer_auth(token.as_str());
+    if let Some(value) = body {
+        request = request.json(&value);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|_| "Master connection failed")?;
+    if !response.status().is_success() {
+        return Err(format!("Memory request failed ({})", response.status()));
+    }
+    let result = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|_| "Invalid memory response")?;
+    let guard = state.session.lock().map_err(|_| "Session unavailable")?;
+    if guard
+        .as_ref()
+        .is_none_or(|session| session.generation != generation)
+    {
+        return Err("Session ended".into());
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+async fn agent_history(state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
+    memory_call(state, reqwest::Method::GET, "/api/agent/history", None).await
+}
+
+#[tauri::command]
+async fn agent_clear_history(state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
+    memory_call(
+        state,
+        reqwest::Method::POST,
+        "/api/agent/history/clear",
+        Some(serde_json::json!({})),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn agent_memory(state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
+    memory_call(state, reqwest::Method::GET, "/api/agent/memory", None).await
+}
+
+#[tauri::command]
+async fn agent_add_memory(
+    content: String,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    memory_call(
+        state,
+        reqwest::Method::POST,
+        "/api/agent/memory/add",
+        Some(serde_json::json!({"content": content})),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn agent_remove_memory(
+    id: String,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    memory_call(
+        state,
+        reqwest::Method::POST,
+        "/api/agent/memory/remove",
+        Some(serde_json::json!({"id": id})),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -415,6 +511,11 @@ pub fn run() {
             read_pairing_clipboard,
             session_status,
             send_agent_chat,
+            agent_history,
+            agent_clear_history,
+            agent_memory,
+            agent_add_memory,
+            agent_remove_memory,
             list_agent_models,
             disconnect_agent,
             hide_agent,

@@ -55,6 +55,24 @@ class IdentityGatewayTests(unittest.TestCase):
             finally:
                 error.close()
 
+    def test_opt_in_chat_history_and_profile_memory_endpoints(self):
+        admin = self.store.login("root-admin", "a very strong admin password")["token"]
+        self.assertEqual(self.call("GET", "/api/chat/history")[0], 401)
+        self.assertEqual(self.call("GET", "/api/chat/history", token=admin), (200, {"entries": []}))
+        status, answer = self.call("POST", "/api/web/chat", {"message": "hello"}, admin)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.call("GET", "/api/chat/history", token=admin)[1]["entries"], [])
+        self.assertEqual(self.call("POST", "/api/web/chat", {"message": "hello", "save_history": True}, admin)[0], 200)
+        history = self.call("GET", "/api/chat/history", token=admin)[1]["entries"]
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["reply"], answer["reply"])
+        status, note = self.call("POST", "/api/chat/memory/add", {"content": "prefers short answers"}, admin)
+        self.assertEqual(status, 201)
+        self.assertEqual(len(self.call("GET", "/api/chat/memory", token=admin)[1]["notes"]), 1)
+        self.assertEqual(self.call("POST", "/api/chat/memory/remove", {"id": note["id"]}, admin)[0], 200)
+        self.assertEqual(self.call("POST", "/api/chat/history/clear", {}, admin)[0], 200)
+        self.assertEqual(self.call("GET", "/api/chat/history", token=admin)[1]["entries"], [])
+
     def test_node_identity_endpoints_reject_http_even_with_forwarded_header(self):
         token = self.store.login("root-admin", "a very strong admin password")["token"]
         self.assertEqual(self.call("POST", "/api/admin/nodes/grants", {"role": "worker"}, token)[0], 426)
@@ -113,6 +131,15 @@ class IdentityGatewayTests(unittest.TestCase):
         self.assertEqual(self.call('POST', '/api/web/chat', {'message': 'سلام'}, member_token)[1]['reply'], 'پاسخ واقعی آزمایشی')
         self.assertEqual(self.call('GET', '/api/web/models')[0], 401)
         agent_token = paired["token"]
+        self.assertEqual(self.call("GET", "/api/agent/history", token=member_token)[0], 401)
+        self.assertEqual(self.call("GET", "/api/chat/history", token=agent_token)[0], 401)
+        self.assertEqual(self.call("POST", "/api/agent/chat", {"message": "private", "save_history": True}, agent_token)[0], 200)
+        self.assertEqual(len(self.call("GET", "/api/agent/history", token=agent_token)[1]["entries"]), 1)
+        self.assertEqual(len(self.call("GET", "/api/chat/history", token=member_token)[1]["entries"]), 1)
+        self.assertEqual(self.call("GET", "/api/chat/history", token=admin_token)[1]["entries"], [])
+        self.assertEqual(self.call("POST", "/api/agent/memory/add", {"content": "private note"}, agent_token)[0], 201)
+        self.assertEqual(len(self.call("GET", "/api/chat/memory", token=member_token)[1]["notes"]), 1)
+        self.assertEqual(self.call("GET", "/api/chat/memory", token=admin_token)[1]["notes"], [])
         self.assertEqual(self.call("GET", "/api/agent/models", token=member_token)[0], 401)
         code, model_list = self.call("GET", "/api/agent/models", token=agent_token)
         self.assertEqual(code, 200)
