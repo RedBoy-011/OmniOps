@@ -2,6 +2,7 @@ use reqwest::{redirect::Policy, Client, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    net::Ipv4Addr,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -72,14 +73,24 @@ impl SharedState {
 fn master_origin(value: &str) -> Result<String, String> {
     let url = Url::parse(value.trim()).map_err(|_| "آدرس هستهٔ مرکزی معتبر نیست".to_string())?;
     let loopback = matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
-    if (url.scheme() != "https" && !(url.scheme() == "http" && loopback))
+    let private_lan = url
+        .host_str()
+        .and_then(|host| host.parse::<Ipv4Addr>().ok())
+        .is_some_and(|ip| {
+            let [a, b, ..] = ip.octets();
+            a == 10 || (a == 172 && (16..=31).contains(&b)) || (a == 192 && b == 168)
+        });
+    if (url.scheme() != "https" && !(url.scheme() == "http" && (loopback || private_lan)))
         || url.username() != ""
         || url.password().is_some()
         || url.path() != "/"
         || url.query().is_some()
         || url.fragment().is_some()
     {
-        return Err("آدرس هسته باید HTTPS باشد؛ HTTP فقط برای localhost مجاز است".into());
+        return Err(
+            "آدرس هسته باید HTTPS باشد؛ HTTP فقط برای localhost یا نشانی خصوصی شبکهٔ داخلی مجاز است"
+                .into(),
+        );
     }
     Ok(url.as_str().trim_end_matches('/').to_owned())
 }
@@ -459,4 +470,30 @@ pub fn run() {
             revoke_on_exit(handle);
         }
     });
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::master_origin;
+
+    #[test]
+    fn accepts_private_lan_and_secure_master_urls() {
+        assert!(master_origin("http://172.19.30.10:9000").is_ok());
+        assert!(master_origin("http://10.88.0.1:9000").is_ok());
+        assert!(master_origin("https://edge.example.com").is_ok());
+    }
+
+    #[test]
+    fn rejects_public_http_and_embedded_credentials() {
+        for url in [
+            "http://8.8.8.8:9000",
+            "http://0.0.0.0:9000",
+            "http://172.32.0.1:9000",
+            "http://user:pass@10.0.0.1:9000",
+            "http://10.0.0.1:9000/api",
+            "http://10.0.0.1:9000/?key=1",
+        ] {
+            assert!(master_origin(url).is_err(), "{url}");
+        }
+    }
 }

@@ -38,6 +38,35 @@ class UpgradeConfigTests(unittest.TestCase):
             with closing(sqlite3.connect(saved[0])) as database:
                 self.assertEqual(database.execute("SELECT name FROM admins").fetchone()[0], "existing-admin")
 
+    def test_existing_config_changes_only_bind_and_preserves_keys_and_database(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            repo = root / "repo"
+            repo.mkdir()
+            database = repo / "identity.db"
+            with closing(sqlite3.connect(database)) as db:
+                db.execute("CREATE TABLE admins (name TEXT)")
+                db.execute("INSERT INTO admins VALUES ('existing-admin')")
+                db.commit()
+            config = root / "master.env"
+            config.write_text(f'OMNIOPS_API_KEY={"a" * 40}\nOMNIOPS_SIGNING_KEY={"b" * 48}\nOMNIOPS_DB_PATH="{database}"\n', encoding="utf-8")
+            os.chmod(config, 0o600)
+            proc = root / "proc"
+            proc.mkdir()
+            with patch.dict(os.environ, {"OMNIOPS_BIND_HOST": "172.19.30.10"}):
+                prepare(repo, config, root / "backups", proc)
+            values = parse_environment_file(config)
+            self.assertEqual(values["OMNIOPS_BIND_HOST"], "172.19.30.10")
+            self.assertEqual(values["OMNIOPS_SIGNING_KEY"], "b" * 48)
+            self.assertEqual(values["OMNIOPS_DB_PATH"], str(database))
+            self.assertEqual(len(list((root / "backups").glob("master-env-*.bak"))), 1)
+            with closing(sqlite3.connect(database)) as db:
+                self.assertEqual(db.execute("SELECT name FROM admins").fetchone()[0], "existing-admin")
+            with patch.dict(os.environ, {"OMNIOPS_BIND_HOST": "0.0.0.0"}):
+                with self.assertRaisesRegex(RuntimeError, "OMNIOPS_BIND_HOST"):
+                    prepare(repo, config, root / "backups", proc)
+            self.assertEqual(parse_environment_file(config)["OMNIOPS_BIND_HOST"], "172.19.30.10")
+
     def test_missing_original_database_halts_without_creating_new_one(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

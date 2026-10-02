@@ -1,20 +1,36 @@
 """Negahdari-e kelid va database-e gateway-e feli pish az update."""
 
 import argparse
+import ipaddress
 import json
 import os
 import secrets
 import shlex
+import shutil
 import sqlite3
 import sys
 import time
+import tempfile
 import uuid
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-KEYS = ("OMNIOPS_API_KEY", "OMNIOPS_SIGNING_KEY", "OMNIOPS_DB_PATH", "OMNIOPS_PORT", "OMNIOPS_OLLAMA_URL")
+KEYS = ("OMNIOPS_API_KEY", "OMNIOPS_SIGNING_KEY", "OMNIOPS_DB_PATH", "OMNIOPS_PORT", "OMNIOPS_OLLAMA_URL", "OMNIOPS_BIND_HOST")
+
+
+def valid_bind_host(host: str) -> bool:
+    if host in ("127.0.0.1", "::1"):
+        return True
+    try:
+        address = ipaddress.IPv4Address(host)
+    except ipaddress.AddressValueError:
+        return False
+    return any(address in network for network in (
+        ipaddress.IPv4Network("10.0.0.0/8"), ipaddress.IPv4Network("172.16.0.0/12"),
+        ipaddress.IPv4Network("192.168.0.0/16"),
+    ))
 
 
 def find_live_gateway(repo: Path, proc: Path = Path("/proc")) -> tuple[int, Path, dict[str, str]] | None:
@@ -57,6 +73,9 @@ def parse_environment_file(path: Path) -> dict[str, str]:
 
 def prepare(repo: Path, config: Path, backups: Path, proc: Path = Path("/proc")) -> tuple[int, int]:
     repo = repo.resolve(strict=True)
+    requested_host = os.environ.get("OMNIOPS_BIND_HOST")
+    if requested_host is not None and not valid_bind_host(requested_host):
+        raise RuntimeError("OMNIOPS_BIND_HOST must be one explicit private LAN IPv4 or loopback")
     live = find_live_gateway(repo, proc)
     rotation = False
     if config.exists():
@@ -79,6 +98,10 @@ def prepare(repo: Path, config: Path, backups: Path, proc: Path = Path("/proc"))
         values["OMNIOPS_DB_PATH"] = str((base / database).resolve())
         if not Path(values["OMNIOPS_DB_PATH"]).is_file():
             raise RuntimeError(f"Existing identity database not found: {values['OMNIOPS_DB_PATH']}; stopping before update")
+    if requested_host is not None:
+        values["OMNIOPS_BIND_HOST"] = requested_host
+    if not valid_bind_host(values.get("OMNIOPS_BIND_HOST", "127.0.0.1")):
+        raise RuntimeError("Existing OMNIOPS_BIND_HOST is not a private LAN IPv4 or loopback")
     if not rotation and (len(values.get("OMNIOPS_SIGNING_KEY", "").encode()) < 32 or len(values.get("OMNIOPS_API_KEY", "").encode()) < 32):
         raise RuntimeError("Existing master.env has missing/short keys; original credentials required")
     try:
@@ -117,16 +140,33 @@ def prepare(repo: Path, config: Path, backups: Path, proc: Path = Path("/proc"))
         print("Original signing/API keys are unavailable. Rotating keys now; existing accounts/passwords remain, previous sessions and PINs will be invalidated.", file=sys.stderr)
         values["OMNIOPS_SIGNING_KEY"] = secrets.token_urlsafe(48)
         values["OMNIOPS_API_KEY"] = secrets.token_urlsafe(32)
+    data = "".join(f"{key}={json.dumps(values[key], ensure_ascii=False)}\n" for key in KEYS if key in values)
     if not config.exists():
         config.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(config.parent, 0o700)
-        data = "".join(f"{key}={json.dumps(values[key], ensure_ascii=False)}\n" for key in KEYS if key in values)
         try:
             descriptor = os.open(config, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(descriptor, "w", encoding="utf-8") as destination:
                 destination.write(data)
         except FileExistsError:
             raise RuntimeError("master.env appeared during update; retry safely") from None
+    elif config.read_text(encoding="utf-8") != data:
+        config_backup = backups / f"master-env-{datetime.now(timezone.utc):%Y%m%dT%H%M%S%fZ}.bak"
+        shutil.copyfile(config, config_backup)
+        os.chmod(config_backup, 0o600)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=config.parent,
+                                             prefix=".master-env-", delete=False) as destination:
+                temporary = Path(destination.name)
+                os.chmod(temporary, 0o600)
+                destination.write(data)
+                destination.flush()
+                os.fsync(destination.fileno())
+            os.replace(temporary, config)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
     if rotation:
         with closing(sqlite3.connect(database)) as db:
             with db:
@@ -148,7 +188,8 @@ def main():
     except (OSError, RuntimeError, sqlite3.Error) as exc:
         print(f"OmniOps update stopped: {exc}", file=sys.stderr)
         raise SystemExit(1) from None
-    print(f"{pid}|{port}")
+    host = parse_environment_file(options.config).get("OMNIOPS_BIND_HOST", "127.0.0.1")
+    print(f"{pid}|{port}|{host}")
 
 
 if __name__ == "__main__":

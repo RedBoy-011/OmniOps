@@ -4,7 +4,7 @@ import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, build_opener, ProxyHandler
 
-from omniops.server import make_server
+from omniops.server import allowed_bind_host, make_server
 from test_ollama import FakeOllama
 from http.server import ThreadingHTTPServer
 
@@ -69,7 +69,16 @@ class GatewayTests(unittest.TestCase):
         )
         self.assertEqual(code, 400)
 
-    def test_non_loopback_server_and_weak_key_rejected(self):
+    def test_private_lan_bind_is_explicit_and_public_or_wildcard_is_rejected(self):
+        self.assertTrue(allowed_bind_host("10.88.0.1"))
+        self.assertTrue(allowed_bind_host("192.168.100.10"))
+        self.assertTrue(allowed_bind_host("172.20.1.4"))
+        for host in ("0.0.0.0", "8.8.8.8", "172.32.0.1", "server.example.com"):
+            self.assertFalse(allowed_bind_host(host))
+            with self.assertRaises(ValueError):
+                make_server(host, 0, self.key, "http://127.0.0.1:11434")
+
+    def test_weak_key_rejected(self):
         with self.assertRaises(ValueError):
             make_server("0.0.0.0", 0, self.key, "http://127.0.0.1:11434")
         with self.assertRaises(ValueError):

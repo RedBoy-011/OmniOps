@@ -80,11 +80,11 @@ helper="$(mktemp)"
 trap 'rm -f "$helper"' EXIT
 git show origin/main:scripts/upgrade_config.py > "$helper"
 runtime="$(python3 "$helper" --repo "$repo")"
-IFS='|' read -r old_pid port <<< "$runtime"
+IFS='|' read -r old_pid port bind_host <<< "$runtime"
 rm -f "$helper"
 trap - EXIT
 git merge --ff-only origin/main
-[[ "$old_pid" =~ ^[0-9]+$ && "$port" =~ ^[0-9]+$ ]] || fail 'Invalid gateway state.'
+[[ "$old_pid" =~ ^[0-9]+$ && "$port" =~ ^[0-9]+$ && -n "$bind_host" ]] || fail 'Invalid gateway state.'
 
 if [[ -f /root/.nvm/nvm.sh ]]; then
   # Node-e nasb-shode dar Ubuntu-ye ghabli ra load kon.
@@ -108,7 +108,7 @@ python3 -m unittest discover -s tests -q
 python_path="$(command -v python3)"
 cat > "$unit" <<EOF
 [Unit]
-Description=OmniOps development master (loopback only)
+Description=OmniOps development master
 After=network.target
 
 [Service]
@@ -141,9 +141,10 @@ if [[ "$old_pid" != 0 ]] && ! systemctl is-active --quiet omniops-master.service
 fi
 systemctl restart omniops-master.service
 for ((attempt=0; attempt<20; attempt++)); do
-  if systemctl is-active --quiet omniops-master.service && curl -fsS --max-time 2 "http://127.0.0.1:$port/health" 2>/dev/null | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "up"' 2>/dev/null; then
+  if systemctl is-active --quiet omniops-master.service && curl -fsS --max-time 2 "http://$bind_host:$port/health" 2>/dev/null | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "up"' 2>/dev/null; then
     systemctl enable omniops-master.service
-    printf 'OmniOps is healthy at http://127.0.0.1:%s/health\n' "$port"
+    printf 'OmniOps is healthy at http://%s:%s/health\n' "$bind_host" "$port"
+    printf 'Open in the LAN: http://%s:%s/\n' "$bind_host" "$port"
     printf 'Version: %s\n' "$(git rev-parse --short HEAD)"
     printf 'Service: systemctl status omniops-master.service\n'
     exit 0

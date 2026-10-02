@@ -1,10 +1,11 @@
 """API-ye azmayeshi-e local baraye avalin ghesmat-e darvazeye Ollama.
 
-In server faghat rooye loopback goosh midahad. Enteshar-e omoomi be
-server-e production, hoviat-e paydar va TLS niaz darad.
+In server rooye loopback ya yek IPv4-e khosusi-e moshakhas goosh midahad.
+Enteshar-e omoomi be server-e production va TLS niaz darad.
 """
 
 import hmac
+import ipaddress
 import json
 import mimetypes
 import os
@@ -17,6 +18,18 @@ from .identity import IdentityError, IdentityStore
 from .ollama import OllamaClient, OllamaError
 
 MAX_BODY_BYTES = 64 * 1024
+LAN_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"
+))
+
+def allowed_bind_host(host: str) -> bool:
+    if host in {"127.0.0.1", "::1"}:
+        return True
+    try:
+        address = ipaddress.IPv4Address(host)
+    except ipaddress.AddressValueError:
+        return False
+    return any(address in network for network in LAN_NETWORKS)
 
 
 def make_server(
@@ -24,8 +37,8 @@ def make_server(
     identity_store: IdentityStore | None = None,
     web_dist: Path | None = None,
 ) -> ThreadingHTTPServer:
-    if host not in {"127.0.0.1", "::1"}:
-        raise ValueError("Development gateway only supports loopback; use a TLS deployment later")
+    if not allowed_bind_host(host):
+        raise ValueError("Development gateway binds only loopback or an explicit private LAN IPv4")
     if len(api_key) < 32:
         raise ValueError("Set a unique OMNIOPS_API_KEY of at least 32 characters")
     ollama = OllamaClient(ollama_url)
@@ -288,6 +301,7 @@ def make_server(
 def main():
     api_key = os.environ.get("OMNIOPS_API_KEY", "")
     port = int(os.environ.get("OMNIOPS_PORT", "9000"))
+    host = os.environ.get("OMNIOPS_BIND_HOST", "127.0.0.1")
     ollama_url = os.environ.get("OMNIOPS_OLLAMA_URL", "http://127.0.0.1:11434")
     signing_key = os.environ.get("OMNIOPS_SIGNING_KEY", "").encode()
     if len(signing_key) < 32:
@@ -298,8 +312,8 @@ def main():
     if not identity.has_active_admin():
         raise SystemExit("Hesab-e SuperAdmin sakhte nashodeh; aval python3 -m omniops.bootstrap ra ejra konid.")
     web_dist = Path(__file__).resolve().parents[1] / "web" / "app" / "dist"
-    with make_server("127.0.0.1", port, api_key, ollama_url, identity, web_dist if web_dist.is_dir() else None) as server:
-        print(f"OmniOps development gateway listening on http://127.0.0.1:{server.server_port}/v1")
+    with make_server(host, port, api_key, ollama_url, identity, web_dist if web_dist.is_dir() else None) as server:
+        print(f"OmniOps development gateway listening on http://{host}:{server.server_port}/v1")
         server.serve_forever()
 
 

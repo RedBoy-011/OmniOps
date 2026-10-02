@@ -236,7 +236,7 @@ export default function App() {
             <h1>اتصال امن به هسته</h1><p>کد شش‌رقمی موقت را از پنل سازمان دریافت کنید.</p>
             <label htmlFor="master-url" className="agent-label">آدرس هستهٔ مرکزی</label>
             <input id="master-url" className="agent-input" dir="ltr" type="url" placeholder="https://edge.example.com" autoComplete="off" spellCheck={false} value={masterUrl} onChange={(event) => setMasterUrl(event.target.value)} disabled={phase === "verifying"} />
-            <span className="agent-url-hint">برای تونل آزمایشی، آدرس کامل مانند <bdi>http://127.0.0.1:19000</bdi> را وارد کنید.</span>
+            <span className="agent-url-hint">برای اتصال در شبکهٔ داخلی، آدرس کامل سرور مانند <bdi>http://192.168.1.10:9000</bdi> را وارد کنید.</span>
             <div className="pin-row" dir="ltr" aria-label="کد اتصال شش‌رقمی">
               {Array.from({ length: 6 }, (_, index) => (
                 <input key={index} ref={(element) => { fields.current[index] = element; }} className="pin-cell" aria-label={`رقم ${index + 1}`} inputMode="numeric" pattern="[0-9]*" autoComplete={index === 0 ? "one-time-code" : "off"} maxLength={1} value={pin[index] || ""} disabled={phase === "verifying"} onChange={(event) => setDigit(index, event.target.value)} onPaste={pasteCode} onKeyDown={(event) => {
