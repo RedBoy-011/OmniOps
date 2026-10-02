@@ -143,6 +143,17 @@ systemctl restart omniops-master.service
 for ((attempt=0; attempt<20; attempt++)); do
   if systemctl is-active --quiet omniops-master.service && curl -fsS --max-time 2 "http://$bind_host:$port/health" 2>/dev/null | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "up"' 2>/dev/null; then
     systemctl enable omniops-master.service
+    if [[ -f /etc/systemd/system/omniops-master-tls.service ]]; then
+      tls_unit=/etc/systemd/system/omniops-master-tls.service
+      grep -Fxq "WorkingDirectory=$repo" "$tls_unit" || fail 'TLS unit belongs to a different repository.'
+      tls_port="$(sed -n -E 's/.*OMNIOPS_PORT=([0-9]+).*/\1/p' "$tls_unit" | head -n 1)"
+      [[ "$tls_port" =~ ^[0-9]+$ ]] || fail 'TLS unit port could not be read.'
+      systemctl restart omniops-master-tls.service
+      curl --noproxy '*' --cacert /etc/omniops/private-pki/ca.crt -fsS --max-time 5 \
+        "https://$bind_host:$tls_port/health" | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "up"' || \
+        fail 'TLS Master health failed after update; HTTP Master remains active.'
+      printf 'Private TLS Master is healthy at https://%s:%s/health\n' "$bind_host" "$tls_port"
+    fi
     printf 'OmniOps is healthy at http://%s:%s/health\n' "$bind_host" "$port"
     printf 'Open in the LAN: http://%s:%s/\n' "$bind_host" "$port"
     printf 'Version: %s\n' "$(git rev-parse --short HEAD)"

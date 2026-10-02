@@ -1,17 +1,15 @@
 @import "tailwindcss";
-@font-face { font-family: "OmniOps IRANSharp"; src: url("/fonts/omniops-iransharp/iransharp_regular_web.woff2") format("woff2"); font-style: normal; font-weight: 400; font-display: swap; }
-@font-face { font-family: "OmniOps IRANSharp"; src: url("/fonts/omniops-iransharp/iransharp_light_web.woff2") format("woff2"); font-style: normal; font-weight: 300; font-display: swap; }
-@font-face { font-family: "OmniOps IRANSharp"; src: url("/fonts/omniops-iransharp/iransharp_bold_web.woff2") format("woff2"); font-style: normal; font-weight: 700 900; font-display: swap; }
 
 
 :root {
-  font-family: "OmniOps IRANSharp", Vazirmatn, "Segoe UI", Tahoma, sans-serif;
+  font-family: Vazirmatn, "Segoe UI", Tahoma, sans-serif;
   color: #f4edf2;
   background: #100b15;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
 * { box-sizing: border-box; }
+button, input, textarea, select { font-family: inherit; }
 body { margin: 0; min-width: 320px; }
 button { cursor: pointer; }
 button:disabled { opacity: .5; cursor: not-allowed; }
@@ -149,3 +147,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 .node-models { padding: 0 18px 0 0; margin: 8px 0 0; list-style: disc; overflow-wrap: anywhere; }
 .node-models li { padding: 3px 0; text-align: left; }
 .node-grant { display: block; direction: ltr; unicode-bidi: isolate; font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; user-select: all; color: #ffe2ea; }
+
+.node-pull { display: grid; gap: 8px; margin: 14px 0; padding: 12px; border: 1px solid #f5a1bd27; border-radius: 12px; background: #ffffff08; }
+.node-pull label { font-size: 12px; }
+.node-pull input { width: 100%; min-width: 0; padding: 9px 12px; border: 1px solid #f5a1bd55; border-radius: 9px; background: #140e19; color: #f4edf2; }
+.node-pull-status { display: grid; gap: 5px; overflow-wrap: anywhere; font-size: 12px; }
+.node-pull-status progress { width: 100%; height: 9px; accent-color: #d24876; }

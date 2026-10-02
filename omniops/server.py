@@ -74,7 +74,7 @@ def make_server(
             return {f"ollama/{entry.name}": entry.name for entry in client.list_models()}
 
         def _static(self) -> bool:
-            if web_dist is None or (self.path != "/" and not self.path.startswith("/assets/")):
+            if web_dist is None or (self.path != "/" and not self.path.startswith("/assets/") and self.path != "/fonts/Vazirmatn-OFL.txt"):
                 return False
             base = web_dist.resolve()
             target = base / ("index.html" if self.path == "/" else self.path.lstrip("/"))
@@ -144,7 +144,8 @@ def make_server(
             path = self.path
             if path not in {"/api/nodes/enroll", "/api/nodes/heartbeat", "/api/nodes/rotate",
                             "/api/admin/nodes/grants", "/api/admin/nodes/grants/revoke",
-                            "/api/admin/nodes/revoke"}:
+                            "/api/admin/nodes/revoke", "/api/admin/nodes/model-pulls",
+                            "/api/nodes/model-pulls/claim", "/api/nodes/model-pulls/report"}:
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
             principal = None
@@ -164,6 +165,13 @@ def make_server(
                     self._send(200, nodes.rotate(body.get("id"), body.get("credential"), body.get("next_credential")))
                 elif path == "/api/admin/nodes/grants":
                     self._send(201, nodes.issue(principal, body.get("role")))
+                elif path == "/api/admin/nodes/model-pulls":
+                    self._send(201, nodes.queue_model_pull(principal, body.get("node_id"), body.get("model")))
+                elif path == "/api/nodes/model-pulls/claim":
+                    self._send(200, {"job": nodes.claim_model_pull(body.get("id"), body.get("credential"))})
+                elif path == "/api/nodes/model-pulls/report":
+                    self._send(200, nodes.report_model_pull(body.get("id"), body.get("credential"),
+                        body.get("job_id"), body.get("status"), body.get("progress"), body.get("detail")))
                 elif path == "/api/admin/nodes/grants/revoke":
                     nodes.cancel_grant(principal, body.get("id"))
                     self._send(200, {"status": "revoked"})
@@ -260,6 +268,17 @@ def make_server(
                 self._send(503, {"error": {"message": str(exc)}})
 
         def do_GET(self):
+            if self.path == "/api/admin/nodes/model-pulls":
+                if not self._node_channel():
+                    return
+                principal = self._principal()
+                if principal is None:
+                    return
+                try:
+                    self._send(200, {"jobs": nodes.list_model_pulls(principal)})
+                except IdentityError as exc:
+                    self._send(exc.status, {"error": {"message": str(exc)}})
+                return
             if self.path == "/api/admin/nodes":
                 if not self._node_channel():
                     return

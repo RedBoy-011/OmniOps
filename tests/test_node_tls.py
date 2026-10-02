@@ -65,6 +65,13 @@ class NodeTlsTests(unittest.TestCase):
                 self.assertEqual(node['role'], 'worker')
                 self.assertEqual(client_node.heartbeat(node, {'cpu_percent': 12})['status'], 'ok')
                 self.assertEqual(send('/api/admin/nodes', token=token)[1]['nodes'][0]['id'], node['id'])
+                queued = send('/api/admin/nodes/model-pulls', {'node_id': node['id'], 'model': 'qwen3:0.6b'}, token)[1]
+                claimed = client_node.claim_model_pull(node)
+                self.assertEqual(claimed['id'], queued['id'])
+                client_node.report_model_pull(node, claimed, 'running', 50, 'downloading')
+                self.assertEqual(send('/api/admin/nodes/model-pulls', token=token)[1]['jobs'][0]['progress'], 50)
+                client_node.report_model_pull(node, claimed, 'completed', 100, 'ready')
+                self.assertEqual(send('/api/admin/nodes/model-pulls', token=token)[1]['jobs'][0]['status'], 'completed')
                 self.assertEqual(send('/api/admin/nodes/revoke', {'id': node['id']}, token)[0], 200)
             finally:
                 server.shutdown()

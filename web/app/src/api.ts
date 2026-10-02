@@ -16,6 +16,9 @@ export type ManagedNode = {
   metrics: { version?: string; cpu_percent?: number; ram_percent?: number;
              disk_percent?: number; models?: string[] } | null;
 };
+export type ModelPull = { id: string; node_id: string; model: string;
+  status: "queued" | "running" | "completed" | "failed"; progress: number | null;
+  detail: string; created_at: number; updated_at: number };
 export type NodeGrant = { id: string; role: "worker" | "edge"; grant: string; expires_at: number };
 export type Operations = { master: "up"; ollama: { url: string; status: NodeStatus["status"]; models: LocalModel[] }; nodes: NodeStatus[] };
 
@@ -49,6 +52,8 @@ export const api = {
   pending: () => request<{ users: PendingUser[] }>("/api/admin/pending"),
   operations: () => request<Operations>("/api/admin/operations"),
   managedNodes: () => request<{ nodes: ManagedNode[] }>("/api/admin/nodes"),
+  modelPulls: () => request<{ jobs: ModelPull[] }>("/api/admin/nodes/model-pulls"),
+  createModelPull: (node_id: string, model: string) => request<{ id: string; status: string }>("/api/admin/nodes/model-pulls", "POST", { node_id, model }),
   issueNodeGrant: (role: "worker" | "edge") => request<NodeGrant>("/api/admin/nodes/grants", "POST", { role }),
   revokeNodeGrant: (id: string) => request<{ status: string }>("/api/admin/nodes/grants/revoke", "POST", { id }),
   revokeNode: (id: string) => request<{ status: string }>("/api/admin/nodes/revoke", "POST", { id }),

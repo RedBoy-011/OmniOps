@@ -26,6 +26,12 @@ class NodeRegistry:
                     expires_at INTEGER NOT NULL, used_at INTEGER, revoked_at INTEGER,
                     created_by TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS model_pulls (
+                    id TEXT PRIMARY KEY, node_id TEXT NOT NULL, model TEXT NOT NULL,
+                    status TEXT NOT NULL, progress INTEGER, detail TEXT NOT NULL,
+                    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+                    created_by TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS managed_nodes (
                     id TEXT PRIMARY KEY, role TEXT NOT NULL CHECK(role IN ('worker','edge')),
                     name TEXT NOT NULL, credential_hash BLOB NOT NULL,
@@ -153,3 +159,79 @@ class NodeRegistry:
             rows = db.execute("SELECT id, role, name, credential_expires_at, created_at, last_seen, metrics, revoked_at FROM managed_nodes ORDER BY created_at DESC").fetchall()
             return [{**{key: row[key] for key in row.keys() if key != "metrics"},
                      "metrics": json.loads(row["metrics"]) if row["metrics"] else None} for row in rows]
+
+
+    def queue_model_pull(self, principal, node_id, model):
+        self._admin(principal)
+        if not isinstance(node_id, str) or not re.fullmatch(r"[0-9a-f]{32}", node_id):
+            raise IdentityError("Invalid worker ID")
+        if not isinstance(model, str) or len(model) > 128 or not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._/-]*(?::[A-Za-z0-9][A-Za-z0-9._-]*)?", model
+        ) or '..' in model or '//' in model:
+            raise IdentityError("Invalid Ollama model name")
+        with self.identity._lock, self.identity._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            node = db.execute("SELECT role, last_seen, revoked_at FROM managed_nodes WHERE id=?", (node_id,)).fetchone()
+            if node is None or node['role'] != 'worker' or node['revoked_at'] is not None:
+                raise IdentityError("Active Worker not found", 404)
+            if node['last_seen'] is None or self._now() - node['last_seen'] >= 90:
+                raise IdentityError("Worker is offline", 409)
+            existing = db.execute("SELECT 1 FROM model_pulls WHERE node_id=? AND status IN ('queued','running')",
+                                  (node_id,)).fetchone()
+            if existing:
+                raise IdentityError("Worker already has a model download", 409)
+            job_id = uuid.uuid4().hex
+            now = self._now()
+            db.execute("INSERT INTO model_pulls VALUES (?,?,?,?,?,?,?,?,?)",
+                       (job_id, node_id, model, 'queued', None, 'در صف', now, now, principal['id']))
+            self.identity._audit(db, principal['id'], 'model_pull_queued', job_id)
+        return {'id': job_id, 'status': 'queued'}
+
+    def list_model_pulls(self, principal):
+        self._admin(principal)
+        with self.identity._db() as db:
+            rows = db.execute("SELECT id, node_id, model, status, progress, detail, created_at, updated_at "
+                              "FROM model_pulls ORDER BY created_at DESC LIMIT 100").fetchall()
+            return [dict(row) for row in rows]
+
+    def claim_model_pull(self, node_id, credential):
+        with self.identity._lock, self.identity._db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            node = self._authenticated(db, node_id, credential)
+            if node['role'] != 'worker':
+                raise IdentityError('Worker role required', 403)
+            # Job-e ghat shodeh bad az panj daghigheh dobareh dar saf gharar migirad.
+            db.execute("UPDATE model_pulls SET status='queued', detail='تلاش دوباره پس از قطع Worker', "
+                       "updated_at=? WHERE node_id=? AND status='running' AND updated_at<?",
+                       (self._now(), node_id, self._now()-300))
+            active = db.execute("SELECT id FROM model_pulls WHERE node_id=? AND status='running'", (node_id,)).fetchone()
+            if active:
+                return None
+            row = db.execute("SELECT id, model FROM model_pulls WHERE node_id=? AND status='queued' "
+                             "ORDER BY created_at LIMIT 1", (node_id,)).fetchone()
+            if row is None:
+                return None
+            db.execute("UPDATE model_pulls SET status='running', detail='شروع دریافت', updated_at=? WHERE id=?",
+                       (self._now(), row['id']))
+            return dict(row)
+
+    def report_model_pull(self, node_id, credential, job_id, status, progress, detail):
+        if status not in ('running', 'completed', 'failed') or not isinstance(detail, str) or len(detail) > 160:
+            raise IdentityError('Invalid model download status')
+        if progress is not None and (type(progress) is not int or not 0 <= progress <= 100):
+            raise IdentityError('Invalid model download progress')
+        if not isinstance(job_id, str) or not re.fullmatch(r'[0-9a-f]{32}', job_id):
+            raise IdentityError('Invalid model download ID')
+        with self.identity._lock, self.identity._db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            node = self._authenticated(db, node_id, credential)
+            if node['role'] != 'worker':
+                raise IdentityError('Worker role required', 403)
+            changed = db.execute("UPDATE model_pulls SET status=?, progress=?, detail=?, updated_at=? "
+                                 "WHERE id=? AND node_id=? AND status='running'",
+                                 (status, progress, detail, self._now(), job_id, node_id)).rowcount
+            if not changed:
+                raise IdentityError('Active model download not found', 404)
+            if status != 'running':
+                self.identity._audit(db, node_id, 'model_pull_' + status, job_id)
+        return {'status': status}

@@ -73,6 +73,51 @@ class NodeRegistryTests(unittest.TestCase):
             self.assertEqual(row, ('system:local-root', 'node_grant_issued_by_local_root'))
         self.assertEqual(self.nodes.enroll(grant['grant'], 'worker-01', 'worker')['role'], 'worker')
 
+    def test_model_pull_is_authorized_and_reports_progress(self):
+        grant = self.nodes.issue(self.admin, 'worker')['grant']
+        worker = self.nodes.enroll(grant, 'worker-01')
+        with self.assertRaises(IdentityError):
+            self.nodes.queue_model_pull(self.admin, worker['id'], 'qwen3:0.6b')
+        self.nodes.heartbeat(worker['id'], worker['credential'], {'models': []})
+        for bad in ('../outside', 'model;touch file', 'bad model', ''):
+            with self.assertRaises(IdentityError):
+                self.nodes.queue_model_pull(self.admin, worker['id'], bad)
+        with self.assertRaises(IdentityError):
+            self.nodes.queue_model_pull({'role': 'member', 'capabilities': ['profile.manage']}, worker['id'], 'qwen3:0.6b')
+        queued = self.nodes.queue_model_pull(self.admin, worker['id'], 'qwen3:0.6b')
+        with self.assertRaises(IdentityError):
+            self.nodes.queue_model_pull(self.admin, worker['id'], 'second:latest')
+        with self.assertRaises(IdentityError):
+            self.nodes.claim_model_pull(worker['id'], 'Z' * 43)
+        job = self.nodes.claim_model_pull(worker['id'], worker['credential'])
+        self.assertEqual(job['model'], 'qwen3:0.6b')
+        self.assertIsNone(self.nodes.claim_model_pull(worker['id'], worker['credential']))
+        with self.assertRaises(IdentityError):
+            self.nodes.report_model_pull(worker['id'], worker['credential'], job['id'], 'running', 101, 'bad')
+        self.nodes.report_model_pull(worker['id'], worker['credential'], job['id'], 'running', 42, 'در حال دریافت')
+        self.assertEqual(self.nodes.list_model_pulls(self.admin)[0]['progress'], 42)
+        self.nodes.report_model_pull(worker['id'], worker['credential'], job['id'], 'completed', 100, 'آماده')
+        self.assertEqual(self.nodes.list_model_pulls(self.admin)[0]['status'], 'completed')
+        self.assertEqual(self.nodes.queue_model_pull(self.admin, worker['id'], 'second:latest')['status'], 'queued')
+        self.assertEqual(queued['id'], job['id'])
+
+    def test_model_pull_retries_after_worker_restart_and_rejects_edge(self):
+        edge = self.nodes.enroll(self.nodes.issue(self.admin, 'edge')['grant'], 'edge-01')
+        self.nodes.heartbeat(edge['id'], edge['credential'], {})
+        with self.assertRaises(IdentityError):
+            self.nodes.queue_model_pull(self.admin, edge['id'], 'qwen3:0.6b')
+        with self.assertRaises(IdentityError):
+            self.nodes.claim_model_pull(edge['id'], edge['credential'])
+        worker = self.nodes.enroll(self.nodes.issue(self.admin, 'worker')['grant'], 'worker-01')
+        self.nodes.heartbeat(worker['id'], worker['credential'], {})
+        self.nodes.queue_model_pull(self.admin, worker['id'], 'qwen3:0.6b')
+        old = self.nodes.claim_model_pull(worker['id'], worker['credential'])
+        self.now[0] += 301
+        self.assertEqual(self.nodes.claim_model_pull(worker['id'], worker['credential'])['id'], old['id'])
+        self.nodes.revoke(self.admin, worker['id'])
+        with self.assertRaises(IdentityError):
+            self.nodes.report_model_pull(worker['id'], worker['credential'], old['id'], 'completed', 100, 'آماده')
+
     def test_parallel_redemption_creates_one_node(self):
         grant = self.nodes.issue(self.admin, 'worker')['grant']
         other = NodeRegistry(IdentityStore(self.store.path, b's' * 32, lambda: self.now[0]))

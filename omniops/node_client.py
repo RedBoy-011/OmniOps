@@ -1,4 +1,4 @@
-"""Small non-root Linux node client: verified TLS, private Master, read-only heartbeat."""
+"""Small non-root Linux node client: verified TLS, private Master, telemetry and model pulls."""
 
 import argparse
 import getpass
@@ -10,6 +10,7 @@ import ssl
 import stat
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from urllib.error import HTTPError
@@ -65,6 +66,17 @@ class NodeClient:
     def heartbeat(self, state, metrics):
         return self.request('/api/nodes/heartbeat', {
             'id': state['id'], 'credential': state['credential'], 'metrics': metrics,
+        })
+
+    def claim_model_pull(self, state):
+        return self.request('/api/nodes/model-pulls/claim', {
+            'id': state['id'], 'credential': state['credential'],
+        })['job']
+
+    def report_model_pull(self, state, job, status, progress=None, detail=''):
+        return self.request('/api/nodes/model-pulls/report', {
+            'id': state['id'], 'credential': state['credential'], 'job_id': job['id'],
+            'status': status, 'progress': progress, 'detail': detail,
         })
 
     def rotate(self, state, next_credential):
@@ -151,6 +163,44 @@ def local_metrics():
     return metrics
 
 
+def pull_model(client, state_path, job):
+    model = job['model']
+    progress = None
+    last_report = 0
+    try:
+        endpoint = local_ollama_url() + '/api/pull'
+        request = Request(endpoint, data=json.dumps({'model': model, 'stream': True}).encode('utf-8'),
+                          headers={'Content-Type': 'application/json'}, method='POST')
+        with build_opener(ProxyHandler({})).open(request, timeout=120) as response:
+            while True:
+                line = response.readline(8193)
+                if not line:
+                    break
+                if len(line) > 8192:
+                    raise ValueError('Ollama progress message too long')
+                event = json.loads(line)
+                if 'error' in event:
+                    raise ValueError('Ollama download failed: ' + str(event['error'])[:100])
+                total = event.get('total')
+                completed = event.get('completed')
+                if type(total) is int and total > 0 and type(completed) is int:
+                    progress = min(99, max(0, int(100 * completed / total)))
+                detail = str(event.get('status', 'در حال دریافت'))[:160]
+                if time.monotonic() - last_report >= 2:
+                    client.report_model_pull(load_identity(state_path), job, 'running', progress, detail)
+                    last_report = time.monotonic()
+                if event.get('status') == 'success':
+                    client.report_model_pull(load_identity(state_path), job, 'completed', 100, 'مدل آماده است')
+                    return
+        raise ValueError('Ollama download ended without success')
+    except (OSError, ValueError, HTTPError) as exc:
+        try:
+            client.report_model_pull(load_identity(state_path), job, 'failed', progress,
+                                     'دریافت مدل ناموفق بود: ' + str(exc)[:130])
+        except (OSError, ValueError, HTTPError):
+            pass
+
+
 def heartbeat_once(client, state, path, metrics):
     # Ghabl az charkhesh, kelid-e jadid ro rooye disk negah midarim ta crash ghabel-e bazyaabi bashe.
     if 'next_credential' not in state and state['credential_expires_at'] - time.time() < 7 * 86400:
@@ -175,7 +225,7 @@ def heartbeat_once(client, state, path, metrics):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='OmniOps private node enrollment and read-only heartbeat')
+    parser = argparse.ArgumentParser(description='OmniOps private node enrollment, heartbeat and model downloads')
     parser.add_argument('--state', default='/var/lib/omniops/node-identity.json')
     parser.add_argument('--ca-file', help='Trusted Master CA certificate, if not in the system trust store')
     actions = parser.add_subparsers(dest='action', required=True)
@@ -199,11 +249,17 @@ def main():
         return
     state = load_identity(args.state)
     client = NodeClient(state['master_url'], args.ca_file)
+    pull_thread = None
     while True:
         result = heartbeat_once(client, state, args.state, local_metrics())
         print('Heartbeat accepted at', result['checked_at'], flush=True)
         if args.action == 'heartbeat':
             return
+        if state.get('role') == 'worker' and (pull_thread is None or not pull_thread.is_alive()):
+            job = client.claim_model_pull(state)
+            if job:
+                pull_thread = threading.Thread(target=pull_model, args=(client, args.state, job), daemon=True)
+                pull_thread.start()
         time.sleep(30)
 
 

@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { api, type ManagedNode, type NodeGrant } from "./api";
+import { api, type ManagedNode, type ModelPull, type NodeGrant } from "./api";
 
 export function NodeManager() {
   const secure = window.location.protocol === "https:";
   const [nodes, setNodes] = useState<ManagedNode[]>([]);
+  const [jobs, setJobs] = useState<ModelPull[]>([]);
+  const [model, setModel] = useState("");
   const [ready, setReady] = useState(false);
   const [grant, setGrant] = useState<NodeGrant | null>(null);
   const [seconds, setSeconds] = useState(0);
@@ -15,8 +17,8 @@ export function NodeManager() {
     let active = true;
     const refresh = async () => {
       try {
-        const result = await api.managedNodes();
-        if (active) { setNodes(result.nodes); setReady(true); setMessage(""); }
+        const [result, pulls] = await Promise.all([api.managedNodes(), api.modelPulls()]);
+        if (active) { setNodes(result.nodes); setJobs(pulls.jobs); setReady(true); setMessage(""); }
       } catch { if (active) setMessage("فهرست گره‌ها دریافت نشد."); }
     };
     void refresh();
@@ -52,6 +54,18 @@ export function NodeManager() {
     finally { setBusy(false); }
   }
 
+  async function installModel(node: ManagedNode) {
+    const selected = model.trim();
+    if (busy || !selected || !window.confirm(`مدل «${selected}» روی «${node.name}» دریافت شود؟ حجم فایل و زمان دانلود به مدل بستگی دارد.`)) return;
+    setBusy(true); setMessage("");
+    try {
+      await api.createModelPull(node.id, selected);
+      setJobs((await api.modelPulls()).jobs);
+      setMessage("درخواست دانلود ثبت شد. پیشرفت هر ۱۵ ثانیه تازه می‌شود.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "درخواست دانلود ناموفق بود."); }
+    finally { setBusy(false); }
+  }
+
   async function revokeNode(node: ManagedNode) {
     if (busy || !window.confirm(`اتصال گره «${node.name}» را قطع و اعتبارنامه‌اش را باطل می‌کنید؟`)) return;
     setBusy(true);
@@ -74,6 +88,16 @@ export function NodeManager() {
           <div className="node-heading"><strong>{node.name} · {node.role === "worker" ? "Worker" : "Edge"}</strong><span className={`node-badge node-${online ? "up" : "unreachable"}`}>{node.revoked_at ? "باطل‌شده" : online ? "متصل" : "بدون heartbeat"}</span></div>
           <small>آخرین حضور: {node.last_seen ? new Date(node.last_seen * 1000).toLocaleString("fa-IR") : "هنوز ثبت نشده"}</small>
           {node.metrics && <><p>CPU {node.metrics.cpu_percent ?? "—"}٪ · RAM {node.metrics.ram_percent ?? "—"}٪ · دیسک {node.metrics.disk_percent ?? "—"}٪</p><small>نسخه: {node.metrics.version || "نامشخص"}</small>{node.metrics.models?.length ? <ul className="node-models">{node.metrics.models.map((model) => <li key={model} dir="ltr">{model}</li>)}</ul> : null}</>}
+          {node.role === "worker" && !node.revoked_at && <div className="node-pull">
+            <label htmlFor={`model-${node.id}`}>نام مدل Ollama برای دریافت</label>
+            <input id={`model-${node.id}`} dir="ltr" value={model} onChange={(event) => setModel(event.target.value)} placeholder="مثلاً nomic-embed-text" maxLength={128} />
+            <button type="button" className="quiet-button" disabled={busy || !online || !model.trim() || jobs.some((job) => job.node_id === node.id && (job.status === "queued" || job.status === "running"))} onClick={() => void installModel(node)}>دریافت روی این Worker</button>
+            {jobs.filter((job) => job.node_id === node.id).slice(0, 3).map((job) => <div className="node-pull-status" key={job.id} role="status">
+              <bdi dir="ltr">{job.model}</bdi> · {job.status === "queued" ? "در صف" : job.status === "running" ? "در حال دریافت" : job.status === "completed" ? "آماده" : "ناموفق"}
+              <progress max={100} value={job.progress ?? undefined} aria-label={`پیشرفت دریافت ${job.model}`} />
+              <small>{job.progress == null ? "پیشرفت نامشخص" : `${job.progress.toLocaleString("fa-IR")}٪`} · {job.detail}</small>
+            </div>)}
+          </div>}
           {!node.revoked_at && <button className="quiet-button danger" type="button" disabled={busy} onClick={() => void revokeNode(node)}>ابطال گره</button>}
         </article>;
       })}</div>}

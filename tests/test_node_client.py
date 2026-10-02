@@ -6,8 +6,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import threading
 
-from omniops.node_client import heartbeat_once, load_identity, save_identity, validate_master_url, local_ollama_url
+from omniops.node_client import heartbeat_once, load_identity, save_identity, validate_master_url, local_ollama_url, pull_model
 
 
 class NodeClientTests(unittest.TestCase):
@@ -42,6 +44,39 @@ class NodeClientTests(unittest.TestCase):
             link.symlink_to(path)
             with self.assertRaises(ValueError):
                 save_identity(link, state)
+
+    def test_ollama_stream_reports_real_progress_and_completion(self):
+        class Ollama(BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers['Content-Length'])
+                body = json.loads(self.rfile.read(length))
+                assert self.path == '/api/pull' and body == {'model': 'small:latest', 'stream': True}
+                chunks = [b'{"status":"downloading","total":100,"completed":25}\n',
+                          b'{"status":"success"}\n']
+                self.send_response(200)
+                self.end_headers()
+                for chunk in chunks:
+                    self.wfile.write(chunk)
+            def log_message(self, *args):
+                pass
+        class Client:
+            reports = []
+            def report_model_pull(self, state, job, status, progress, detail):
+                self.reports.append((status, progress))
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Ollama)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            client = Client()
+            with patch.dict(os.environ, {'OMNIOPS_LOCAL_OLLAMA_URL': f'http://127.0.0.1:{server.server_port}'}), \
+                 patch('omniops.node_client.load_identity', return_value={'id': 'node'}):
+                pull_model(client, 'unused', {'id': 'a' * 32, 'model': 'small:latest'})
+            self.assertIn(('running', 25), client.reports)
+            self.assertEqual(client.reports[-1], ('completed', 100))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_rotation_recovers_before_or_after_server_accepts(self):
         class FakeClient:
