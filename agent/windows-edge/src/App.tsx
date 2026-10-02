@@ -16,6 +16,13 @@ function digits(value: string) {
     .replace(/\D/g, "").slice(0, 6);
 }
 
+function clipboardPin(value: string): string | null {
+  const normalized = value.trim()
+    .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)))
+    .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)));
+  return /^\d{6}$/.test(normalized) ? normalized : null;
+}
+
 export default function App() {
   const [masterUrl, setMasterUrl] = useState("");
   const [pin, setPin] = useState("");
@@ -169,11 +176,23 @@ export default function App() {
     if (cleaned && index < 5) fields.current[index + 1]?.focus();
   }
 
+  function applyPastedCode(text: string) {
+    const code = clipboardPin(text);
+    if (!code) { setError("حافظه باید فقط یک کد شش‌رقمی داشته باشد."); return; }
+    setError("");
+    setPin(code);
+    fields.current[5]?.focus();
+  }
+
   function pasteCode(event: ClipboardEvent<HTMLInputElement>) {
     event.preventDefault();
-    const pasted = digits(event.clipboardData.getData("text"));
-    setPin(pasted);
-    fields.current[Math.min(pasted.length, 5)]?.focus();
+    applyPastedCode(event.clipboardData.getData("text"));
+  }
+
+  async function pasteFromClipboard() {
+    if (!isTauri()) { setError("جایگذاری با دکمه فقط در برنامهٔ نصب‌شدهٔ ویندوز فعال است."); return; }
+    try { applyPastedCode(await invoke<string>("read_pairing_clipboard")); }
+    catch (cause) { setError(typeof cause === "string" ? cause : "خواندن حافظه ممکن نشد."); }
   }
 
   async function disconnect() {
@@ -246,7 +265,8 @@ export default function App() {
                 }} />
               ))}
             </div>
-            <p className="pin-help">با ورود رقم آخر، کد خودکار بررسی می‌شود. اعتبار کد: ۲ دقیقه.</p>
+            <button type="button" className="paste-pin" disabled={phase === "verifying"} onClick={() => void pasteFromClipboard()}>جایگذاری کد از حافظه</button>
+            <p className="pin-help">با جایگذاری یا ورود رقم آخر، کد خودکار بررسی می‌شود. اعتبار کد: ۲ دقیقه.</p>
             {phase === "verifying" && <span className="progress">در حال تأیید…</span>}
             {error && <p className="agent-error" role="alert">{error}</p>}
           </motion.section>

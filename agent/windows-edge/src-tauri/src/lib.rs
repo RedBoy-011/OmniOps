@@ -15,6 +15,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State,
 };
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use zeroize::Zeroizing;
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -109,6 +110,18 @@ fn http_client() -> Result<Client, String> {
         .timeout(Duration::from_secs(8))
         .build()
         .map_err(|_| "ایجاد ارتباط با هسته ممکن نشد".into())
+}
+
+#[tauri::command]
+fn read_pairing_clipboard(app: AppHandle) -> Result<String, String> {
+    let text = app
+        .clipboard()
+        .read_text()
+        .map_err(|_| "خواندن حافظهٔ ویندوز ممکن نشد".to_string())?;
+    if text.chars().count() > 64 {
+        return Err("حافظه باید فقط یک کد اتصال شش‌رقمی داشته باشد".into());
+    }
+    Ok(text)
 }
 
 #[tauri::command]
@@ -396,8 +409,10 @@ pub fn run() {
     start_lease_monitor(shared.session.clone());
     let app = tauri::Builder::default()
         .manage(shared)
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             pair_agent,
+            read_pairing_clipboard,
             session_status,
             send_agent_chat,
             list_agent_models,

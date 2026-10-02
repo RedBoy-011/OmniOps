@@ -41,6 +41,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid #84f2d2; outline-
 .pin-row { width: 100%; display: flex; justify-content: space-between; gap: 7px; margin-top: 24px; }
 .pin-cell { width: 48px; height: 58px; min-width: 0; border-radius: 13px; background: #202424; border: 1px solid #ffffff32; text-align: center; font-size: 25px; font-weight: 700; color: #e7fff4; transition: border-color .2s, transform .2s, box-shadow .2s; }
 .pin-cell:focus { border-color: #7af1c4; box-shadow: 0 0 17px #72dfae4a; transform: translateY(-2px); outline: 0; }
+.paste-pin { margin-top: 12px; min-height: 36px; border: 1px solid #7ce6ba77; border-radius: 11px; padding: 6px 16px; color: #c2ffe2; background: #24523e66; font-size: 11px; }
+.paste-pin:hover:not(:disabled) { background: #2d694e; }
+.paste-pin:disabled { opacity: .55; cursor: wait; }
 .pair-view .pin-help { font-size: 10px; margin-top: 13px; color: #828e8a; }
 .progress { font-size: 12px; color: #7de8b7; }
 .agent-error { font-size: 11px; color: #ffafbc; line-height: 1.8; text-align: center; margin: 10px 0; }

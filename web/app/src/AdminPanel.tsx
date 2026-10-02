@@ -17,6 +17,7 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
   const [message, setMessage] = useState("");
   const [pair, setPair] = useState<{ code: string; expires_at: number } | null>(null);
   const [seconds, setSeconds] = useState(0);
+  const [copyStatus, setCopyStatus] = useState("");
   const [selected, setSelected] = useState<Record<string, string[]>>({});
   const [operations, setOperations] = useState<Operations | null>(null);
   const [operationsError, setOperationsError] = useState("");
@@ -43,7 +44,7 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
     const update = () => {
       const remaining = Math.max(0, pair.expires_at - Math.floor(Date.now() / 1000));
       setSeconds(remaining);
-      if (remaining === 0) setPair(null);
+      if (remaining === 0) { setPair(null); setCopyStatus(""); }
     };
     update();
     const timer = window.setInterval(update, 1000);
@@ -86,8 +87,34 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
 
   async function createPair() {
     setMessage("");
+    setCopyStatus("");
     try { setPair(await api.issuePairing()); }
     catch (cause) { setMessage(cause instanceof Error ? cause.message : "کد اتصال صادر نشد."); }
+  }
+
+  async function copyPair() {
+    if (!pair || seconds <= 0) return;
+    let copied = false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(pair.code);
+        copied = true;
+      }
+    } catch { /* Dar HTTP-e LAN az copy-e qadimi estefade mikonim. */ }
+    if (!copied) {
+      const field = document.createElement("textarea");
+      field.value = pair.code;
+      field.setAttribute("readonly", "");
+      field.style.position = "fixed";
+      field.style.opacity = "0";
+      document.body.appendChild(field);
+      const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      field.select();
+      try { copied = document.execCommand("copy"); } catch { /* Matn-e code ghabele entekhab ast. */ }
+      field.remove();
+      focused?.focus();
+    }
+    setCopyStatus(copied ? "کد کپی شد؛ در ایجنت روی «جایگذاری کد» بزنید." : "کپی ممکن نشد؛ کد را انتخاب و کپی کنید.");
   }
 
   return (
@@ -120,7 +147,7 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
             {!user.capabilities.includes("agent.pair") ? <p className="empty-note">پروفایل شما مجوز اتصال ایجنت ندارد.</p> : <>
               <button className="submit-button" onClick={createPair}>صدور کد اتصال تازه</button>
               <AnimatePresence mode="wait">{pair && <motion.div key={pair.code} className="pair-result" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}>
-                <p>این کد را در پنجرهٔ ایجنت وارد کنید:</p><strong dir="ltr">{pair.code}</strong><small>{seconds.toLocaleString("fa-IR")} ثانیه باقی‌مانده · پس از استفاده باطل می‌شود</small>
+                <p>این کد را در پنجرهٔ ایجنت وارد کنید:</p><strong dir="ltr">{pair.code}</strong><button type="button" className="quiet-button pair-copy" onClick={() => void copyPair()}>کپی کد</button><small>{seconds.toLocaleString("fa-IR")} ثانیه باقی‌مانده · پس از استفاده باطل می‌شود</small>{copyStatus && <span className="pair-copy-status" role="status" aria-live="polite">{copyStatus}</span>}
               </motion.div>}</AnimatePresence>
               <p className="safety-note">توکن اتصال فقط در حافظهٔ فرایند ایجنت می‌ماند و با خروج یا قطع heartbeat از اعتبار می‌افتد.</p>
             </>}

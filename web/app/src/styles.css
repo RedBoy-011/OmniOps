@@ -90,6 +90,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 .pair-result p { font-size: 11px; color: #c9b4bf; margin: 0 0 10px; }
 .pair-result strong { letter-spacing: 10px; font-size: 30px; color: #ffe2ea; display: block; padding-left: 10px; }
 .pair-result small { display: block; font-size: 11px; color: #f5a2bb; margin-top: 9px; }
+.pair-result .pair-copy { display: inline-flex; align-items: center; justify-content: center; margin-top: 16px; min-height: 35px; }
+.pair-copy-status { display: block; margin-top: 9px; font-size: 11px; color: #9cebc4; }
 .safety-note { font-size: 11px; color: #bca7b6; line-height: 2; margin-top: 17px; }
 .admin-message { background: #e6658a26; border: 1px solid #f287a452; color: #f7c5d8; border-radius: 12px; padding: 10px 15px; font-size: 12px; }
 .operations-card { margin-top: 20px; }
