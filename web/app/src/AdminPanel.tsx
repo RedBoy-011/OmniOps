@@ -4,6 +4,7 @@ import { api, type Operations, type PendingUser, type Profile } from "./api";
 import { NodeManager } from "./NodeManager";
 import { ProviderManager } from "./ProviderManager";
 import { ChatRoom } from "./ChatRoom";
+import { WorkspaceTasks } from "./WorkspaceTasks";
 
 const choices = [
   ["chat", "گفت‌وگو"], ["provider.use", "مدل API بیرونی"], ["skill.use", "مهارت‌ها"], ["tool.read", "مشاهدهٔ ابزار"],
@@ -14,6 +15,7 @@ type Props = { user: Profile; initialPending: number; onLogout: () => void };
 
 export function AdminPanel({ user, initialPending, onLogout }: Props) {
   const [pending, setPending] = useState<PendingUser[]>([]);
+  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "task">("chat");
   const [count, setCount] = useState(initialPending);
   const [toast, setToast] = useState(initialPending > 0 && user.role === "superadmin");
   const [loading, setLoading] = useState(false);
@@ -180,7 +182,7 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
             </>}
           </section>
         </div>
-        {user.capabilities.includes("chat") && <ChatRoom />}
+{user.capabilities.includes("chat") && <><div className="workspace-switch" role="tablist" aria-label="حالت فضای کاری"><button type="button" role="tab" aria-selected={workspaceMode === "chat"} className={workspaceMode === "chat" ? "active" : ""} onClick={() => setWorkspaceMode("chat")}>گفتگو</button><button type="button" role="tab" aria-selected={workspaceMode === "task"} className={workspaceMode === "task" ? "active" : ""} onClick={() => setWorkspaceMode("task")}>وظیفه</button></div><div hidden={workspaceMode !== "chat"}><ChatRoom /></div><div hidden={workspaceMode !== "task"}><WorkspaceTasks canRequest={user.capabilities.includes("action.request")} /></div></>}
         {user.role === "superadmin" && <section className="glass admin-card operations-card">
           <div className="card-title"><div><h2>وضعیت گره‌ها و مدل‌های محلی</h2><p>بررسی خودکار هر ۱۵ ثانیه از Master و Ollama.</p></div><button className="quiet-button" onClick={() => void refreshOperations()}>بررسی دوباره</button></div>
           {operationsError && <p className="admin-message" role="alert">{operationsError}</p>}

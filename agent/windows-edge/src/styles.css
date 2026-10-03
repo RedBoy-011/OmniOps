@@ -114,3 +114,16 @@ button:focus-visible, input:focus-visible { outline: 2px solid #84f2d2; outline-
 .agent-memory-list { display:grid; gap:5px; }
 .agent-memory-list > div { display:flex; align-items:center; justify-content:space-between; gap:8px; border-top:1px solid #ffffff16; padding-top:5px; font-size:10px; }
 .agent-memory-list span { overflow-wrap:anywhere; }
+.agent-task-pane { flex:1; min-height:0; overflow-y:auto; display:grid; align-content:start; gap:10px; padding:12px 4px; }
+.agent-task-pane h2 { margin:0; font-size:16px; }
+.agent-task-pane p { margin:0; color:#bac9bf; font-size:11px; line-height:1.9; }
+.agent-task-pane form { display:grid; gap:7px; }
+.agent-task-pane form > div { display:flex; gap:7px; }
+.agent-task-pane label { font-size:11px; }
+.agent-task-pane input,.agent-task-pane textarea,.agent-task-pane select { flex:1; min-width:0; width:100%; border:1px solid #ffffff31; border-radius:9px; background:#161d1a; color:white; padding:8px; font-size:11px; }
+.agent-task-pane textarea { resize:vertical; }
+.agent-task-pane button { border:1px solid #ffffff31; border-radius:9px; padding:7px; background:#234d39; color:#eafff0; font-size:11px; }
+.agent-task-list { display:grid; gap:8px; }
+.agent-task-list article { border:1px solid #ffffff22; border-radius:12px; padding:8px; }
+.agent-task-list small { font-size:10px; color:#96cab1; }
+.agent-task-list button { margin-inline-start:8px; }

@@ -111,7 +111,7 @@ class IdentityGatewayTests(unittest.TestCase):
         self.assertEqual(code, 200)
         selected = next(u for u in pending["users"] if u["username"] == "new-operator")
         code, approved = self.call("POST", f"/api/admin/pending/{selected['id']}/approve", {
-            "capabilities": ["chat", "agent.pair"],
+            "capabilities": ["chat", "agent.pair", "action.request"],
         }, admin_token)
         self.assertEqual((code, approved["status"]), (200, "active"))
         code, member_login = self.call("POST", "/api/auth/login", {
@@ -131,6 +131,16 @@ class IdentityGatewayTests(unittest.TestCase):
         self.assertEqual(self.call('POST', '/api/web/chat', {'message': 'سلام'}, member_token)[1]['reply'], 'پاسخ واقعی آزمایشی')
         self.assertEqual(self.call('GET', '/api/web/models')[0], 401)
         agent_token = paired["token"]
+        status, project = self.call("POST", "/api/web/workspace/projects", {"name": "First project"}, member_token)
+        self.assertEqual(status, 201)
+        self.assertEqual(self.call("GET", "/api/web/workspace/projects", token=admin_token)[1]["projects"], [])
+        self.assertEqual(self.call("GET", "/api/agent/workspace/projects", token=member_token)[0], 401)
+        self.assertEqual(self.call("GET", "/api/agent/workspace/projects", token=agent_token)[1]["projects"][0]["id"], project["id"])
+        status, task = self.call("POST", "/api/agent/workspace/tasks", {"project_id": project["id"], "description": "Report draft"}, agent_token)
+        self.assertEqual((status, task["status"]), (201, "draft"))
+        self.assertEqual(self.call("GET", "/api/web/workspace/tasks", token=admin_token)[1]["tasks"], [])
+        self.assertEqual(self.call("GET", "/api/web/workspace/tasks", token=member_token)[1]["tasks"][0]["id"], task["id"])
+        self.assertEqual(self.call("POST", "/api/web/workspace/tasks/cancel", {"id": task["id"]}, member_token)[0], 200)
         self.assertEqual(self.call("GET", "/api/agent/history", token=member_token)[0], 401)
         self.assertEqual(self.call("GET", "/api/chat/history", token=agent_token)[0], 401)
         self.assertEqual(self.call("POST", "/api/agent/chat", {"message": "private", "save_history": True}, agent_token)[0], 200)

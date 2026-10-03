@@ -268,3 +268,18 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 .chat-memory-item { justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 6px; overflow-wrap: anywhere; }
 .chat-history-options label { display: inline-flex; align-items: center; gap: 7px; margin-inline-end: auto; }
 @media (max-width: 600px) { .chat-memory-form, .chat-history-options { width: 100%; } .chat-memory-tools { padding: 12px; } }
+.workspace-switch { display:flex; gap:6px; width:max-content; max-width:100%; margin-block:18px 8px; border:1px solid #ffffff26; border-radius:16px; padding:5px; background:#161c20c9; }
+.workspace-switch button { border:0; border-radius:12px; padding:8px 20px; background:transparent; color:#c5d4d3; }
+.workspace-switch button.active { background:#702c40; color:#fff; box-shadow:0 4px 20px #7a204a55; }
+.workspace-tasks { display:grid; gap:15px; }
+.workspace-tasks form { display:grid; gap:8px; }
+.workspace-project-form > div { display:flex; gap:8px; }
+.workspace-project-form input { flex:1; min-width:0; }
+.workspace-tasks :is(input,textarea,select) { border-radius:12px; border:1px solid #ffffff30; background:#171e25; color:white; padding:10px; }
+.workspace-task-form textarea { resize:vertical; width:100%; }
+.workspace-task-list { display:grid; gap:9px; }
+.workspace-task-item { border:1px solid #ffffff20; border-radius:14px; padding:12px; background:#121b22bd; }
+.workspace-task-item p { white-space:pre-wrap; overflow-wrap:anywhere; margin:0 0 9px; }
+.workspace-task-item small { color:#a8bbbc; }
+.workspace-task-item button { margin-inline-start:12px; }
+@media(max-width:600px) { .workspace-project-form > div { flex-wrap:wrap; } .workspace-switch { width:100%; } .workspace-switch button { flex:1; } }

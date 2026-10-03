@@ -21,6 +21,7 @@ from .local_routing import choose_local_chat_model
 from .nodes import NodeRegistry
 from .providers import ProviderRegistry
 from .profile_memory import ProfileMemory
+from .workspace import WorkspaceStore
 
 MAX_BODY_BYTES = 64 * 1024
 LAN_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
@@ -50,6 +51,7 @@ def make_server(
     nodes = NodeRegistry(identity_store) if identity_store else None
     providers = ProviderRegistry(identity_store) if identity_store else None
     memory = ProfileMemory(identity_store) if identity_store else None
+    workspace = WorkspaceStore(identity_store) if identity_store else None
 
     def current_ollama() -> OllamaClient:
         endpoint = identity_store.ollama_endpoint() if identity_store else None
@@ -259,6 +261,9 @@ def make_server(
                 "/api/agent/pairing", "/api/agent/redeem", "/api/agent/heartbeat", "/api/agent/logout", "/api/agent/chat", "/api/web/chat",
                 "/api/chat/history/clear", "/api/chat/memory/add", "/api/chat/memory/remove",
                 "/api/agent/history/clear", "/api/agent/memory/add", "/api/agent/memory/remove",
+                "/api/web/workspace/projects", "/api/agent/workspace/projects",
+                "/api/web/workspace/tasks", "/api/agent/workspace/tasks",
+                "/api/web/workspace/tasks/cancel", "/api/agent/workspace/tasks/cancel",
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/enable", "/api/admin/providers/price",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
@@ -331,6 +336,12 @@ def make_server(
                 elif path in ('/api/chat/memory/remove', '/api/agent/memory/remove'):
                     memory.remove_note(principal, payload.get('id'))
                     self._send(200, {'status': 'removed'})
+                elif path in ('/api/web/workspace/projects', '/api/agent/workspace/projects'):
+                    self._send(201, workspace.create_project(principal, payload.get('name')))
+                elif path in ('/api/web/workspace/tasks', '/api/agent/workspace/tasks'):
+                    self._send(201, workspace.create_task(principal, payload.get('project_id'), payload.get('description')))
+                elif path in ('/api/web/workspace/tasks/cancel', '/api/agent/workspace/tasks/cancel'):
+                    self._send(200, workspace.cancel_task(principal, payload.get('id')))
                 elif path in ('/api/agent/chat', '/api/web/chat'):
                     self._send(200, self._answer_chat(principal, payload))
                 else:
@@ -345,6 +356,19 @@ def make_server(
                 self._send(503, {"error": {"message": str(exc)}})
 
         def do_GET(self):
+            if self.path in ('/api/web/workspace/projects', '/api/agent/workspace/projects',
+                             '/api/web/workspace/tasks', '/api/agent/workspace/tasks'):
+                principal = self._principal('agent' if self.path.startswith('/api/agent/') else 'web')
+                if principal is None:
+                    return
+                try:
+                    if self.path.endswith('/projects'):
+                        self._send(200, {'projects': workspace.list_projects(principal)})
+                    else:
+                        self._send(200, {'tasks': workspace.list_tasks(principal)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                return
             if self.path in ('/api/chat/history', '/api/chat/memory', '/api/agent/history', '/api/agent/memory'):
                 principal = self._principal('agent' if self.path.startswith('/api/agent/') else 'web')
                 if principal is None:

@@ -8,6 +8,8 @@ export type Profile = {
 
 export type ChatHistory = { id: string; prompt: string; reply: string; model: string; created_at: number };
 export type MemoryNote = { id: string; content: string; created_at: number };
+export type WorkspaceProject = { id: string; name: string; created_at: number };
+export type TaskDraft = { id: string; project_id: string; description: string; status: "draft" | "cancelled"; created_at: number; updated_at: number };
 export type PendingUser = { id: string; username: string; mobile: string; created_at: number };
 export type LoginResult = { token: string; user: Profile; pending_count: number };
 export type LocalModel = { id: string; size_bytes: number | null };
@@ -60,6 +62,11 @@ export const api = {
   operations: () => request<Operations>("/api/admin/operations"),
   webModels: () => request<{ models: string[] }>("/api/web/models"),
   webChat: (message: string, model: string, allow_external = false, save_history = false) => request<{ reply: string; model: string }>("/api/web/chat", "POST", { message, model, allow_external, save_history }),
+  projects: () => request<{ projects: WorkspaceProject[] }>("/api/web/workspace/projects"),
+  createProject: (name: string) => request<{ id: string; name: string }>("/api/web/workspace/projects", "POST", { name }),
+  taskDrafts: () => request<{ tasks: TaskDraft[] }>("/api/web/workspace/tasks"),
+  createTaskDraft: (project_id: string, description: string) => request<{ id: string; status: string }>("/api/web/workspace/tasks", "POST", { project_id, description }),
+  cancelTaskDraft: (id: string) => request<{ status: string }>("/api/web/workspace/tasks/cancel", "POST", { id }),
   chatHistory: () => request<{ entries: ChatHistory[] }>("/api/chat/history"),
   clearChatHistory: () => request<{ status: string }>("/api/chat/history/clear", "POST", {}),
   memoryNotes: () => request<{ notes: MemoryNote[] }>("/api/chat/memory"),

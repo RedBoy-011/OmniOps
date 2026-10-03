@@ -235,8 +235,9 @@ async fn send_agent_chat(
         .map_err(|_| "پاسخ گفتگو معتبر نیست".into())
 }
 
-async fn memory_call(
+async fn profile_call(
     state: State<'_, SharedState>,
+    capability: &'static str,
     method: reqwest::Method,
     route: &'static str,
     body: Option<serde_json::Value>,
@@ -244,8 +245,13 @@ async fn memory_call(
     let (origin, token, generation) = {
         let guard = state.session.lock().map_err(|_| "Session unavailable")?;
         let session = guard.as_ref().ok_or("Sign in first")?;
-        if !session.profile.capabilities.iter().any(|cap| cap == "chat") {
-            return Err("Chat permission required".into());
+        if !session
+            .profile
+            .capabilities
+            .iter()
+            .any(|cap| cap == capability)
+        {
+            return Err("Profile permission required".into());
         }
         (
             session.master_url.clone(),
@@ -265,12 +271,12 @@ async fn memory_call(
         .await
         .map_err(|_| "Master connection failed")?;
     if !response.status().is_success() {
-        return Err(format!("Memory request failed ({})", response.status()));
+        return Err(format!("Profile request failed ({})", response.status()));
     }
     let result = response
         .json::<serde_json::Value>()
         .await
-        .map_err(|_| "Invalid memory response")?;
+        .map_err(|_| "Invalid profile response")?;
     let guard = state.session.lock().map_err(|_| "Session unavailable")?;
     if guard
         .as_ref()
@@ -283,13 +289,21 @@ async fn memory_call(
 
 #[tauri::command]
 async fn agent_history(state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
-    memory_call(state, reqwest::Method::GET, "/api/agent/history", None).await
+    profile_call(
+        state,
+        "chat",
+        reqwest::Method::GET,
+        "/api/agent/history",
+        None,
+    )
+    .await
 }
 
 #[tauri::command]
 async fn agent_clear_history(state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
-    memory_call(
+    profile_call(
         state,
+        "chat",
         reqwest::Method::POST,
         "/api/agent/history/clear",
         Some(serde_json::json!({})),
@@ -299,7 +313,14 @@ async fn agent_clear_history(state: State<'_, SharedState>) -> Result<serde_json
 
 #[tauri::command]
 async fn agent_memory(state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
-    memory_call(state, reqwest::Method::GET, "/api/agent/memory", None).await
+    profile_call(
+        state,
+        "chat",
+        reqwest::Method::GET,
+        "/api/agent/memory",
+        None,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -307,8 +328,9 @@ async fn agent_add_memory(
     content: String,
     state: State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
-    memory_call(
+    profile_call(
         state,
+        "chat",
         reqwest::Method::POST,
         "/api/agent/memory/add",
         Some(serde_json::json!({"content": content})),
@@ -321,10 +343,81 @@ async fn agent_remove_memory(
     id: String,
     state: State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
-    memory_call(
+    profile_call(
         state,
+        "chat",
         reqwest::Method::POST,
         "/api/agent/memory/remove",
+        Some(serde_json::json!({"id": id})),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn list_agent_projects(state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
+    profile_call(
+        state,
+        "chat",
+        reqwest::Method::GET,
+        "/api/agent/workspace/projects",
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn create_agent_project(
+    name: String,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    profile_call(
+        state,
+        "chat",
+        reqwest::Method::POST,
+        "/api/agent/workspace/projects",
+        Some(serde_json::json!({"name": name})),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn list_agent_tasks(state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
+    profile_call(
+        state,
+        "action.request",
+        reqwest::Method::GET,
+        "/api/agent/workspace/tasks",
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn create_agent_task(
+    project_id: String,
+    description: String,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    profile_call(
+        state,
+        "action.request",
+        reqwest::Method::POST,
+        "/api/agent/workspace/tasks",
+        Some(serde_json::json!({"project_id": project_id, "description": description})),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn cancel_agent_task(
+    id: String,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    profile_call(
+        state,
+        "action.request",
+        reqwest::Method::POST,
+        "/api/agent/workspace/tasks/cancel",
         Some(serde_json::json!({"id": id})),
     )
     .await
@@ -516,6 +609,11 @@ pub fn run() {
             agent_memory,
             agent_add_memory,
             agent_remove_memory,
+            list_agent_projects,
+            create_agent_project,
+            list_agent_tasks,
+            create_agent_task,
+            cancel_agent_task,
             list_agent_models,
             disconnect_agent,
             hide_agent,
