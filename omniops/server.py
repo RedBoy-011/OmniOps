@@ -23,7 +23,7 @@ from .providers import ProviderRegistry
 from .profile_memory import ProfileMemory
 from .workspace import WorkspaceStore
 
-MAX_BODY_BYTES = 64 * 1024
+MAX_BODY_BYTES = 384 * 1024
 LAN_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"
 ))
@@ -264,6 +264,8 @@ def make_server(
                 "/api/web/workspace/projects", "/api/agent/workspace/projects",
                 "/api/web/workspace/tasks", "/api/agent/workspace/tasks",
                 "/api/web/workspace/tasks/cancel", "/api/agent/workspace/tasks/cancel",
+                "/api/web/workspace/attachments", "/api/agent/workspace/attachments",
+                "/api/web/workspace/attachments/remove", "/api/agent/workspace/attachments/remove",
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/enable", "/api/admin/providers/price",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
@@ -342,6 +344,11 @@ def make_server(
                     self._send(201, workspace.create_task(principal, payload.get('project_id'), payload.get('description')))
                 elif path in ('/api/web/workspace/tasks/cancel', '/api/agent/workspace/tasks/cancel'):
                     self._send(200, workspace.cancel_task(principal, payload.get('id')))
+                elif path in ('/api/web/workspace/attachments', '/api/agent/workspace/attachments'):
+                    self._send(201, workspace.add_attachment(principal, payload.get('project_id'),
+                                                              payload.get('name'), payload.get('mime'), payload.get('content_base64')))
+                elif path in ('/api/web/workspace/attachments/remove', '/api/agent/workspace/attachments/remove'):
+                    self._send(200, workspace.remove_attachment(principal, payload.get('id')))
                 elif path in ('/api/agent/chat', '/api/web/chat'):
                     self._send(200, self._answer_chat(principal, payload))
                 else:
@@ -356,6 +363,18 @@ def make_server(
                 self._send(503, {"error": {"message": str(exc)}})
 
         def do_GET(self):
+            from urllib.parse import parse_qs, urlsplit
+            parsed = urlsplit(self.path)
+            if parsed.path in ('/api/web/workspace/attachments', '/api/agent/workspace/attachments'):
+                principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
+                if principal is None:
+                    return
+                try:
+                    ids = parse_qs(parsed.query).get('project_id', [])
+                    self._send(200, {'attachments': workspace.list_attachments(principal, ids[0] if len(ids) == 1 else None)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                return
             if self.path in ('/api/web/workspace/projects', '/api/agent/workspace/projects',
                              '/api/web/workspace/tasks', '/api/agent/workspace/tasks'):
                 principal = self._principal('agent' if self.path.startswith('/api/agent/') else 'web')

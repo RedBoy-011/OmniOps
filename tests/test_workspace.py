@@ -1,4 +1,5 @@
-﻿import tempfile
+﻿import base64
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -41,3 +42,19 @@ class WorkspaceTests(unittest.TestCase):
             self.workspace.create_task(no_action, project['id'], 'Forbidden')
         with self.assertRaises(IdentityError):
             self.workspace.create_task(self.member, project['id'], 'x' * 2001)
+
+    def test_attachment_ownership_validation_and_deletion(self):
+        project = self.workspace.create_project(self.member, 'Files')
+        payload = base64.b64encode('سلام'.encode()).decode()
+        item = self.workspace.add_attachment(self.member, project['id'], 'note.txt', 'text/plain', payload)
+        self.assertEqual(self.workspace.list_attachments(self.member, project['id'])[0]['id'], item['id'])
+        with self.assertRaises(IdentityError):
+            self.workspace.list_attachments(self.owner, project['id'])
+        with self.assertRaises(IdentityError):
+            self.workspace.remove_attachment(self.owner, item['id'])
+        with self.assertRaises(IdentityError):
+            self.workspace.add_attachment(self.member, project['id'], 'fake.png', 'image/png', payload)
+        with self.assertRaises(IdentityError):
+            self.workspace.add_attachment(self.member, project['id'], 'bad.txt', 'text/plain', 'not-base64!')
+        self.workspace.remove_attachment(self.member, item['id'])
+        self.assertEqual(self.workspace.list_attachments(self.member, project['id']), [])

@@ -1,3 +1,4 @@
+import base64
 import json
 import tempfile
 import threading
@@ -134,6 +135,16 @@ class IdentityGatewayTests(unittest.TestCase):
         status, project = self.call("POST", "/api/web/workspace/projects", {"name": "First project"}, member_token)
         self.assertEqual(status, 201)
         self.assertEqual(self.call("GET", "/api/web/workspace/projects", token=admin_token)[1]["projects"], [])
+        content = base64.b64encode('test attachment'.encode()).decode()
+        status, attachment = self.call('POST', '/api/web/workspace/attachments', {
+            'project_id': project['id'], 'name': 'note.txt', 'mime': 'text/plain', 'content_base64': content}, member_token)
+        self.assertEqual(status, 201)
+        attachment_path = '/api/web/workspace/attachments?project_id=' + project['id']
+        self.assertEqual(self.call('GET', attachment_path, token=member_token)[1]['attachments'][0]['id'], attachment['id'])
+        self.assertEqual(self.call('GET', attachment_path, token=admin_token)[0], 404)
+        self.assertEqual(self.call('POST', '/api/web/workspace/attachments/remove', {'id': attachment['id']}, admin_token)[0], 404)
+        self.assertEqual(self.call('POST', '/api/agent/workspace/attachments/remove', {'id': attachment['id']}, agent_token)[0], 200)
+        self.assertEqual(self.call('GET', attachment_path, token=member_token)[1]['attachments'], [])
         self.assertEqual(self.call("GET", "/api/agent/workspace/projects", token=member_token)[0], 401)
         self.assertEqual(self.call("GET", "/api/agent/workspace/projects", token=agent_token)[1]["projects"][0]["id"], project["id"])
         status, task = self.call("POST", "/api/agent/workspace/tasks", {"project_id": project["id"], "description": "Report draft"}, agent_token)

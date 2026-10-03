@@ -9,6 +9,7 @@ export type Profile = {
 export type ChatHistory = { id: string; prompt: string; reply: string; model: string; created_at: number };
 export type MemoryNote = { id: string; content: string; created_at: number };
 export type WorkspaceProject = { id: string; name: string; created_at: number };
+export type WorkspaceAttachment = { id: string; project_id: string; name: string; mime: string; size: number; created_at: number };
 export type TaskDraft = { id: string; project_id: string; description: string; status: "draft" | "cancelled"; created_at: number; updated_at: number };
 export type PendingUser = { id: string; username: string; mobile: string; created_at: number };
 export type LoginResult = { token: string; user: Profile; pending_count: number };
@@ -64,6 +65,9 @@ export const api = {
   webChat: (message: string, model: string, allow_external = false, save_history = false) => request<{ reply: string; model: string }>("/api/web/chat", "POST", { message, model, allow_external, save_history }),
   projects: () => request<{ projects: WorkspaceProject[] }>("/api/web/workspace/projects"),
   createProject: (name: string) => request<{ id: string; name: string }>("/api/web/workspace/projects", "POST", { name }),
+  attachments: (project_id: string) => request<{ attachments: WorkspaceAttachment[] }>(`/api/web/workspace/attachments?project_id=${encodeURIComponent(project_id)}`),
+  addAttachment: (project_id: string, name: string, mime: string, content_base64: string) => request<WorkspaceAttachment>("/api/web/workspace/attachments", "POST", { project_id, name, mime, content_base64 }),
+  removeAttachment: (id: string) => request<{ status: string }>("/api/web/workspace/attachments/remove", "POST", { id }),
   taskDrafts: () => request<{ tasks: TaskDraft[] }>("/api/web/workspace/tasks"),
   createTaskDraft: (project_id: string, description: string) => request<{ id: string; status: string }>("/api/web/workspace/tasks", "POST", { project_id, description }),
   cancelTaskDraft: (id: string) => request<{ status: string }>("/api/web/workspace/tasks/cancel", "POST", { id }),

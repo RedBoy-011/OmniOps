@@ -1,5 +1,7 @@
 ﻿"""Owner-scoped project list and durable task drafts without tool execution."""
 
+import base64
+import binascii
 import uuid
 
 from .identity import IdentityError
@@ -22,6 +24,13 @@ class WorkspaceStore:
                     created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS workspace_task_owner ON workspace_tasks(owner_id, created_at);
+                CREATE TABLE IF NOT EXISTS workspace_attachments (
+                    id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    project_id TEXT NOT NULL REFERENCES workspace_projects(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL,
+                    content BLOB NOT NULL, created_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS workspace_attachment_owner ON workspace_attachments(owner_id, project_id);
             """)
 
     @staticmethod
@@ -88,3 +97,74 @@ class WorkspaceStore:
                 raise IdentityError('Draft task not found', 404)
             self.store._audit(db, principal['id'], 'workspace_task_draft_cancelled', task_id)
         return {'status': 'cancelled'}
+
+    def list_attachments(self, principal, project_id):
+        self._cap(principal, 'chat')
+        if not isinstance(project_id, str) or len(project_id) != 32:
+            raise IdentityError('Invalid project ID')
+        with self.store._db() as db:
+            if not db.execute('SELECT 1 FROM workspace_projects WHERE id=? AND owner_id=?',
+                              (project_id, principal['id'])).fetchone():
+                raise IdentityError('Project not found', 404)
+            return [dict(row) for row in db.execute(
+                'SELECT id,project_id,name,mime,size,created_at FROM workspace_attachments '
+                'WHERE owner_id=? AND project_id=? ORDER BY created_at DESC, rowid DESC',
+                (principal['id'], project_id))]
+
+    def add_attachment(self, principal, project_id, name, mime, encoded):
+        self._cap(principal, 'chat')
+        if not isinstance(project_id, str) or len(project_id) != 32:
+            raise IdentityError('Invalid project ID')
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120 or any(
+                c in name for c in ('/', '\\', '\x00', '\n', '\r')):
+            raise IdentityError('Invalid attachment name')
+        if mime not in ('text/plain', 'image/png', 'image/jpeg', 'image/webp'):
+            raise IdentityError('Unsupported attachment type')
+        if not isinstance(encoded, str) or len(encoded) > 350000:
+            raise IdentityError('Attachment exceeds 256 KiB', 413)
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise IdentityError('Invalid attachment encoding') from exc
+        if not 0 < len(content) <= 256 * 1024:
+            raise IdentityError('Attachment exceeds 256 KiB', 413)
+        if mime == 'text/plain':
+            try:
+                text = content.decode('utf-8')
+            except UnicodeDecodeError as exc:
+                raise IdentityError('Text attachment must be UTF-8') from exc
+            if '\x00' in text:
+                raise IdentityError('Invalid text attachment')
+        elif mime == 'image/png' and not content.startswith(b'\x89PNG\r\n\x1a\n'):
+            raise IdentityError('Invalid PNG image')
+        elif mime == 'image/jpeg' and not content.startswith(b'\xff\xd8\xff'):
+            raise IdentityError('Invalid JPEG image')
+        elif mime == 'image/webp' and not (content.startswith(b'RIFF') and content[8:12] == b'WEBP'):
+            raise IdentityError('Invalid WebP image')
+        with self.store._lock, self.store._db() as db:
+            if not db.execute('SELECT 1 FROM workspace_projects WHERE id=? AND owner_id=?',
+                              (project_id, principal['id'])).fetchone():
+                raise IdentityError('Project not found', 404)
+            count, total = db.execute('SELECT COUNT(*), COALESCE(SUM(size),0) FROM workspace_attachments '
+                                      'WHERE owner_id=?', (principal['id'],)).fetchone()
+            if count >= 50 or total + len(content) > 10 * 1024 * 1024:
+                raise IdentityError('Attachment quota reached', 409)
+            attachment_id = uuid.uuid4().hex
+            created = int(self.store.clock())
+            db.execute('INSERT INTO workspace_attachments VALUES (?,?,?,?,?,?,?,?)',
+                       (attachment_id, principal['id'], project_id, name.strip(), mime, len(content), content, created))
+            self.store._audit(db, principal['id'], 'workspace_attachment_added', attachment_id)
+        return {'id': attachment_id, 'project_id': project_id, 'name': name.strip(),
+                'mime': mime, 'size': len(content), 'created_at': created}
+
+    def remove_attachment(self, principal, attachment_id):
+        self._cap(principal, 'chat')
+        if not isinstance(attachment_id, str) or len(attachment_id) != 32:
+            raise IdentityError('Invalid attachment ID')
+        with self.store._lock, self.store._db() as db:
+            changed = db.execute('DELETE FROM workspace_attachments WHERE id=? AND owner_id=?',
+                                 (attachment_id, principal['id'])).rowcount
+            if changed != 1:
+                raise IdentityError('Attachment not found', 404)
+            self.store._audit(db, principal['id'], 'workspace_attachment_removed', attachment_id)
+        return {'status': 'removed'}
