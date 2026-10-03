@@ -14,6 +14,8 @@
 - [بررسی ۹ ابزار MCP و برنامهٔ اتصال آن‌ها](docs/MCP_INTEGRATIONS.fa.md)
 - [وضعیت پیاده‌سازی و گام‌های بعدی](docs/IMPLEMENTATION_STATUS.fa.md)
 - [نقشهٔ راه مرحله‌ای و درصدهای قابل سنجش](docs/PROGRESS_ROADMAP.fa.md)
+- [تطبیق نقشهٔ ده‌فازی عامل با پروژه و رفع اشکال ترتیب](docs/AGENT_10_PHASE_REVIEW.fa.md)
+- [راهنمای تحویل و فهرست همهٔ فایل‌ها برای عامل بعدی](docs/PROJECT_HANDOFF.fa.md)
 - [ساخت ویندوز و دریافت خروجی از GitHub Actions](docs/GITHUB_BUILD.fa.md)
 - [اجرای آزمایشی هسته روی اوبونتو و اتصال امن ایجنت ویندوز](docs/UBUNTU_TEST.fa.md)
 - [تطبیق رابط و رفتار ایجنت با مرجع Coucou](docs/COUCOU_AGENT_ADAPTATION.fa.md)
