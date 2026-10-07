@@ -1,0 +1,119 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: omniops-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-omniops}
+      POSTGRES_USER: ${POSTGRES_USER:-omniops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-omniops} -d ${POSTGRES_DB:-omniops}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - omniops-internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: omniops-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - omniops-internal
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.0
+    container_name: omniops-qdrant
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
+    volumes:
+      - qdrantdata:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - omniops-internal
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: omniops-litellm
+    restart: unless-stopped
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml:ro
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "4"]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:4000/health/liveliness\")'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - omniops-internal
+
+  master-core:
+    build:
+      context: ../..
+      dockerfile: cluster/master/Dockerfile
+    container_name: omniops-master-core
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
+    ports:
+      - "${OMNIOPS_BIND_PORT:-8000}:8000"
+    environment:
+      CLUSTER_SECRET_KEY: ${CLUSTER_SECRET_KEY:?CLUSTER_SECRET_KEY is required}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-omniops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-omniops}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      LITELLM_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      WORKER_TIMEOUT_SECONDS: "30"
+    volumes:
+      - ../../skills:/app/skills:ro
+      - ../../web/app/dist:/app/web/dist:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health\")'"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - omniops-internal
+      - omniops-external
+
+networks:
+  omniops-internal:
+    driver: bridge
+    internal: true
+  omniops-external:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
+  qdrantdata:

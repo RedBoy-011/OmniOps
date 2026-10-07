@@ -60,6 +60,7 @@ struct Session {
 struct SharedState {
     session: Arc<Mutex<Option<Session>>>,
     sequence: AtomicU64,
+    approval_mode: Arc<Mutex<String>>,
 }
 
 impl SharedState {
@@ -67,6 +68,7 @@ impl SharedState {
         Self {
             session: Arc::new(Mutex::new(None)),
             sequence: AtomicU64::new(1),
+            approval_mode: Arc::new(Mutex::new("auto".to_string())),
         }
     }
 }
@@ -484,25 +486,63 @@ fn quit_agent(app: AppHandle) {
 }
 
 #[tauri::command]
+fn set_approval_mode(mode: String, state: State<'_, SharedState>) -> Result<(), String> {
+    let mut guard = state.approval_mode.lock().map_err(|_| "Failed to lock state".to_string())?;
+    match mode.as_str() {
+        "manual" | "auto" | "full_access" => {
+            *guard = mode;
+            Ok(())
+        }
+        _ => Err("Invalid approval mode. Choose manual, auto, or full_access".into()),
+    }
+}
+
+#[tauri::command]
+fn get_approval_mode(state: State<'_, SharedState>) -> Result<String, String> {
+    let guard = state.approval_mode.lock().map_err(|_| "Failed to lock state".to_string())?;
+    Ok(guard.clone())
+}
+
+#[tauri::command]
+fn toggle_maximize(app: AppHandle) -> Result<bool, String> {
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
+    let is_max = window.is_maximized().map_err(|e| e.to_string())?;
+    if is_max {
+        window.unmaximize().map_err(|e| e.to_string())?;
+        Ok(false)
+    } else {
+        window.maximize().map_err(|e| e.to_string())?;
+        Ok(true)
+    }
+}
+
+#[tauri::command]
+fn minimize_window(app: AppHandle) -> Result<(), String> {
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
+    window.minimize().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn set_compact(app: AppHandle, compact: bool) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or("پنجرهٔ ایجنت پیدا نشد")?;
     let monitor = window.current_monitor().ok().flatten();
     let (width, height) = if compact {
-        (320.0, 76.0)
+        (340.0, 76.0)
     } else if let Some(ref monitor) = monitor {
         let scale = monitor.scale_factor();
         (
-            560.0_f64
+            1160.0_f64
                 .min(monitor.size().width as f64 / scale - 32.0)
-                .max(350.0),
-            640.0_f64
-                .min(monitor.size().height as f64 / scale - 80.0)
+                .max(500.0),
+            780.0_f64
+                .min(monitor.size().height as f64 / scale - 60.0)
                 .max(480.0),
         )
     } else {
-        (520.0, 600.0)
+        (1160.0, 780.0)
     };
     window
         .set_size(LogicalSize::new(width, height))
@@ -510,7 +550,7 @@ fn set_compact(app: AppHandle, compact: bool) -> Result<(), String> {
     if let Some(monitor) = monitor {
         let scale = monitor.scale_factor();
         let x = monitor.position().x + ((monitor.size().width as f64 - width * scale) / 2.0) as i32;
-        let y = monitor.position().y + (if compact { 0.0 } else { 16.0 } * scale) as i32;
+        let y = monitor.position().y + (if compact { 0.0 } else { 20.0 } * scale) as i32;
         window
             .set_position(PhysicalPosition::new(x, y))
             .map_err(|_| "جابه‌جایی پنجره ممکن نشد".to_string())?;
@@ -618,7 +658,11 @@ pub fn run() {
             disconnect_agent,
             hide_agent,
             quit_agent,
-            set_compact
+            set_compact,
+            set_approval_mode,
+            get_approval_mode,
+            toggle_maximize,
+            minimize_window
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

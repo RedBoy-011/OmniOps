@@ -1,0 +1,12 @@
+{
+  "name": "OmniOps Mobile Companion",
+  "short_name": "OmniOps Mobile",
+  "description": "Enterprise Mobile Companion for OmniOps Studio & Windows Agent Relay",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d0d0f",
+  "theme_color": "#0d0d0f",
+  "dir": "rtl",
+  "lang": "fa"
+}

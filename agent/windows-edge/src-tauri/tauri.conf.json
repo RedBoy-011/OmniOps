@@ -13,13 +13,13 @@
     "windows": [{
       "label": "main",
       "title": "OmniOps Edge",
-      "width": 460,
-      "height": 560,
-      "minWidth": 300,
-      "minHeight": 70,
+      "width": 1160,
+      "height": 780,
+      "minWidth": 340,
+      "minHeight": 76,
       "transparent": true,
       "decorations": false,
-      "alwaysOnTop": true,
+      "alwaysOnTop": false,
       "resizable": true,
       "center": true
     }],
