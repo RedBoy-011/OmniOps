@@ -381,6 +381,58 @@ async fn create_agent_project(
 }
 
 #[tauri::command]
+async fn list_agent_attachments(
+    project_id: String,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    if project_id.len() != 32 || !project_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("شناسهٔ پروژه معتبر نیست".into());
+    }
+    profile_call(
+        state,
+        "chat",
+        reqwest::Method::GET,
+        &format!("/api/agent/workspace/attachments?project_id={project_id}"),
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn add_agent_attachment(
+    project_id: String,
+    name: String,
+    mime: String,
+    content_base64: String,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    profile_call(
+        state,
+        "chat",
+        reqwest::Method::POST,
+        "/api/agent/workspace/attachments",
+        Some(serde_json::json!({"project_id": project_id, "name": name,
+                                "mime": mime, "content_base64": content_base64})),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn remove_agent_attachment(
+    id: String,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    profile_call(
+        state,
+        "chat",
+        reqwest::Method::POST,
+        "/api/agent/workspace/attachments/remove",
+        Some(serde_json::json!({"id": id})),
+    )
+    .await
+}
+
+#[tauri::command]
 async fn list_agent_tasks(state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
     profile_call(
         state,
@@ -611,6 +663,9 @@ pub fn run() {
             agent_remove_memory,
             list_agent_projects,
             create_agent_project,
+            list_agent_attachments,
+            add_agent_attachment,
+            remove_agent_attachment,
             list_agent_tasks,
             create_agent_task,
             cancel_agent_task,
