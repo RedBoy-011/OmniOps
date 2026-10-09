@@ -73,17 +73,14 @@ flowchart LR
 برای راه‌اندازی سریع سرور Master روی اوبونتو با اسکریپت خودکار به‌روزرسانی و مدیریت سرویس:
 
 ```bash
-# نصب خودکار کلون و اجرای سرویس Master
+# نصب خودکار کلون و اجرای سرویس Master (تشخیص هوشمند آی‌پی سرور و ساخت حساب مدیر)
 git clone https://github.com/RedBoy-011/OmniOps.git /opt/omniops && cd /opt/omniops && sudo bash scripts/update-ubuntu.sh
 ```
 
-> **نکته برای سرورهای در حال اجرا:** اگر از قبل هسته را نصب کرده‌اید، می‌توانید دستور تک‌خطی زیر را برای به‌روزرسانی سریع اجرا کنید:
+> **نکته:** اسکریپت به صورت فوق‌هوشمند آی‌پی خصوصی سرور را شناسایی کرده، پیش‌نیازها را نصب می‌کند، در اولین نصب حساب مدیر ارشد را می‌سازد و در پایان اطلاعات ورود به پنل وب را نمایش می‌دهد.
+> برای سرورهای در حال اجرا نیز همین دستور یا دستور تک‌خطی زیر عملیات به‌روزرسانی امن (بدون پاک‌شدن داده‌ها) را انجام می‌دهد:
 > ```bash
 > bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/RedBoy-011/OmniOps/main/scripts/update-ubuntu.sh | bash'
-> ```
-> برای تنظیم IP خصوصی مشخص در شبکه محلی:
-> ```bash
-> OMNIOPS_BIND_HOST=LAN_IP bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/RedBoy-011/OmniOps/main/scripts/update-ubuntu.sh | bash'
 > ```
 
 ---
