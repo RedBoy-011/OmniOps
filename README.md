@@ -66,60 +66,62 @@ flowchart LR
 
 ---
 
-## 🚀 نصب و راه‌اندازی سریع
+## 🚀 راهنمای نصب و راه‌اندازی گره‌ها (دستورات تک‌خطی)
 
-### ۱. نصب تک‌خطی سرور Master (اوبونتو / سرور لینوکس)
-
-برای راه‌اندازی سریع سرور Master روی اوبونتو با اسکریپت خودکار به‌روزرسانی و مدیریت سرویس:
+### ۱. سرور اصلی (Master Node - لینوکس / اوبونتو)
+سرور مرکزی هویت، پنل وب، سیاست‌ها و کنترل‌پلین سیستم است. برای نصب خودکار یا به‌روزرسانی:
 
 ```bash
-# نصب خودکار کلون و اجرای سرویس Master (تشخیص هوشمند آی‌پی سرور و ساخت حساب مدیر)
-git clone https://github.com/RedBoy-011/OmniOps.git /opt/omniops && cd /opt/omniops && sudo bash scripts/update-ubuntu.sh
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/RedBoy-011/OmniOps/main/scripts/update-ubuntu.sh | bash'
 ```
-
-> **نکته:** اسکریپت به صورت فوق‌هوشمند آی‌پی خصوصی سرور را شناسایی کرده، پیش‌نیازها را نصب می‌کند، در اولین نصب حساب مدیر ارشد را می‌سازد و در پایان اطلاعات ورود به پنل وب را نمایش می‌دهد.
-> برای سرورهای در حال اجرا نیز همین دستور یا دستور تک‌خطی زیر عملیات به‌روزرسانی امن (بدون پاک‌شدن داده‌ها) را انجام می‌دهد:
-> ```bash
-> bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/RedBoy-011/OmniOps/main/scripts/update-ubuntu.sh | bash'
-> ```
+> **ویژگی هوشمند:** این اسکریپت آی‌پی خصوصی سرور را خودکار تشخیص می‌دهد، پیش‌نیازها را نصب می‌کند، حساب مدیر ارشد را می‌سازد و در پایان آدرس ورود به پنل را تحویل می‌دهد.
 
 ---
 
-### ۲. راه‌اندازی محلی روی ویندوز (محیط توسعه / تست)
+### ۲. نود عملیاتی (Worker Node - پردازش مدل‌های محلی)
+سرور پردازشی مجزا در شبکه خصوصی برای اجرای مدل‌های هوش مصنوعی (Ollama) و گزارش سلامت:
 
-#### پیش‌نیازها:
-* **Python 3.10+** (دارای لانچر `py`)
-* **Node.js 18+** و **npm**
-* سرور **Ollama** محلی در حال اجرا (اختیاری جهت چت هوشمند)
-
-#### گام الف: ساخت پنل وب
-```powershell
-cd web/app
-npm ci
-npm run build
-cd ../..
+```bash
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/RedBoy-011/OmniOps/main/scripts/setup-worker.sh | bash'
 ```
+> **اتصال خودکار:** این اسکریپت Ollama را نصب کرده، مدل انتخابی (مثل `qwen3:0.6b`) را دانلود می‌کند، آدرس Master و کد مجوز را دریافت کرده و با گواهی TLS اختصاصی، نود را در پنل Master متصل و سبز می‌کند.  
+> *(کد مجوز یک‌بارمصرف را از سرور Master با دستور `python3 -m omniops.node_admin --local-root --role worker` دریافت کنید).*
 
-#### گام ب: مقداردهی کلیدها و اجرای Master
+---
+
+### ۳. سرور لبه شبکه اینترنتی (Edge Node - آینه عمومی اینترنتی)
+سرور عمومی دارای آی‌پی پابلیک و دامنه، برای دسترسی امن از اینترنت به پنل با SSL خودکار (Caddy):
+
+```bash
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/RedBoy-011/OmniOps/main/scripts/setup-edge.sh | bash'
+```
+> **درگاه امن:** ترافیک اینترنتی از طریق دامنه با گواهی Let's Encrypt دریافت شده و بدون بازکردن پورت‌های Master در اینترنت، به صورت امن به پنل داخلی هدایت می‌شود.
+
+---
+
+### ۴. کلاینت ویندوز (Windows Edge Agent)
+ایجنت شناور ویندوز برای پایش سخت‌افزاری و اجرای وظایف با نظارت انسانی:
+
+1. به مخزن گیت‌هاب بروید: [`RedBoy-011/OmniOps`](https://github.com/RedBoy-011/OmniOps)
+2. وارد تب **Actions** و گردش‌کار **Windows validation and installer** شوید.
+3. از بخش **Artifacts** در پایین آخرین اجرای موفق، بستهٔ `omniops-windows-x64-unsigned-preview` را دانلود کنید.
+4. فایل `OmniOps Windows Edge_0.1.0_x64-setup.exe` را نصب کرده و با پین ۶ رقمی دریافتی از پنل مدیر، کلاینت را متصل کنید.
+
+---
+
+### ۵. راه‌اندازی محلی روی ویندوز (محیط توسعه / تست آفلاین)
+اگر می‌خواهید هسته و وب را به صورت لوکال روی ویندوز بالا بیاورید:
 ```powershell
+# ساخت پنل فرانت‌اند
+cd web/app; npm ci; npm run build; cd ../..
+
+# اجرای سرور درگاه
 $env:OMNIOPS_API_KEY = py -3 -c "import secrets; print(secrets.token_urlsafe(32))"
 $env:OMNIOPS_SIGNING_KEY = py -3 -c "import secrets; print(secrets.token_urlsafe(48))"
 py -3 -m omniops.bootstrap
 py -3 -m omniops.server
 ```
-
-پنل وب از آدرس `http://127.0.0.1:9000` در دسترس خواهد بود. در اولین اجرا، حساب کاربری مدیر کل را بسازید.
-
----
-
-### ۳. دریافت کلاینت ویندوز (Windows Edge Agent)
-
-کلاینت ویندوز با GitHub Actions به‌طور خودکار کامپایل و به صورت نصاب NSIS آماده می‌شود:
-
-1. به مخزن گیت‌هاب پروژه بروید: [`RedBoy-011/OmniOps`](https://github.com/RedBoy-011/OmniOps)
-2. وارد تب **Actions** و گردش‌کار **Windows validation and installer** شوید.
-3. روی آخرین اجرای موفق کلیک کرده و از بخش **Artifacts** در پایین صفحه، بستهٔ `omniops-windows-x64-unsigned-preview` را دانلود کنید.
-4. فایل نصبی `OmniOps Windows Edge_0.1.0_x64-setup.exe` را نصب کنید و با پین ۶ رقمی دریافت شده از پنل مدیر، ایجنت را متصل نمایید.
+پنل از آدرس `http://127.0.0.1:9000` در دسترس خواهد بود.
 
 ---
 
