@@ -8,14 +8,48 @@ trap 'printf "\n⚠️ خطا در خط %s اسکریپت رخ داد.\n" "$LINE
 [[ "$(id -u)" == 0 ]] || fail 'این اسکریپت باید با دسترسی مدیر ارشد (root یا sudo) اجرا شود.'
 [[ -d /run/systemd/system ]] || fail 'نیازمند سیستم‌عامل با پشتیبانی systemd است.'
 
+# تابع خواندن امن از ترمینال کاربر حتی در صورت اجرای با curl | bash
+prompt_terminal() {
+  local prompt_text="$1"
+  local var_name="$2"
+  local default_val="${3:-}"
+  local is_secret="${4:-0}"
+  local res=""
+
+  if [[ -r /dev/tty ]]; then
+    if [[ "$is_secret" -eq 1 ]]; then
+      read -s -r -p "$prompt_text" res </dev/tty || true
+      printf '\n' >&2
+    else
+      read -r -p "$prompt_text" res </dev/tty || true
+    fi
+  elif [[ -t 0 ]]; then
+    if [[ "$is_secret" -eq 1 ]]; then
+      read -s -r -p "$prompt_text" res || true
+      printf '\n' >&2
+    else
+      read -r -p "$prompt_text" res || true
+    fi
+  fi
+  res="$(echo "${res:-$default_val}" | tr -d '\r\n')"
+  eval "$var_name=\"\$res\""
+}
+
 printf '\n======================================================================\n'
 printf '        راه‌اندازی سرور لبه شبکه اینترنتی OmniOps (Edge Node)\n'
 printf '======================================================================\n\n'
 
-printf 'نقش سرور Edge:\n'
-printf 'این سرور به عنوان درگاه عمومی اینترنتی با استفاده از وب‌سرور مدرن Caddy و گواهی خودکار\n'
-printf 'SSL (ACME/Let'\''s Encrypt) عمل می‌کند و ترافیک را به سرور داخلی Master هدایت می‌نماید،\n'
-printf 'بدون اینکه نیاز باشد پورت‌های سرورهای Master یا Worker روی اینترنت باز شوند.\n\n'
+cli_token=""
+cli_domain=""
+cli_master=""
+while (($#)); do
+  case "$1" in
+    --token) [[ $# -ge 2 ]] || fail '--token نیازمند مقدار است'; cli_token="$2"; shift 2 ;;
+    --domain) [[ $# -ge 2 ]] || fail '--domain نیازمند مقدار است'; cli_domain="$2"; shift 2 ;;
+    --master) [[ $# -ge 2 ]] || fail '--master نیازمند مقدار است'; cli_master="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
 
 # ۱. نصب پیش‌نیازها و وب‌سرور Caddy
 missing_tools=()
@@ -41,26 +75,33 @@ if ! command -v caddy >/dev/null 2>&1; then
 fi
 
 # ۲. دریافت نام دامنه عمومی اینترنتی
-domain=""
+domain="${cli_domain:-${OMNIOPS_EDGE_DOMAIN:-}}"
 while [[ -z "$domain" ]]; do
-  if [[ -r /dev/tty && -t 0 ]]; then
-    read -r -p "نام دامنه عمومی سرور لبه (مثال: ops.yourdomain.com یا آی‌پی عمومی): " domain </dev/tty || true
-  else
-    domain="${OMNIOPS_EDGE_DOMAIN:-}"
-    [[ -n "$domain" ]] || fail 'متغیر OMNIOPS_EDGE_DOMAIN در حالت غیرتعاملی لازم است.'
-  fi
+  prompt_terminal "نام دامنه عمومی سرور لبه (مثال: ops.yourdomain.com یا آی‌پی عمومی): " domain ""
   domain="$(echo "$domain" | tr -d '[:space:]')"
 done
 
 # ۳. دریافت آدرس سرور Master در شبکه داخلی یا تونل
-master_target=""
+master_target="${cli_master:-${OMNIOPS_EDGE_MASTER_TARGET:-}}"
+token_candidate="${cli_token:-}"
+
+if [[ -z "$master_target" && -n "$token_candidate" ]]; then
+  raw_token="${token_candidate#omniops_*_}"
+  master_target="$(python3 - "$raw_token" <<'PY'
+import sys, json, base64
+try:
+    data = json.loads(base64.urlsafe_b64decode(sys.argv[1].encode()).decode())
+    url = data.get('master_url', '')
+    url = url.replace('https://', '').replace('http://', '')
+    print(url)
+except Exception:
+    sys.exit(1)
+PY
+)" || true
+fi
+
 while [[ -z "$master_target" ]]; do
-  if [[ -r /dev/tty && -t 0 ]]; then
-    read -r -p "آدرس داخلی سرور Master در شبکه خصوصی (مثال: 172.19.30.94:9000): " master_target </dev/tty || true
-  else
-    master_target="${OMNIOPS_EDGE_MASTER_TARGET:-}"
-    [[ -n "$master_target" ]] || fail 'متغیر OMNIOPS_EDGE_MASTER_TARGET لازم است.'
-  fi
+  prompt_terminal "آدرس داخلی سرور Master در شبکه خصوصی یا تونل (مثال: 172.19.30.94:9000): " master_target ""
   master_target="$(echo "$master_target" | tr -d '[:space:]')"
 done
 
@@ -68,7 +109,6 @@ done
 if [[ "$master_target" != *":"* ]]; then
   master_target="$master_target:9000"
 fi
-# حذف http/https از ابتدای آدرس جهت Caddyfile
 master_target="${master_target#http://}"
 master_target="${master_target#https://}"
 

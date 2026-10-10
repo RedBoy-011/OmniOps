@@ -82,10 +82,14 @@ bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/RedBoy-011/Omn
 سرور پردازشی مجزا در شبکه خصوصی برای اجرای مدل‌های هوش مصنوعی (Ollama) و گزارش سلامت:
 
 ```bash
+# روش پیشنهادی: اجرای دستور آماده با توکن تبادل (که روی Master با دستور omniops-token worker تولید می‌شود):
+curl -fsSL https://raw.githubusercontent.com/RedBoy-011/OmniOps/main/scripts/setup-worker.sh | bash -s -- --token <JOIN_TOKEN>
+
+# یا اجرای تعاملی:
 bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/RedBoy-011/OmniOps/main/scripts/setup-worker.sh | bash'
 ```
-> **اتصال خودکار:** این اسکریپت Ollama را نصب کرده، مدل انتخابی (مثل `qwen3:0.6b`) را دانلود می‌کند، آدرس Master و کد مجوز را دریافت کرده و با گواهی TLS اختصاصی، نود را در پنل Master متصل و سبز می‌کند.  
-> *(کد مجوز یک‌بارمصرف را از سرور Master با دستور `python3 -m omniops.node_admin --local-root --role worker` دریافت کنید).*
+> **اتصال خودکار:** این اسکریپت Ollama را نصب کرده، مدل انتخابی (مثل `qwen3:0.6b`) را دانلود می‌کند، آدرس Master و گواهی TLS را به صورت خودکار از توکن تبادل استخراج کرده و نود را در پنل Master متصل و سبز می‌کند.  
+> *(برای صدور توکن تبادل در هر زمان، روی سرور Master دستور `omniops-token worker` را اجرا کنید).*
 
 ---
 

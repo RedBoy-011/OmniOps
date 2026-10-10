@@ -292,7 +292,23 @@ done
   fail 'سرویس پس از راه‌اندازی پاسخ سالم نداد. دستور بررسی لاگ: journalctl -u omniops-master.service -n 60 --no-pager'
 }
 
-# ۱۳. نمایش زیبا و کامل اطلاعات ورود به پنل و وضعیت سیستم
+# ۱۳. فعال‌سازی خودکار درگاه امن TLS 1.3 روی پورت ۹۴۴۳ برای اتصال گره‌های Worker/Edge
+if [[ ! -f /etc/systemd/system/omniops-master-tls.service ]]; then
+  printf 'در حال فعال‌سازی درگاه امن TLS 1.3 برای گره‌ها (پورت ۹۴۴۳)...\n'
+  export OMNIOPS_TLS_PORT=9443
+  bash "$repo/scripts/install-private-master-tls.sh" || true
+else
+  systemctl restart omniops-master-tls.service 2>/dev/null || true
+fi
+
+# ۱۴. ایجاد میانبر سیستمی برای صدور آسان توکن تبادل گره‌ها
+chmod +x "$repo/scripts/issue-token.sh" 2>/dev/null || true
+ln -sf "$repo/scripts/issue-token.sh" /usr/local/bin/omniops-token 2>/dev/null || true
+
+# تولید یک توکن اتصال اولیه برای نمایش به کاربر
+worker_token="$(python3 -m omniops.node_admin --local-root --role worker --token --raw 2>/dev/null || true)"
+
+# ۱۵. نمایش زیبا و کامل اطلاعات ورود به پنل و وضعیت سیستم
 cat << 'EOF'
 
 ╔══════════════════════════════════════════════════════════════════════╗
@@ -306,13 +322,29 @@ else
   printf "  👤 نام کاربری مدیر ارشد:  حساب کاربری فعال قبلی\n"
 fi
 printf "  ⚡ وضعیت سرویس:          فعال و پایدار (omniops-master.service: active)\n"
+printf "  🔒 درگاه امن گره‌ها:     https://%s:9443/ (TLS 1.3)\n" "$bind_host"
 printf "  🩺 بررسی سلامت هسته:     http://%s:%s/health\n" "$bind_host" "$port"
 printf "  📦 نسخهٔ برنامه:          %s\n" "$(git rev-parse --short HEAD)"
+
+if [[ -n "$worker_token" ]]; then
+cat << EOF
+──────────────────────────────────────────────────────────────────────
+  🚀 دستور آماده اتصال نود عملیاتی (Worker Node):
+  این دستور را کپی کنید و در ترمینال سرور Worker پیست نمایید تا خودکار وصل شود:
+
+  curl -fsSL https://raw.githubusercontent.com/RedBoy-011/OmniOps/main/scripts/setup-worker.sh | bash -s -- --token $worker_token
+──────────────────────────────────────────────────────────────────────
+  💡 برای صدور توکن‌های تبادل جدید در هر زمان، در همین سرور دستور زیر را بزنید:
+     omniops-token worker    (برای اتصال سرور عملیاتی)
+     omniops-token edge      (برای اتصال سرور لبه)
+EOF
+fi
+
 cat << 'EOF'
 ──────────────────────────────────────────────────────────────────────
   دستورات مدیریت سرویس در لینوکس:
-    • مشاهده وضعیت:   systemctl status omniops-master.service
-    • مشاهده لاگ‌ها:    journalctl -u omniops-master.service -f
+    • وضعیت سرویس:   systemctl status omniops-master.service
+    • لاگ‌های زنده:    journalctl -u omniops-master.service -f
     • راه‌اندازی مجدد: systemctl restart omniops-master.service
 ──────────────────────────────────────────────────────────────────────
   گام‌های بعدی:

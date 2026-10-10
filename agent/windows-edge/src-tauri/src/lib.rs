@@ -239,7 +239,7 @@ async fn profile_call(
     state: State<'_, SharedState>,
     capability: &'static str,
     method: reqwest::Method,
-    route: &'static str,
+    route: &str,
     body: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     let (origin, token, generation) = {
@@ -388,11 +388,12 @@ async fn list_agent_attachments(
     if project_id.len() != 32 || !project_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err("شناسهٔ پروژه معتبر نیست".into());
     }
+    let route = format!("/api/agent/workspace/attachments?project_id={project_id}");
     profile_call(
         state,
         "chat",
         reqwest::Method::GET,
-        &format!("/api/agent/workspace/attachments?project_id={project_id}"),
+        &route,
         None,
     )
     .await

@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Validate one-line Ubuntu updater
-        run: bash -n scripts/update-ubuntu.sh scripts/setup-worker.sh scripts/setup-edge.sh scripts/install-ubuntu.sh scripts/install-ollama-worker.sh scripts/create-private-master-cert.sh scripts/install-private-master-tls.sh scripts/renew-private-master-tls.sh scripts/install-private-worker-node.sh scripts/install-socks-relay-worker.sh
+        run: bash -n scripts/update-ubuntu.sh scripts/setup-worker.sh scripts/setup-edge.sh scripts/issue-token.sh scripts/install-ubuntu.sh scripts/install-ollama-worker.sh scripts/create-private-master-cert.sh scripts/install-private-master-tls.sh scripts/renew-private-master-tls.sh scripts/install-private-worker-node.sh scripts/install-socks-relay-worker.sh
       - name: Install provider vault dependency
         run: python -m pip install cryptography==46.0.7
       - name: Run core tests
