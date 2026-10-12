@@ -22,6 +22,7 @@ from .nodes import NodeRegistry
 from .providers import ProviderRegistry
 from .profile_memory import ProfileMemory
 from .workspace import WorkspaceStore
+from .mobile_orchestrator import MobileApprovalStore
 
 MAX_BODY_BYTES = 384 * 1024
 LAN_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
@@ -52,6 +53,7 @@ def make_server(
     providers = ProviderRegistry(identity_store) if identity_store else None
     memory = ProfileMemory(identity_store) if identity_store else None
     workspace = WorkspaceStore(identity_store) if identity_store else None
+    mobile_store = MobileApprovalStore(identity_store) if identity_store else None
 
     def current_ollama() -> OllamaClient:
         endpoint = identity_store.ollama_endpoint() if identity_store else None
@@ -351,6 +353,27 @@ def make_server(
                     self._send(200, workspace.remove_attachment(principal, payload.get('id')))
                 elif path in ('/api/agent/chat', '/api/web/chat'):
                     self._send(200, self._answer_chat(principal, payload))
+                elif path == '/api/mobile/approvals/request':
+                    self._send(201, mobile_store.request_approval(
+                        payload.get('node_id', 'pc-local'),
+                        payload.get('command', ''),
+                        payload.get('agent_name', 'Antigravity'),
+                        payload.get('risk_level', 'high'),
+                        payload.get('description', '')
+                    ))
+                elif path == '/api/mobile/approvals/decide':
+                    self._send(200, mobile_store.decide(
+                        principal,
+                        payload.get('request_id'),
+                        bool(payload.get('approved', False)),
+                        payload.get('auth_method', 'biometric_fingerprint')
+                    ))
+                elif path == '/api/mobile/kill-switch':
+                    self._send(200, mobile_store.emergency_kill_switch(
+                        principal,
+                        payload.get('node_id', 'all'),
+                        payload.get('reason', 'Emergency mobile operator stop')
+                    ))
                 else:
                     pieces = path.split("/")
                     if len(pieces) != 6 or not pieces[4]:
@@ -375,6 +398,31 @@ def make_server(
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 return
+            if parsed.path in ('/api/mobile/approvals/pending', '/api/mobile/status'):
+                principal = self._principal('web') or self._principal('agent')
+                if principal is None:
+                    return
+                if parsed.path == '/api/mobile/approvals/pending':
+                    self._send(200, {'requests': mobile_store.list_pending(principal)})
+                    return
+                if parsed.path == '/api/mobile/status':
+                    self._send(200, {
+                        'system': 'Connected - LOUIS-PC',
+                        'node_name': 'LOUIS-PC',
+                        'status': 'online',
+                        'agents': [
+                            {'name': 'Antigravity', 'status': 'Ready', 'type': 'IDE Agent'},
+                            {'name': 'Claude Desktop', 'status': 'Ready', 'type': 'Desktop Assistant'},
+                            {'name': 'OmniOps Ollama', 'status': 'Ready', 'type': 'Local GPU'},
+                        ],
+                        'plan_usage': {
+                            'used_percent': 64,
+                            'limit': '1,000,000 Tokens/day',
+                            'remaining': '360,000 Tokens',
+                            'tier': 'Enterprise Pro'
+                        }
+                    })
+                    return
             if parsed.path in ('/api/web/project/files', '/api/web/project/file'):
                 principal = self._principal('web')
                 if principal is None:

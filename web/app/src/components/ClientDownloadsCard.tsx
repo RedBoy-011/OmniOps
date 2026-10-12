@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
+import { MobileOrchestratorCard } from './MobileOrchestratorCard';
 
 export const ClientDownloadsCard: React.FC = () => {
   const [copiedPin, setCopiedPin] = useState(false);
+  const [showOrchestratorDemo, setShowOrchestratorDemo] = useState(false);
   const userPin = '842-109'; // پین اختصاصی اتصال کاربر
 
   const handleCopyPin = () => {
@@ -90,6 +92,18 @@ export const ClientDownloadsCard: React.FC = () => {
             <span>دانلود فایل APK (4.8 MB)</span>
           </a>
         </div>
+      </div>
+
+      {/* بخش شبیه‌ساز ارکستراتور سیار و دروازه بیومتریک (Coucou) */}
+      <div className="mt-4 pt-3 border-t border-[#30363d] flex flex-col gap-3">
+        <button
+          type="button"
+          onClick={() => setShowOrchestratorDemo(!showOrchestratorDemo)}
+          className="text-xs text-amber-400 hover:text-amber-300 flex items-center justify-center gap-1.5 py-1.5 bg-[#1f242c] hover:bg-[#272e38] rounded-lg transition"
+        >
+          <span>{showOrchestratorDemo ? "▲ بستن نمای شبیه‌ساز ارکستراتور" : "▼ شبیه‌ساز دروازه تایید بیومتریک و جزیره پویا (Coucou)"}</span>
+        </button>
+        {showOrchestratorDemo && <MobileOrchestratorCard />}
       </div>
     </div>
   );

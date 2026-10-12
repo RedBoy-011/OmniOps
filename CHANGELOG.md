@@ -4,6 +4,17 @@
 
 ---
 
+## [v1.0.5] - 2026-10-12
+### 📱 ارتقای ارکستراتور سیار موبایل و دروازه تایید بیومتریک (Mobile Orchestrator & Biometric Gateway):
+* **تطبیق و ارتقای معماری ایده Coucou:** تحلیل کامل نقاط قوت و رفع باگ‌های بنیادین طرح Coucou (رفع آسیب‌پذیری Replay Attack با چالش HMAC Nonce، جلوگیری از قطعی Doze Mode با Foreground Service، و رفع محدودیت‌های اندروید ۱۴ برای هشدارهای صفحه قفل).
+* **دروازه تایید بیومتریک (Biometric Approval Gate):** امکان ارسال درخواست تایید برای فرامین حساس ترمینال (مانند `npm run deploy` و اسکریپت‌های پاک‌سازی) با سد تایید اثر انگشت موبایل (`Allowed from Android - fingerprint [Verified by Admin]`).
+* **شبیه‌ساز ویجت جزیره پویا (Dynamic Island Overlay):** وضعیت زنده پیشرفت تسک‌های ایجنت در بالای صفحه بدون نیاز به باز نگه داشتن اپلیکیشن (`Running tests...` -> `Finished: 14 tests passed ✓`).
+* **کلید قطع اضطراری سخت‌افزاری (Emergency Kill-Switch):** توقف آنی کلیه پروسه‌ها و شل‌های ایجنت در کامپیوتر در کسری از ثانیه از روی موبایل.
+* **اندپوینت‌های سرور و ماژول `mobile_orchestrator.py`:** پیاده‌سازی مسیرهای `/api/mobile/approvals/request`، `/api/mobile/approvals/decide`، `/api/mobile/kill-switch` و `/api/mobile/status` با ذخیره‌سازی امن و ثبت ممیزی کامل.
+* **مستند جامع مهندسی:** تدوین و انتشار سند مرجع [`docs/MOBILE_ORCHESTRATOR_SPEC.fa.md`](docs/MOBILE_ORCHESTRATOR_SPEC.fa.md).
+
+---
+
 ## [v1.0.4] - 2026-10-12
 ### ✨ پنل پیش‌نمایش فایل و بازبینی تغییرات مشابه Antigravity (File Preview & Diff Review Drawer):
 * **پنل کشویی پیش‌نمایش فایل (Split-View Drawer):** امکان باز و بسته کردن دلخواه پنل پیش‌نمایش در کنار صفحه چت با دکمه اختصاصی در هدر (`◫ پیش‌نمایش فایل`)، دکمه بستن سریع (`✕`)، و باز شدن مستقیم با کلیک بر روی کارت یا نام فایل‌ها در چت.
