@@ -117,13 +117,32 @@ else
   active_admins="$(python3 -c "import sqlite3; db=sqlite3.connect('$db_file'); print(db.execute(\"SELECT COUNT(*) FROM users WHERE role='superadmin' AND status='active'\").fetchone()[0])" 2>/dev/null || echo 0)"
   if [[ "$active_admins" -lt 1 ]]; then
     needs_bootstrap=1
+  else
+    printf '\n======================================================================\n'
+    printf '  🔍 سیستم OmniOps قبلاً روی این سرور راه‌اندازی شده است.\n'
+    printf '======================================================================\n'
+    printf '  [1] به‌روزرسانی سریع هسته (حفظ کامل حساب‌ها و داده‌ها) [پیش‌فرض]\n'
+    printf '  [2] بازنشانی رمز عبور مدیر ارشد یا نصب مجدد (Reset Admin / Reinstall)\n'
+    printf '======================================================================\n'
+    upgrade_choice="1"
+    if [[ -r /dev/tty && -t 0 ]]; then
+      read -r -p "لطفاً گزینه مورد نظر را انتخاب کنید [1/2] (Enter برای گزینه 1): " user_choice </dev/tty || true
+      if [[ "$user_choice" == "2" ]]; then
+        upgrade_choice="2"
+        needs_bootstrap=1
+        printf '>>> حالت بازنشانی مشخصات مدیر ارشد فعال شد.\n'
+      fi
+    fi
+    if [[ "$upgrade_choice" == "1" ]]; then
+      printf '>>> حالت به‌روزرسانی سریع فعال است. حساب‌های مدیر و تنظیمات حفظ می‌شوند.\n'
+    fi
   fi
 fi
 
 admin_user_created=""
 if [[ "$needs_bootstrap" -eq 1 ]]; then
   printf '\n======================================================================\n'
-  printf '       پیکربندی اولیه: ساخت حساب کاربری مدیر ارشد (SuperAdmin)\n'
+  printf '       پیکربندی حساب کاربری مدیر ارشد (SuperAdmin)\n'
   printf '======================================================================\n'
   mkdir -p "$repo/data"
   chmod 700 "$repo/data"

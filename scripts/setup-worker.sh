@@ -235,6 +235,17 @@ EOF
 printf "  ⚡ وضعیت سرویس:          فعال و پایدار (omniops-worker-node.service)\n"
 printf "  🌐 متصل به سرور Master:  %s\n" "$master_url"
 printf "  🤖 نشانی موتور Ollama:   http://%s:11434/\n" "$worker_ip"
+
+# بررسی و نمایش مدل‌های آفلاین از قبل دانلودشده
+if curl -fsSL http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+  local_models="$(curl -fsSL http://127.0.0.1:11434/api/tags | python3 -c 'import sys, json; data=json.load(sys.stdin); print(", ".join(m["name"] for m in data.get("models", [])))' 2>/dev/null || true)"
+  if [[ -n "$local_models" ]]; then
+    printf "  🧠 مدل‌های کشف‌شده قبلی: %s (آماده استفاده بدون نیاز به دانلود)\n" "$local_models"
+  else
+    printf "  🧠 مدل‌های هوش مصنوعی:   آماده بارگذاری از پنل وب مستر\n"
+  fi
+fi
+
 printf "  🩺 ارسال Heartbeat:      تأییدشده و فعال\n"
 cat << 'EOF'
 ──────────────────────────────────────────────────────────────────────
