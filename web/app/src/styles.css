@@ -297,3 +297,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 .workspace-attachment-preview img { max-width:180px; max-height:120px; object-fit:contain; border-radius:10px; }
 .workspace-attachment-list { display:grid; gap:6px; }
 .workspace-attachment-list > div { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px; border-top:1px solid #ffffff20; padding:8px 0; overflow-wrap:anywhere; }
+
+/* صف پیام‌های بعدی چت‌بات */
+.chat-queue-container { margin-bottom: 8px; border: 1px solid #e9a1bd44; border-radius: 16px; background: rgba(22, 14, 27, 0.85); padding: 10px 14px; display: grid; gap: 8px; animation: fadeIn .2s ease-in-out; }
+.chat-queue-header { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #ffbfd1; font-weight: 600; flex-wrap: wrap; gap: 6px; }
+.chat-queue-tip { font-size: 10px; color: #c4abb8; font-weight: 400; }
+.chat-queue-list { display: grid; gap: 6px; max-height: 140px; overflow-y: auto; }
+.chat-queue-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.05); font-size: 11px; color: #e8d0dd; border: 1px solid rgba(255, 255, 255, 0.08); }
+.chat-queue-item-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-queue-item-text strong { color: #f28bab; margin-inline-end: 4px; }
+.chat-queue-actions { display: flex; gap: 6px; }
+.chat-queue-actions button { font-size: 10px; padding: 2px 7px; border-radius: 6px; min-height: 24px; }

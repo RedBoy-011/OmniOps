@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { api, type MemoryNote } from "./api";
 
 type Entry = { role: "user" | "assistant"; text: string; time: string; model?: string };
+type QueuedMessage = { id: string; text: string; time: string };
 const suggestions = ["وضعیت امروز سیستم را خلاصه کن", "برای بررسی سرویس‌ها چه مراحلی پیشنهاد می‌کنی؟", "یک گزارش کوتاه فارسی بنویس"];
 
 export function ChatRoom() {
@@ -10,6 +11,7 @@ export function ChatRoom() {
   const [selected, setSelected] = useState("auto");
   const [externalConsent, setExternalConsent] = useState(false);
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [queue, setQueue] = useState<QueuedMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [saveHistory, setSaveHistory] = useState(false);
@@ -72,17 +74,54 @@ export function ChatRoom() {
     finally { setMemoryBusy(false); }
   }
 
-  async function send(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const message = draft.trim();
-    if (!message || busy || (!localModels.length && !(externalConsent && externalModels.length))) return;
-    setDraft(""); setBusy(true); setError("");
+  async function executePrompt(message: string) {
+    setBusy(true);
+    setError("");
     setEntries((before) => [...before, { role: "user", text: message, time: new Date().toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" }) }]);
     try {
       const result = await api.webChat(message, selected, externalConsent, saveHistory);
       setEntries((before) => [...before, { role: "assistant", text: result.reply, model: result.model, time: new Date().toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" }) }]);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "پاسخ مدل دریافت نشد."); }
     finally { setBusy(false); }
+  }
+
+  async function send(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const message = draft.trim();
+    if (!message || (!localModels.length && !(externalConsent && externalModels.length))) return;
+
+    if (busy) {
+      // اگر مدل مشغول تولید پاسخ است، پیام وارد صف می‌شود
+      const queuedItem: QueuedMessage = {
+        id: Date.now().toString(),
+        text: message,
+        time: new Date().toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" }),
+      };
+      setQueue((prev) => [...prev, queuedItem]);
+      setDraft("");
+      return;
+    }
+
+    setDraft("");
+    await executePrompt(message);
+  }
+
+  // پردازش خودکار پیام بعدی از صف پس از پایان پاسخ مدل
+  useEffect(() => {
+    if (!busy && queue.length > 0) {
+      const nextItem = queue[0];
+      setQueue((prev) => prev.slice(1));
+      void executePrompt(nextItem.text);
+    }
+  }, [busy, queue]);
+
+  function removeQueueItem(id: string) {
+    setQueue((prev) => prev.filter((item) => item.id !== id));
+  }
+
+  function editQueueItem(item: QueuedMessage) {
+    setDraft(item.text);
+    removeQueueItem(item.id);
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -110,7 +149,67 @@ export function ChatRoom() {
       {busy && <div className="web-chat-entry assistant chat-thinking" role="status"><span className="chat-entry-label">OmniOps</span><span className="chat-typing" aria-hidden="true"><i /><i /><i /></span><span>در حال دریافت پاسخ از مدل…</span></div>}
       <div ref={endRef} />
     </div>
-    <form className="web-chat-form" ref={formRef} onSubmit={(event) => void send(event)}><label className="sr-only" htmlFor="web-chat-input">پیام</label><div className="chat-composer"><textarea id="web-chat-input" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onKeyDown} maxLength={8000} rows={2} placeholder="پیام خود را بنویسید…" disabled={busy} /><div className="chat-composer-foot"><small>{draft.length.toLocaleString("fa-IR")} / ۸٬۰۰۰ · Enter ارسال، Shift+Enter خط جدید</small><button className="submit-button" disabled={busy || !draft.trim() || (!localModels.length && !(externalConsent && externalModels.length))}>{busy ? "در حال پاسخ…" : "ارسال پیام ↗"}</button></div></div></form>
+
+    {/* نمایش صف پیام‌های در انتظار پاسخ */}
+    {queue.length > 0 && (
+      <div className="chat-queue-container" role="region" aria-label="صف پیام‌های بعدی">
+        <div className="chat-queue-header">
+          <span>📌 پیام‌های در صف انتظار ({queue.length.toLocaleString("fa-IR")} پیام)</span>
+          <small className="chat-queue-tip">پس از پایان پاسخ فعلی، به نوبت ارسال و پردازش می‌شوند</small>
+        </div>
+        <div className="chat-queue-list">
+          {queue.map((item, idx) => (
+            <div key={item.id} className="chat-queue-item">
+              <span className="chat-queue-item-text">
+                <strong>#{idx + 1}</strong> {item.text}
+              </span>
+              <div className="chat-queue-actions">
+                <button
+                  type="button"
+                  className="quiet-button"
+                  onClick={() => editQueueItem(item)}
+                  title="ویرایش پیام"
+                >
+                  ✏️
+                </button>
+                <button
+                  type="button"
+                  className="quiet-button danger"
+                  onClick={() => removeQueueItem(item.id)}
+                  title="حذف از صف"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+
+    <form className="web-chat-form" ref={formRef} onSubmit={(event) => void send(event)}>
+      <label className="sr-only" htmlFor="web-chat-input">پیام</label>
+      <div className="chat-composer">
+        <textarea
+          id="web-chat-input"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={onKeyDown}
+          maxLength={8000}
+          rows={2}
+          placeholder={busy ? "مدل در حال پاسخ است... پیام خود را بنویسید تا در صف قرار گیرد..." : "پیام خود را بنویسید…"}
+        />
+        <div className="chat-composer-foot">
+          <small>{draft.length.toLocaleString("fa-IR")} / ۸٬۰۰۰ · Enter ارسال، Shift+Enter خط جدید</small>
+          <button
+            className="submit-button"
+            disabled={!draft.trim() || (!localModels.length && !(externalConsent && externalModels.length))}
+          >
+            {busy ? "افزودن به صف پیام‌ها ⌛" : "ارسال پیام ↗"}
+          </button>
+        </div>
+      </div>
+    </form>
     {error && <p className="admin-message" role="alert">{error}</p>}
   </section>;
 }
