@@ -53,7 +53,7 @@ done
 
 # ۱. نصب پیش‌نیازها و وب‌سرور Caddy
 missing_tools=()
-for tool in curl systemctl; do
+for tool in curl systemctl python3 openssl; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     missing_tools+=("$tool")
   fi
@@ -74,40 +74,82 @@ if ! command -v caddy >/dev/null 2>&1; then
   apt-get install -y caddy
 fi
 
+# تابع استخراج هوشمند اطلاعات سرور Master از توکن تبادل Edge
+parse_and_apply_edge_token() {
+  local raw_input="${1:-}"
+  [[ -n "$raw_input" ]] || return 1
+
+  local parsed=""
+  parsed="$(python3 - "$raw_input" <<'PY'
+import sys, re, json, base64
+
+text = sys.argv[1].strip()
+m = re.search(r'(omniops_[a-zA-Z0-9]+_[A-Za-z0-9_-]+)', text)
+if not m:
+    sys.exit(1)
+
+token = m.group(1)
+try:
+    parts = token.split('_', 2)
+    role = parts[1]
+    raw = parts[2].rstrip('=')
+    padded = raw + '=' * (-len(raw) % 4)
+    data = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
+    url = str(data.get('master_url', '')).strip()
+    url = url.replace('https://', '').replace('http://', '').split('/')[0]
+    host = url.split(':')[0]
+    if host:
+        print(f"MASTER_TARGET={host}:9000")
+        print(f"ROLE={role}")
+except Exception:
+    sys.exit(2)
+PY
+)" || return 1
+
+  while IFS='=' read -r key val; do
+    case "$key" in
+      MASTER_TARGET) [[ -n "$val" ]] && master_target="$val" ;;
+    esac
+  done <<< "$parsed"
+
+  [[ -n "$master_target" ]] && return 0
+  return 1
+}
+
+token_candidate="${cli_token:-}"
+master_target="${cli_master:-${OMNIOPS_EDGE_MASTER_TARGET:-}}"
+
+if [[ -n "$token_candidate" ]]; then
+  if parse_and_apply_edge_token "$token_candidate"; then
+    printf '✅ توکن تبادل با موفقیت شناسایی شد. هدف Master: %s\n' "$master_target"
+  fi
+fi
+
 # ۲. دریافت نام دامنه عمومی اینترنتی
 domain="${cli_domain:-${OMNIOPS_EDGE_DOMAIN:-}}"
 while [[ -z "$domain" ]]; do
   prompt_terminal "نام دامنه عمومی سرور لبه (مثال: ops.yourdomain.com یا آی‌پی عمومی): " domain ""
   domain="$(echo "$domain" | tr -d '[:space:]')"
+
+  # اگر کاربر تصادفاً توکن را در نام دامنه پیست کرد
+  if [[ "$domain" =~ omniops_ ]]; then
+    parse_and_apply_edge_token "$domain" || true
+    domain=""
+    printf '💡 توکن شناسایی شد؛ اکنون نام دامنه عمومی این سرور لبه را وارد نمایید.\n'
+  fi
 done
 
 # ۳. دریافت آدرس سرور Master در شبکه داخلی یا تونل
-master_target="${cli_master:-${OMNIOPS_EDGE_MASTER_TARGET:-}}"
-token_candidate="${cli_token:-}"
-
-if [[ -z "$master_target" && -n "$token_candidate" ]]; then
-  master_target="$(python3 - "$token_candidate" <<'PY'
-import sys, json, base64
-try:
-    raw = sys.argv[1].strip()
-    if raw.startswith('omniops_'):
-        parts = raw.split('_', 2)
-        if len(parts) >= 3:
-            raw = parts[2]
-    padded = raw + '=' * (-len(raw) % 4)
-    data = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
-    url = data.get('master_url', '')
-    url = url.replace('https://', '').replace('http://', '')
-    print(url)
-except Exception:
-    sys.exit(1)
-PY
-)" || true
-fi
-
 while [[ -z "$master_target" ]]; do
-  prompt_terminal "آدرس داخلی سرور Master در شبکه خصوصی یا تونل (مثال: 172.19.30.94:9000): " master_target ""
+  prompt_terminal "آدرس داخلی سرور Master در شبکه خصوصی یا توکن تبادل (مثال: 172.19.30.94:9000): " master_target ""
   master_target="$(echo "$master_target" | tr -d '[:space:]')"
+
+  if [[ "$master_target" =~ omniops_ ]]; then
+    if parse_and_apply_edge_token "$master_target"; then
+      printf '✅ توکن شناسایی شد. آدرس Master: %s\n' "$master_target"
+      break
+    fi
+  fi
 done
 
 # در صورت نداشتن پورت، پیش‌فرض ۹۰۰۰ تنظیم شود

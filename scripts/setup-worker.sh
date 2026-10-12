@@ -129,58 +129,150 @@ ca_fingerprint=""
 
 token_candidate="${cli_token:-${OMNIOPS_JOIN_TOKEN:-}}"
 
-if [[ -z "$token_candidate" && -z "$master_url" ]]; then
-  printf '\n💡 روش‌های اتصال به سرور Master:\n'
-  printf '  ۱) ورود «توکن تبادل یکپارچه» (تولیدشده در سرور Master با دستور omniops-token worker)\n'
-  printf '  ۲) ورود آدرس سرور Master و کد مجوز به صورت دستی\n\n'
-  user_input=""
-  prompt_terminal "آدرس سرور Master یا توکن تبادل (Join Token) را وارد کنید: " user_input ""
-  if [[ "$user_input" == omniops_* ]]; then
-    token_candidate="$user_input"
-  else
-    master_url="$user_input"
-  fi
-fi
+# تابع فوق‌هوشمند استخراج و اعتبارسنجی توکن از هر ورودی (حتی اگر کل دستور curl پیست شده باشد)
+parse_and_apply_token() {
+  local raw_input="${1:-}"
+  [[ -n "$raw_input" ]] || return 1
 
-# اگر توکن تبادل داده شده، اطلاعات را خودکار از آن استخراج کن
-if [[ -n "$token_candidate" ]]; then
-  parsed="$(python3 - "$token_candidate" <<'PY'
-import sys, json, base64
+  local parsed=""
+  parsed="$(python3 - "$raw_input" <<'PY'
+import sys, re, json, base64
+
+text = sys.argv[1].strip()
+m = re.search(r'(omniops_[a-zA-Z0-9]+_[A-Za-z0-9_-]+)', text)
+if not m:
+    sys.exit(1)
+
+token = m.group(1)
 try:
-    raw = sys.argv[1].strip()
-    if raw.startswith('omniops_'):
-        parts = raw.split('_', 2)
-        if len(parts) >= 3:
-            raw = parts[2]
+    parts = token.split('_', 2)
+    role = parts[1]
+    raw = parts[2].rstrip('=')
     padded = raw + '=' * (-len(raw) % 4)
     data = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
-    print(data.get('master_url', ''))
-    print(data.get('grant', ''))
-    print(data.get('ca_fingerprint', ''))
-    ca_crt = data.get('ca_crt', '')
-    if ca_crt:
-        with open('/etc/omniops-node/master-ca.crt', 'w', encoding='utf-8') as f:
-            f.write(ca_crt)
-        print('ca_saved')
-    else:
-        print('no_ca')
-except Exception as e:
-    sys.exit(1)
-PY
-)" || fail 'توکن تبادل نامعتبر است یا با خطا مواجه شد.'
 
-  master_url="$(echo "$parsed" | sed -n '1p')"
-  grant_code="$(echo "$parsed" | sed -n '2p')"
-  ca_fingerprint="$(echo "$parsed" | sed -n '3p')"
-  printf '✅ توکن تبادل با موفقیت اعتبارسنجی و خوانده شد:\n'
-  printf '   • آدرس سرور Master: %s\n' "$master_url"
-  if [[ -n "$ca_fingerprint" ]]; then
-    printf '   • اثرانگشت گواهی Master CA: %s\n' "$ca_fingerprint"
+    master_url = str(data.get('master_url', '')).strip().rstrip('/')
+    grant = str(data.get('grant', '')).strip()
+    ca_fp = str(data.get('ca_fingerprint', '')).strip().lower()
+    ca_crt = data.get('ca_crt', '')
+
+    if ca_crt:
+        try:
+            with open('/etc/omniops-node/master-ca.crt', 'w', encoding='utf-8') as f:
+                f.write(ca_crt)
+            print("CA_SAVED=1")
+        except Exception:
+            print("CA_SAVED=0")
+    else:
+        print("CA_SAVED=0")
+
+    print(f"MASTER_URL={master_url}")
+    print(f"GRANT={grant}")
+    print(f"CA_FINGERPRINT={ca_fp}")
+    print(f"ROLE={role}")
+except Exception:
+    sys.exit(2)
+PY
+)" || return 1
+
+  local found_master=""
+  local found_grant=""
+  local found_fp=""
+  while IFS='=' read -r key val; do
+    case "$key" in
+      MASTER_URL) found_master="$val" ;;
+      GRANT) found_grant="$val" ;;
+      CA_FINGERPRINT) found_fp="$val" ;;
+    esac
+  done <<< "$parsed"
+
+  if [[ -n "$found_master" && -n "$found_grant" ]]; then
+    master_url="$found_master"
+    grant_code="$found_grant"
+    [[ -n "$found_fp" ]] && ca_fingerprint="$found_fp"
+    return 0
+  fi
+  return 1
+}
+
+# بررسی توکن اولیه دریافتی از آرگومان‌ها
+if [[ -n "$token_candidate" ]]; then
+  if parse_and_apply_token "$token_candidate"; then
+    printf '✅ توکن تبادل با موفقیت اعتبارسنجی و خوانده شد:\n'
+    printf '   • آدرس سرور Master: %s\n' "$master_url"
+    if [[ -n "$ca_fingerprint" ]]; then
+      printf '   • اثرانگشت گواهی Master CA: %s\n' "$ca_fingerprint"
+    fi
+  else
+    printf '⚠️ توکن اولیه معتبر نبود؛ وارد مرحله انتخاب دستی یا دریافت مجدد می‌شویم.\n'
   fi
 fi
 
-while [[ -z "$master_url" ]]; do
+if [[ -z "$master_url" || -z "$grant_code" ]]; then
+  printf '\n💡 روش‌های اتصال به سرور مرکزی (Master):\n'
+  printf '  [1] ورود توکن تبادل یکپارچه (توصیه‌شده - کپی از وب‌پنل یا خروجی omniops-token worker)\n'
+  printf '  [2] ورود دستی (آدرس سرور Master و کد مجوز به صورت جداگانه)\n\n'
+
+  method_choice=""
+  prompt_terminal "روش اتصال را انتخاب کنید [1 یا 2، پیش‌فرض: 1]: " method_choice "1"
+  method_choice="$(echo "$method_choice" | tr -d '[:space:]')"
+
+  # هوشمندی: اگر کاربر تصادفاً توکن یا دستور کامل curl را در همین فیلد پیست کرد
+  if [[ "$method_choice" =~ omniops_ ]]; then
+    if parse_and_apply_token "$method_choice"; then
+      printf '✅ توکن تبادل شناسایی شد:\n'
+      printf '   • آدرس سرور Master: %s\n' "$master_url"
+      if [[ -n "$ca_fingerprint" ]]; then
+        printf '   • اثرانگشت گواهی Master CA: %s\n' "$ca_fingerprint"
+      fi
+    fi
+  elif [[ "$method_choice" =~ ^https?:// || "$method_choice" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+    master_url="$method_choice"
+  elif [[ "$method_choice" == "2" ]]; then
+    :
+  else
+    # گزینه ۱ (پیش‌فرض): درخواست توکن یکپارچه
+    printf '\n📌 لطفاً «توکن تبادل» یا کل دستور curl کپی‌شده را در خط زیر وارد کنید:\n'
+    token_input=""
+    prompt_terminal "توکن تبادل (Join Token): " token_input ""
+    if parse_and_apply_token "$token_input"; then
+      printf '✅ توکن تبادل با موفقیت اعتبارسنجی شد:\n'
+      printf '   • آدرس سرور Master: %s\n' "$master_url"
+      if [[ -n "$ca_fingerprint" ]]; then
+        printf '   • اثرانگشت گواهی Master CA: %s\n' "$ca_fingerprint"
+      fi
+    else
+      printf '⚠️ متن واردشده حاوی توکن معتبر نبود. به حالت ورود دستی منتقل می‌شوید.\n'
+    fi
+  fi
+fi
+
+# اعتبارسنجی و تکمیل آدرس Master در صورت عدم استخراج با توکن
+while [[ -z "$master_url" || ! "$master_url" =~ ^https:// ]]; do
+  if [[ -n "$master_url" ]]; then
+    # اگر کاربر توکن را در آدرس سرور پیست کرده باشد
+    if parse_and_apply_token "$master_url"; then
+      printf '✅ توکن تبادل شناسایی شد؛ آدرس سرور: %s\n' "$master_url"
+      break
+    fi
+    # اصلاح خودکار در صورتی که کاربر آی‌پی ساده یا http وارد کرده باشد
+    if [[ "$master_url" =~ ^http:// ]]; then
+      master_url="https://${master_url#http://}"
+      if [[ "$master_url" =~ ^https://[0-9a-zA-Z.:-]+$ ]]; then
+        break
+      fi
+    elif [[ "$master_url" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?$ ]]; then
+      if [[ "$master_url" != *":"* ]]; then
+        master_url="https://${master_url}:9443"
+      else
+        master_url="https://${master_url}"
+      fi
+      break
+    fi
+    printf '⚠️ آدرس نامعتبر است! آدرس سرور باید با https:// شروع شود و شامل پورت باشد (مثال: https://172.19.30.94:9443).\n'
+  fi
   prompt_terminal "آدرس کامل HTTPS سرور Master (مثال: https://172.19.30.94:9443): " master_url ""
+  master_url="$(echo "$master_url" | tr -d '[:space:]')"
 done
 master_url="${master_url%/}"
 
@@ -214,8 +306,16 @@ printf 'اثرانگشت گواهی امنیتی: %s\n' "$ca_fingerprint"
 while [[ -z "$grant_code" ]]; do
   printf '\n💡 راهنما: روی سرور Master دستور زیر را برای صدور کد مجوز یا توکن بزنید:\n'
   printf '   omniops-token worker\n'
-  prompt_terminal "کد مجوز گرانت (Grant Code): " grant_code ""
+  prompt_terminal "کد مجوز گرانت (Grant Code) یا توکن تبادل: " grant_code ""
   grant_code="$(echo "$grant_code" | tr -d '[:space:]')"
+
+  # اگر کاربر توکن یا کل دستور curl را اینجا پیست کرد
+  if [[ "$grant_code" =~ omniops_ ]]; then
+    if parse_and_apply_token "$grant_code"; then
+      printf '✅ توکن تبادل شناسایی شد و کد مجوز استخراج گردید.\n'
+      break
+    fi
+  fi
 done
 
 # ۶. ثبت و جفت‌سازی امن گره با سرور Master
