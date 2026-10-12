@@ -12,8 +12,10 @@ export function ChatRoom() {
   const [externalConsent, setExternalConsent] = useState(false);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
+  const [queueCollapsed, setQueueCollapsed] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showModelPicker, setShowModelPicker] = useState(false);
   const [saveHistory, setSaveHistory] = useState(false);
   const [notes, setNotes] = useState<MemoryNote[]>([]);
   const [noteDraft, setNoteDraft] = useState("");
@@ -22,7 +24,7 @@ export function ChatRoom() {
   const endRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const localModels = models.filter(model => model.startsWith("ollama/"));
-  const externalModels = models.filter(model => model.startsWith("gemini/") || model.startsWith("openrouter/"));
+  const externalModels = models.filter(model => model.startsWith("gemini/") || model.startsWith("openrouter/") || model.startsWith("deepseek/") || model.startsWith("openai/"));
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [entries, busy]);
 
@@ -91,7 +93,7 @@ export function ChatRoom() {
     if (!message || (!localModels.length && !(externalConsent && externalModels.length))) return;
 
     if (busy) {
-      // اگر مدل مشغول تولید پاسخ است، پیام وارد صف می‌شود
+      // اگر مدل مشغول است، پیام به صف اضافه می‌شود
       const queuedItem: QueuedMessage = {
         id: Date.now().toString(),
         text: message,
@@ -106,7 +108,7 @@ export function ChatRoom() {
     await executePrompt(message);
   }
 
-  // پردازش خودکار پیام بعدی از صف پس از پایان پاسخ مدل
+  // ارسال خودکار پیام بعدی از صف پس از پایان پاسخ هوش مصنوعی
   useEffect(() => {
     if (!busy && queue.length > 0) {
       const nextItem = queue[0];
@@ -124,6 +126,11 @@ export function ChatRoom() {
     removeQueueItem(item.id);
   }
 
+  function promoteQueueItem(item: QueuedMessage) {
+    // اولویت دادن به پیام و انتقال به ابتدای صف
+    setQueue((prev) => [item, ...prev.filter((i) => i.id !== item.id)]);
+  }
+
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault(); formRef.current?.requestSubmit();
@@ -131,65 +138,183 @@ export function ChatRoom() {
   }
 
   return <section className="glass admin-card operations-card web-chat" aria-label="گفت‌وگو با هسته">
-    <div className="web-chat-top"><div className="web-chat-title"><span className="chat-core" aria-hidden="true">✦</span><div><h2>گفت‌وگو با هسته</h2><p>مدل محلی در اولویت است · خروج متن به API بیرونی فقط با اجازهٔ همین صفحه</p></div></div>
-      <span className={`chat-presence ${models.length ? "connected" : ""}`}><i aria-hidden="true" />{models.length ? "مدل آماده" : "در حال بررسی"}</span></div>
-    <div className="web-chat-controls"><label htmlFor="web-chat-model">مدل پاسخ‌گو</label><select id="web-chat-model" dir="ltr" value={selected} disabled={busy} onChange={event => setSelected(event.target.value)}><option value="auto">محلی، با جایگزین بیرونی در صورت اجازه</option>{localModels.map(model => <option value={model} key={model}>{model}</option>)}{externalModels.map(model => <option value={model} key={model} disabled={!externalConsent}>{model}</option>)}</select><button className="quiet-button" type="button" onClick={() => void refresh()} aria-label="تازه‌سازی مدل‌ها">↻ <span>تازه‌سازی</span></button></div>
-    {externalModels.length > 0 && <label className="chat-external-consent"><input type="checkbox" checked={externalConsent} disabled={busy} onChange={event => { setExternalConsent(event.target.checked); if (!event.target.checked && !selected.startsWith("ollama/")) setSelected("auto"); }} /><span><strong>اجازهٔ ارسال پیام به مدل‌های API بیرونی</strong><small>در انتخاب خودکار ابتدا مدل محلی امتحان می‌شود. با فعال‌کردن این گزینه، متن پیام در صورت انتخاب مدل بیرونی یا خرابی همهٔ مدل‌های محلی به Provider ارسال می‌شود و ممکن است هزینه داشته باشد.</small></span></label>}
+    <div className="web-chat-top">
+      <div className="web-chat-title">
+        <span className="chat-core" aria-hidden="true">✦</span>
+        <div>
+          <h2>گفت‌وگو با هسته OmniOps</h2>
+          <p>مدل محلی در اولویت است · خروج متن به API بیرونی فقط با رضایت شما</p>
+        </div>
+      </div>
+      <span className={`chat-presence ${models.length ? "connected" : ""}`}>
+        <i aria-hidden="true" />{models.length ? "سیستم هوش مصنوعی آنلاین" : "در حال اتصال به ورکر"}
+      </span>
+    </div>
+
+    {/* بخش رضایت API ابری */}
+    {externalModels.length > 0 && (
+      <label className="chat-external-consent">
+        <input
+          type="checkbox"
+          checked={externalConsent}
+          disabled={busy}
+          onChange={event => {
+            setExternalConsent(event.target.checked);
+            if (!event.target.checked && !selected.startsWith("ollama/")) setSelected("auto");
+          }}
+        />
+        <span>
+          <strong>اجازهٔ ارسال پیام به مدل‌های ابری آنلاین (OpenAI / DeepSeek / Gemini)</strong>
+          <small>در صورت قطعی یا عدم توانایی مدل محلی، پرامپت از طریق پروکسی امن SOCKS5 به ارائه‌دهنده خارجی هدایت می‌شود.</small>
+        </span>
+      </label>
+    )}
+
+    {/* ابزارهای حافظه و تاریخچه شخصی */}
     <section className="chat-memory-tools" aria-label="حافظه و تاریخچهٔ حساب">
-      <div className="chat-memory-heading"><strong>حافظهٔ شخصی شما</strong><small>فقط در حساب شما · یادداشت‌ها فعلاً به مدل فرستاده نمی‌شوند</small></div>
-      <form onSubmit={(event) => void addNote(event)} className="chat-memory-form"><label className="sr-only" htmlFor="memory-note">یادداشت شخصی</label><input id="memory-note" value={noteDraft} maxLength={500} onChange={event => setNoteDraft(event.target.value)} placeholder="یک نکته برای پروفایل خود ثبت کنید…" /><button type="submit" className="quiet-button" disabled={memoryBusy || !noteDraft.trim()}>ثبت</button></form>
-      <div className="chat-memory-list">{notes.map(note => <div key={note.id} className="chat-memory-item"><span>{note.content}</span><button type="button" className="quiet-button danger" disabled={memoryBusy} onClick={() => void removeNote(note.id)} aria-label="حذف یادداشت">حذف</button></div>)}</div>
-      <div className="chat-history-options"><label><input type="checkbox" checked={saveHistory} onChange={event => setSaveHistory(event.target.checked)} /> ذخیرهٔ گفتگوهای بعدی در حساب من</label><button type="button" className="quiet-button" onClick={() => void loadHistory()}>نمایش تاریخچه</button><button type="button" className="quiet-button danger" onClick={() => void clearHistory()}>پاک‌کردن تاریخچه</button></div>
+      <div className="chat-memory-heading">
+        <strong>حافظهٔ شخصی شما</strong>
+        <small>فقط در حساب شما · یادداشت‌ها فعلاً به مدل فرستاده نمی‌شوند</small>
+      </div>
+      <form onSubmit={(event) => void addNote(event)} className="chat-memory-form">
+        <label className="sr-only" htmlFor="memory-note">یادداشت شخصی</label>
+        <input
+          id="memory-note"
+          value={noteDraft}
+          maxLength={500}
+          onChange={event => setNoteDraft(event.target.value)}
+          placeholder="یک نکته برای پروفایل خود ثبت کنید…"
+        />
+        <button type="submit" className="quiet-button" disabled={memoryBusy || !noteDraft.trim()}>
+          ثبت
+        </button>
+      </form>
+      <div className="chat-memory-list">
+        {notes.map(note => (
+          <div key={note.id} className="chat-memory-item">
+            <span>{note.content}</span>
+            <button
+              type="button"
+              className="quiet-button danger"
+              disabled={memoryBusy}
+              onClick={() => void removeNote(note.id)}
+              aria-label="حذف یادداشت"
+            >
+              حذف
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="chat-history-options">
+        <label>
+          <input
+            type="checkbox"
+            checked={saveHistory}
+            onChange={event => setSaveHistory(event.target.checked)}
+          />{" "}
+          ذخیرهٔ گفتگوهای بعدی در حساب من
+        </label>
+        <button type="button" className="quiet-button" onClick={() => void loadHistory()}>
+          نمایش تاریخچه
+        </button>
+        <button type="button" className="quiet-button danger" onClick={() => void clearHistory()}>
+          پاک‌کردن تاریخچه
+        </button>
+      </div>
     </section>
+
+    {/* تاریخچه چت */}
     <div className="web-chat-history" role="log" aria-live="polite" aria-relevant="additions text">
-      {entries.length === 0 && <div className="chat-welcome"><span className="chat-welcome-icon" aria-hidden="true">✧</span><strong>از اینجا شروع کنیم</strong><p>یک سؤال بپرسید یا یکی از پیشنهادها را انتخاب کنید.</p><div className="chat-suggestions">{suggestions.map(text => <button type="button" className="quiet-button" key={text} onClick={() => setDraft(text)}>{text}</button>)}</div></div>}
-      <AnimatePresence initial={false}>{entries.map((entry, index) => <motion.article className={`web-chat-entry ${entry.role}`} key={index} initial={{ opacity: 0, y: 12, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: .25 }}>
-        <span className="chat-entry-label">{entry.role === "user" ? "شما" : "OmniOps"}</span><p>{entry.text}</p><div className="chat-entry-meta"><time>{entry.time}</time>{entry.model && <bdi dir="ltr">{entry.model}</bdi>}</div>
-      </motion.article>)}</AnimatePresence>
-      {busy && <div className="web-chat-entry assistant chat-thinking" role="status"><span className="chat-entry-label">OmniOps</span><span className="chat-typing" aria-hidden="true"><i /><i /><i /></span><span>در حال دریافت پاسخ از مدل…</span></div>}
+      {entries.length === 0 && (
+        <div className="chat-welcome">
+          <span className="chat-welcome-icon" aria-hidden="true">✧</span>
+          <strong>از اینجا شروع کنید</strong>
+          <p>یک سؤال بپرسید یا یکی از پیشنهادها را برای بررسی زیرساخت انتخاب نمایید.</p>
+          <div className="chat-suggestions">
+            {suggestions.map(text => (
+              <button type="button" className="quiet-button" key={text} onClick={() => setDraft(text)}>
+                {text}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <AnimatePresence initial={false}>
+        {entries.map((entry, index) => (
+          <motion.article
+            className={`web-chat-entry ${entry.role}`}
+            key={index}
+            initial={{ opacity: 0, y: 12, scale: .98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: .25 }}
+          >
+            <span className="chat-entry-label">{entry.role === "user" ? "شما" : "OmniOps AI"}</span>
+            <p>{entry.text}</p>
+            <div className="chat-entry-meta">
+              <time>{entry.time}</time>
+              {entry.model && <bdi dir="ltr">{entry.model}</bdi>}
+            </div>
+          </motion.article>
+        ))}
+      </AnimatePresence>
+      {busy && (
+        <div className="web-chat-entry assistant chat-thinking" role="status">
+          <span className="chat-entry-label">OmniOps</span>
+          <span className="chat-typing" aria-hidden="true"><i /><i /><i /></span>
+          <span>در حال پردازش و استدلال مدل…</span>
+        </div>
+      )}
       <div ref={endRef} />
     </div>
 
-    {/* نمایش صف پیام‌های در انتظار پاسخ */}
+    {/* پنل صف پیام‌ها (دقیقاً مشابه باکس Queued Messages در تصویر ۱) */}
     {queue.length > 0 && (
-      <div className="chat-queue-container" role="region" aria-label="صف پیام‌های بعدی">
-        <div className="chat-queue-header">
-          <span>📌 پیام‌های در صف انتظار ({queue.length.toLocaleString("fa-IR")} پیام)</span>
-          <small className="chat-queue-tip">پس از پایان پاسخ فعلی، به نوبت ارسال و پردازش می‌شوند</small>
+      <div className="antigravity-queue-box" role="region" aria-label="صف پیام‌های در انتظار">
+        <div className="antigravity-queue-header">
+          <div className="antigravity-queue-header-left">
+            <span className="antigravity-queue-title">Queued Messages</span>
+            <span className="antigravity-queue-badge">{queue.length}</span>
+            <span className="antigravity-queue-subtitle">Sends after agent finishes working</span>
+          </div>
+          <button
+            type="button"
+            className="antigravity-queue-toggle"
+            onClick={() => setQueueCollapsed(!queueCollapsed)}
+            title={queueCollapsed ? "نمایش صف" : "جمع کردن صف"}
+          >
+            {queueCollapsed ? "▾" : "▴"}
+          </button>
         </div>
-        <div className="chat-queue-list">
-          {queue.map((item, idx) => (
-            <div key={item.id} className="chat-queue-item">
-              <span className="chat-queue-item-text">
-                <strong>#{idx + 1}</strong> {item.text}
-              </span>
-              <div className="chat-queue-actions">
-                <button
-                  type="button"
-                  className="quiet-button"
-                  onClick={() => editQueueItem(item)}
-                  title="ویرایش پیام"
-                >
-                  ✏️
-                </button>
-                <button
-                  type="button"
-                  className="quiet-button danger"
-                  onClick={() => removeQueueItem(item.id)}
-                  title="حذف از صف"
-                >
-                  ✕
-                </button>
+
+        {!queueCollapsed && (
+          <div className="antigravity-queue-list">
+            {queue.map((item, idx) => (
+              <div key={item.id} className="antigravity-queue-row">
+                <span className="antigravity-queue-text">
+                  <span className="antigravity-queue-idx">#{idx + 1}</span> {item.text}
+                </span>
+                <div className="antigravity-queue-actions">
+                  <button type="button" onClick={() => editQueueItem(item)} title="ویرایش پیام (Edit)">
+                    ✏️
+                  </button>
+                  <button type="button" onClick={() => promoteQueueItem(item)} title="اولویت‌دهی و ارسال بعد از پاسخ (Promote)">
+                    ↗
+                  </button>
+                  <button type="button" onClick={() => removeQueueItem(item.id)} title="حذف از صف (Delete)">
+                    🗑️
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     )}
 
+    {/* کادر نوشتن پیام با منوی انتخاب مدل در پایین (مشابه تصاویر ۱، ۲ و ۳) */}
     <form className="web-chat-form" ref={formRef} onSubmit={(event) => void send(event)}>
       <label className="sr-only" htmlFor="web-chat-input">پیام</label>
-      <div className="chat-composer">
+      <div className="antigravity-composer">
         <textarea
           id="web-chat-input"
           value={draft}
@@ -197,16 +322,84 @@ export function ChatRoom() {
           onKeyDown={onKeyDown}
           maxLength={8000}
           rows={2}
-          placeholder={busy ? "مدل در حال پاسخ است... پیام خود را بنویسید تا در صف قرار گیرد..." : "پیام خود را بنویسید…"}
+          placeholder="Ask anything, @ to mention, / for actions (یا پیام را بنویسید تا در صف قرار گیرد)..."
         />
-        <div className="chat-composer-foot">
-          <small>{draft.length.toLocaleString("fa-IR")} / ۸٬۰۰۰ · Enter ارسال، Shift+Enter خط جدید</small>
-          <button
-            className="submit-button"
-            disabled={!draft.trim() || (!localModels.length && !(externalConsent && externalModels.length))}
-          >
-            {busy ? "افزودن به صف پیام‌ها ⌛" : "ارسال پیام ↗"}
-          </button>
+
+        <div className="antigravity-composer-footer">
+          {/* دکمه انتخاب مدل و منوی سهمیه (تصویر ۲ و ۳) */}
+          <div className="antigravity-model-picker-container">
+            <button
+              type="button"
+              className="antigravity-model-pill"
+              onClick={() => setShowModelPicker(!showModelPicker)}
+            >
+              <span>✦</span>
+              <span className="antigravity-model-name">
+                {selected === "auto" ? "انتخاب خودکار (Auto)" : selected}
+              </span>
+              <span className="antigravity-model-arrow">▲</span>
+            </button>
+
+            {/* پاپ‌آپ لیست مدل‌ها با نشانگر سهمیه و سرعت */}
+            {showModelPicker && (
+              <div className="antigravity-model-dropdown">
+                <div className="antigravity-model-dropdown-header">
+                  <span>مدل‌های هوش مصنوعی (AI Models)</span>
+                  <small>سرعت و سهمیه فعال</small>
+                </div>
+
+                <div className="antigravity-model-section">
+                  <span className="antigravity-model-section-title">مدل‌های محلی ورکر (Ollama):</span>
+                  <div
+                    className={`antigravity-model-item ${selected === "auto" ? "active" : ""}`}
+                    onClick={() => { setSelected("auto"); setShowModelPicker(false); }}
+                  >
+                    <span>⚡ هوشمند خودکار (Auto Router)</span>
+                    <span className="antigravity-badge green">Fast</span>
+                  </div>
+                  {localModels.map(m => (
+                    <div
+                      key={m}
+                      className={`antigravity-model-item ${selected === m ? "active" : ""}`}
+                      onClick={() => { setSelected(m); setShowModelPicker(false); }}
+                    >
+                      <span className="truncate">{m}</span>
+                      <span className="antigravity-badge purple">GPU Local</span>
+                    </div>
+                  ))}
+                </div>
+
+                {externalModels.length > 0 && externalConsent && (
+                  <div className="antigravity-model-section">
+                    <span className="antigravity-model-section-title">مدل‌های ابری آنلاین (Cloud API):</span>
+                    {externalModels.map(m => (
+                      <div
+                        key={m}
+                        className={`antigravity-model-item ${selected === m ? "active" : ""}`}
+                        onClick={() => { setSelected(m); setShowModelPicker(false); }}
+                      >
+                        <span className="truncate">{m}</span>
+                        <div className="antigravity-quota-indicator">
+                          <span className="antigravity-quota-circle"></span>
+                          <span>94% باقی‌مانده</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="antigravity-composer-controls">
+            <small className="antigravity-char-count">{draft.length.toLocaleString("fa-IR")} / ۸٬۰۰۰</small>
+            <button
+              className={`antigravity-send-button ${busy ? "queue-mode" : ""}`}
+              disabled={!draft.trim() || (!localModels.length && !(externalConsent && externalModels.length))}
+            >
+              {busy ? "Queued (+)" : "↗"}
+            </button>
+          </div>
         </div>
       </div>
     </form>
