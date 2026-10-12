@@ -101,6 +101,11 @@ class NodeTlsTests(unittest.TestCase):
                 client_node.report_model_pull(node, claimed, 'completed', 100, 'ready')
                 self.assertEqual(send('/api/admin/nodes/model-pulls', token=token)[1]['jobs'][0]['status'], 'completed')
                 self.assertEqual(send('/api/admin/nodes/revoke', {'id': node['id']}, token)[0], 200)
+                token_resp = send('/api/admin/nodes/token', {'role': 'worker'}, token)[1]
+                self.assertTrue(token_resp['token'].startswith('omniops_worker_'))
+                self.assertIn('setup-worker.sh', token_resp['command'])
+                self.assertEqual(send('/api/admin/nodes/delete', {'id': node['id']}, token)[0], 200)
+                self.assertEqual(send('/api/admin/nodes', token=token)[1]['nodes'], [])
             finally:
                 server.shutdown()
                 server.server_close()

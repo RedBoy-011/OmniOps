@@ -1220,3 +1220,165 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
     width: 100%;
   }
 }
+
+/* Node Connection Modal & Management */
+.node-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 5, 14, 0.82);
+  backdrop-filter: blur(10px);
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.node-modal-card {
+  width: 100%;
+  max-width: 640px;
+  background: linear-gradient(145deg, #2a1626, #160e1b);
+  border: 1px solid rgba(245, 161, 189, 0.35);
+  border-radius: 20px;
+  padding: 24px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.75), inset 0 1px 1px rgba(255, 255, 255, 0.1);
+  color: #f4edf2;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.node-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(245, 161, 189, 0.15);
+  padding-bottom: 12px;
+}
+
+.node-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #ffc4d6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.node-role-selector {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.node-role-option {
+  border: 1px solid rgba(245, 161, 189, 0.25);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: right;
+}
+
+.node-role-option.active {
+  border-color: #f5a1bd;
+  background: rgba(245, 161, 189, 0.14);
+  box-shadow: 0 0 15px rgba(245, 161, 189, 0.2);
+}
+
+.node-role-option strong {
+  font-size: 13px;
+  color: #fff;
+}
+
+.node-role-option small {
+  font-size: 11px;
+  color: #d9c8d2;
+  line-height: 1.5;
+}
+
+.node-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.node-field label {
+  font-size: 12px;
+  color: #ffc4d6;
+  font-weight: 500;
+}
+
+.node-field input {
+  padding: 10px 14px;
+  border: 1px solid rgba(245, 161, 189, 0.35);
+  border-radius: 10px;
+  background: #140d18;
+  color: #f5e6ee;
+  font-family: monospace;
+  font-size: 12px;
+  outline: none;
+}
+
+.node-field input:focus {
+  border-color: #f5a1bd;
+}
+
+.token-command-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #0f0a14;
+  border: 1px solid rgba(245, 161, 189, 0.3);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.token-command-box label {
+  font-size: 12px;
+  color: #a4eac0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.token-command-box textarea {
+  width: 100%;
+  padding: 10px;
+  background: #09050d;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #ffe2ea;
+  font-family: monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  resize: vertical;
+  user-select: all;
+  box-sizing: border-box;
+}
+
+.node-instructions-tip {
+  font-size: 11px;
+  color: #d9c8d2;
+  line-height: 1.6;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 10px 14px;
+  border-radius: 10px;
+  border-right: 3px solid #f5a1bd;
+}
+
+.node-tile-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}

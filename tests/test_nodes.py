@@ -154,6 +154,14 @@ class NodeRegistryTests(unittest.TestCase):
         with self.assertRaises(IdentityError):
             self.nodes.report_model_pull(worker['id'], worker['credential'], old['id'], 'completed', 100, 'آماده')
 
+    def test_delete_node(self):
+        worker = self.nodes.enroll(self.nodes.issue(self.admin, 'worker')['grant'], 'worker-to-delete')
+        self.assertEqual(len(self.nodes.list_nodes(self.admin)), 1)
+        self.nodes.delete(self.admin, worker['id'])
+        self.assertEqual(len(self.nodes.list_nodes(self.admin)), 0)
+        with self.assertRaises(IdentityError):
+            self.nodes.delete(self.admin, worker['id'])
+
     def test_parallel_redemption_creates_one_node(self):
         grant = self.nodes.issue(self.admin, 'worker')['grant']
         other = NodeRegistry(IdentityStore(self.store.path, b's' * 32, lambda: self.now[0]))

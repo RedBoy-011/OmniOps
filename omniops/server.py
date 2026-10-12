@@ -4,6 +4,8 @@ In server rooye loopback ya yek IPv4-e khosusi-e moshakhas goosh midahad.
 Enteshar-e omoomi be server-e production va TLS niaz darad.
 """
 
+import base64
+import hashlib
 import hmac
 import ipaddress
 import json
@@ -214,7 +216,8 @@ def make_server(
             path = self.path
             if path not in {"/api/nodes/enroll", "/api/nodes/heartbeat", "/api/nodes/rotate",
                             "/api/admin/nodes/grants", "/api/admin/nodes/grants/revoke",
-                            "/api/admin/nodes/revoke", "/api/admin/nodes/model-pulls", "/api/admin/nodes/model-delete",
+                            "/api/admin/nodes/revoke", "/api/admin/nodes/delete", "/api/admin/nodes/token",
+                            "/api/admin/nodes/model-pulls", "/api/admin/nodes/model-delete",
                             "/api/nodes/model-pulls/claim", "/api/nodes/model-pulls/report"}:
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
@@ -247,11 +250,69 @@ def make_server(
                 elif path == "/api/admin/nodes/grants/revoke":
                     nodes.cancel_grant(principal, body.get("id"))
                     self._send(200, {"status": "revoked"})
+                elif path == "/api/admin/nodes/delete":
+                    nodes.delete(principal, body.get("id"))
+                    self._send(200, {"status": "deleted"})
+                elif path == "/api/admin/nodes/token":
+                    self._send(201, self._handle_node_token(nodes, principal, body))
                 else:
                     nodes.revoke(principal, body.get("id"))
                     self._send(200, {"status": "revoked"})
             except IdentityError as exc:
                 self._send(exc.status, {"error": {"message": str(exc)}})
+
+        def _handle_node_token(self, nodes, principal, body):
+            role = body.get("role", "worker")
+            if role not in ("worker", "edge"):
+                raise IdentityError("Invalid node role")
+            issued = nodes.issue(principal, role)
+
+            custom_url = body.get("master_url")
+            if custom_url and isinstance(custom_url, str) and custom_url.strip():
+                master_url = custom_url.strip().rstrip("/")
+            else:
+                master_url = os.environ.get("OMNIOPS_MASTER_URL")
+                if not master_url:
+                    host_header = self.headers.get("Host", "127.0.0.1:9443") if hasattr(self, "headers") and self.headers else "127.0.0.1:9443"
+                    host_ip = host_header.split(":")[0]
+                    tls_port = os.environ.get("OMNIOPS_TLS_PORT", "9443")
+                    master_url = f"https://{host_ip}:{tls_port}"
+
+            ca_path = os.environ.get("OMNIOPS_CA_PATH", "/etc/omniops/private-pki/ca.crt")
+            ca_crt = ""
+            ca_fingerprint = ""
+            if os.path.exists(ca_path):
+                try:
+                    with open(ca_path, "r", encoding="utf-8") as f:
+                        ca_crt = f.read()
+                    der = ssl.PEM_cert_to_DER_cert(ca_crt)
+                    ca_fingerprint = hashlib.sha256(der).hexdigest().lower()
+                except Exception:
+                    ca_crt = ""
+                    ca_fingerprint = ""
+
+            payload = {
+                "version": 1,
+                "role": role,
+                "master_url": master_url,
+                "grant": issued["grant"],
+                "expires_at": issued["expires_at"],
+                "ca_crt": ca_crt,
+                "ca_fingerprint": ca_fingerprint
+            }
+            token_str = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+            join_token = f"omniops_{role}_{token_str}"
+            script_name = "setup-worker.sh" if role == "worker" else "setup-edge.sh"
+            command = f"curl -fsSL https://raw.githubusercontent.com/RedBoy-011/OmniOps/main/scripts/{script_name} | bash -s -- --token {join_token}"
+            return {
+                "id": issued["id"],
+                "grant": issued["grant"],
+                "role": role,
+                "expires_at": issued["expires_at"],
+                "master_url": master_url,
+                "token": join_token,
+                "command": command
+            }
 
         def _identity_post(self):
             store = self._identity()

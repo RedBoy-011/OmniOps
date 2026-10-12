@@ -30,6 +30,15 @@ export type ApiProvider = { kind: "openai" | "gemini" | "anthropic" | "openroute
   prices: Record<string, { input: string; output: string }>;
   catalog_prices: Record<string, { input: string; output: string }> };
 export type NodeGrant = { id: string; role: "worker" | "edge"; grant: string; expires_at: number };
+export type NodeTokenResponse = {
+  id: string;
+  grant: string;
+  role: "worker" | "edge";
+  expires_at: number;
+  master_url: string;
+  token: string;
+  command: string;
+};
 export type ProjectFileSummary = { path: string; name: string; type: string; size?: number; changes?: string; category?: string };
 export type ProjectFileDetail = {
   path: string;
@@ -98,8 +107,11 @@ export const api = {
   priceProvider: (kind: string, model: string, input: string, output: string) =>
     request<{ model: string }>("/api/admin/providers/price", "POST", { kind, model, input, output }),
   issueNodeGrant: (role: "worker" | "edge") => request<NodeGrant>("/api/admin/nodes/grants", "POST", { role }),
+  issueNodeToken: (role: "worker" | "edge", master_url?: string) =>
+    request<NodeTokenResponse>("/api/admin/nodes/token", "POST", { role, master_url }),
   revokeNodeGrant: (id: string) => request<{ status: string }>("/api/admin/nodes/grants/revoke", "POST", { id }),
   revokeNode: (id: string) => request<{ status: string }>("/api/admin/nodes/revoke", "POST", { id }),
+  deleteNode: (id: string) => request<{ status: string }>("/api/admin/nodes/delete", "POST", { id }),
   saveOllamaEndpoint: (url: string) => request<Operations["ollama"]>("/api/admin/ollama-endpoint", "POST", { url }),
   approve: (id: string, capabilities: string[]) => request<{ status: string }>(`/api/admin/pending/${encodeURIComponent(id)}/approve`, "POST", { capabilities }),
   reject: (id: string) => request<{ status: string }>(`/api/admin/pending/${encodeURIComponent(id)}/reject`, "POST", {}),

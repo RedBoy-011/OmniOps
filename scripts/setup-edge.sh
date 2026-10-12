@@ -86,11 +86,16 @@ master_target="${cli_master:-${OMNIOPS_EDGE_MASTER_TARGET:-}}"
 token_candidate="${cli_token:-}"
 
 if [[ -z "$master_target" && -n "$token_candidate" ]]; then
-  raw_token="${token_candidate#omniops_*_}"
-  master_target="$(python3 - "$raw_token" <<'PY'
+  master_target="$(python3 - "$token_candidate" <<'PY'
 import sys, json, base64
 try:
-    data = json.loads(base64.urlsafe_b64decode(sys.argv[1].encode()).decode())
+    raw = sys.argv[1].strip()
+    if raw.startswith('omniops_'):
+        parts = raw.split('_', 2)
+        if len(parts) >= 3:
+            raw = parts[2]
+    padded = raw + '=' * (-len(raw) % 4)
+    data = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
     url = data.get('master_url', '')
     url = url.replace('https://', '').replace('http://', '')
     print(url)

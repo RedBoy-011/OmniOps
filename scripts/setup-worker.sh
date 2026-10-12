@@ -144,11 +144,16 @@ fi
 
 # اگر توکن تبادل داده شده، اطلاعات را خودکار از آن استخراج کن
 if [[ -n "$token_candidate" ]]; then
-  raw_token="${token_candidate#omniops_*_}"
-  parsed="$(python3 - "$raw_token" <<'PY'
+  parsed="$(python3 - "$token_candidate" <<'PY'
 import sys, json, base64
 try:
-    data = json.loads(base64.urlsafe_b64decode(sys.argv[1].encode()).decode())
+    raw = sys.argv[1].strip()
+    if raw.startswith('omniops_'):
+        parts = raw.split('_', 2)
+        if len(parts) >= 3:
+            raw = parts[2]
+    padded = raw + '=' * (-len(raw) % 4)
+    data = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
     print(data.get('master_url', ''))
     print(data.get('grant', ''))
     print(data.get('ca_fingerprint', ''))
@@ -215,15 +220,23 @@ done
 
 # ۶. ثبت و جفت‌سازی امن گره با سرور Master
 printf '\nدر حال جفت‌سازی و ثبت نود در سرور Master...\n'
+systemctl stop omniops-worker-node.service 2>/dev/null || true
+
 export OMNIOPS_MASTER_URL="$master_url"
 export OMNIOPS_CA_FILE="$ca_file"
 export OMNIOPS_CA_SHA256="$ca_fingerprint"
 export OMNIOPS_GRANT_FILE="/root/omniops-worker-grant"
+export OMNIOPS_FORCE_REENROLL="1"
 
+rm -f -- /root/omniops-worker-grant 2>/dev/null || true
 printf '%s' "$grant_code" > "$OMNIOPS_GRANT_FILE"
 chmod 600 "$OMNIOPS_GRANT_FILE"
 
 bash "$repo/scripts/install-private-worker-node.sh"
+
+systemctl daemon-reload 2>/dev/null || true
+systemctl enable --now omniops-worker-node.service 2>/dev/null || true
+systemctl restart omniops-worker-node.service 2>/dev/null || true
 
 # ۷. نمایش وضعیت نهایی
 cat << 'EOF'

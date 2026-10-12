@@ -29,10 +29,10 @@ actual_fingerprint="$(openssl x509 -in "$ca_source" -outform DER | openssl dgst 
 [[ "$actual_fingerprint" =~ ^[0-9a-f]{64}$ ]] || fail 'Invalid CA certificate.'
 ca_target=/etc/omniops-node/master-ca.crt
 fingerprint_file=/etc/omniops-node/ca.sha256
-if [[ -f "$fingerprint_file" ]]; then
-  expected_fingerprint="$(cat "$fingerprint_file")"
-elif [[ -n "${OMNIOPS_CA_SHA256:-}" ]]; then
+if [[ -n "${OMNIOPS_CA_SHA256:-}" ]]; then
   expected_fingerprint="${OMNIOPS_CA_SHA256,,}"
+elif [[ -f "$fingerprint_file" ]]; then
+  expected_fingerprint="$(cat "$fingerprint_file")"
 else
   [[ -r /dev/tty ]] || fail 'Provide OMNIOPS_CA_SHA256 from a trusted Master session.'
   read -r -p 'CA SHA256 fingerprint from the trusted Master SSH session: ' expected_fingerprint </dev/tty
@@ -50,11 +50,16 @@ state=/var/lib/omniops-node/node-identity.json
 if [[ -e "$state" ]]; then
   installed_url="$(python3 - "$state" <<'PY'
 import json, sys
-with open(sys.argv[1], encoding='utf-8') as file:
-    print(json.load(file)['master_url'])
+try:
+    with open(sys.argv[1], encoding='utf-8') as file:
+        print(json.load(file).get('master_url', ''))
+except Exception:
+    print('')
 PY
 )"
-  [[ "$installed_url" == "${master_url%/}" ]] || fail 'Existing node identity belongs to a different Master; revoke before reinstall.'
+  if [[ "$installed_url" != "${master_url%/}" || "${OMNIOPS_FORCE_REENROLL:-0}" == "1" || -n "${OMNIOPS_GRANT_FILE:-}" ]]; then
+    mv -f "$state" "${state}.bak" 2>/dev/null || rm -f "$state"
+  fi
 fi
 if ! id -u omniops-node >/dev/null 2>&1; then
   useradd --system --user-group --home-dir /var/lib/omniops-node --shell /usr/sbin/nologin omniops-node

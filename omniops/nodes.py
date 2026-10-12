@@ -156,6 +156,18 @@ class NodeRegistry:
                 raise IdentityError("Active node not found", 404)
             self.identity._audit(db, principal["id"], "node_revoked", node_id)
 
+    def delete(self, principal, node_id):
+        self._admin(principal)
+        if not isinstance(node_id, str) or not re.fullmatch(r"[0-9a-f]{32}", node_id):
+            raise IdentityError("Invalid node ID")
+        with self.identity._lock, self.identity._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("DELETE FROM model_pulls WHERE node_id=?", (node_id,))
+            changed = db.execute("DELETE FROM managed_nodes WHERE id=?", (node_id,)).rowcount
+            if not changed:
+                raise IdentityError("Node not found", 404)
+            self.identity._audit(db, principal["id"], "node_deleted", node_id)
+
     def list_nodes(self, principal):
         self._admin(principal)
         with self.identity._db() as db:
