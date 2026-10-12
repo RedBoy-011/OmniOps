@@ -30,6 +30,16 @@ export type ApiProvider = { kind: "openai" | "gemini" | "anthropic" | "openroute
   prices: Record<string, { input: string; output: string }>;
   catalog_prices: Record<string, { input: string; output: string }> };
 export type NodeGrant = { id: string; role: "worker" | "edge"; grant: string; expires_at: number };
+export type ProjectFileSummary = { path: string; name: string; type: string; size?: number; changes?: string; category?: string };
+export type ProjectFileDetail = {
+  path: string;
+  name: string;
+  content: string;
+  size: number;
+  lines: number;
+  type: string;
+  diff?: { diff_text?: string; added?: number; removed?: number } | null;
+};
 export type Operations = { master: "up"; ollama: { url: string; status: NodeStatus["status"]; models: LocalModel[] }; nodes: NodeStatus[] };
 
 let volatileWebToken: string | null = null;
@@ -95,4 +105,6 @@ export const api = {
   reject: (id: string) => request<{ status: string }>(`/api/admin/pending/${encodeURIComponent(id)}/reject`, "POST", {}),
   issuePairing: () => request<{ code: string; expires_at: number }>("/api/agent/pairing", "POST", {}),
   logout: () => request<{ status: string }>("/api/auth/logout", "POST", {}),
+  projectFiles: () => request<{ files: ProjectFileSummary[] }>("/api/web/project/files"),
+  projectFile: (path: string) => request<ProjectFileDetail>(`/api/web/project/file?path=${encodeURIComponent(path)}`),
 };

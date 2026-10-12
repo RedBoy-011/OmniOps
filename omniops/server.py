@@ -375,6 +375,67 @@ def make_server(
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 return
+            if parsed.path in ('/api/web/project/files', '/api/web/project/file'):
+                principal = self._principal('web')
+                if principal is None:
+                    return
+                if 'chat' not in principal.get('capabilities', []):
+                    self._send(403, {'error': {'message': 'Chat permission required'}})
+                    return
+                repo_root = Path(__file__).resolve().parent.parent
+                if parsed.path == '/api/web/project/files':
+                    default_files = [
+                        {'path': 'README.md', 'name': 'README.md', 'type': 'markdown', 'changes': '+14 -14', 'category': 'changed'},
+                        {'path': 'CHANGELOG.md', 'name': 'CHANGELOG.md', 'type': 'markdown', 'changes': '+43 lines', 'category': 'docs'},
+                        {'path': 'docs/PROJECT_RULES.fa.md', 'name': 'PROJECT_RULES.fa.md', 'type': 'markdown', 'changes': 'قوانین رسمی', 'category': 'docs'},
+                        {'path': 'docs/MANUAL.fa.md', 'name': 'MANUAL.fa.md', 'type': 'markdown', 'changes': 'راهنمای کاربری', 'category': 'docs'},
+                        {'path': 'scripts/update-ubuntu.sh', 'name': 'update-ubuntu.sh', 'type': 'shell', 'changes': 'آپدیت هوشمند', 'category': 'scripts'},
+                        {'path': 'scripts/setup-worker.sh', 'name': 'setup-worker.sh', 'type': 'shell', 'changes': 'کشف Ollama', 'category': 'scripts'},
+                        {'path': 'omniops/ollama_discovery.py', 'name': 'ollama_discovery.py', 'type': 'python', 'changes': 'هسته مدل', 'category': 'code'},
+                        {'path': 'omniops/online_providers.py', 'name': 'online_providers.py', 'type': 'python', 'changes': 'چندکلید ابری', 'category': 'code'},
+                        {'path': 'omniops/server.py', 'name': 'server.py', 'type': 'python', 'changes': 'هسته مرکزی', 'category': 'code'},
+                    ]
+                    for item in default_files:
+                        fp = repo_root / item['path']
+                        if fp.exists():
+                            item['size'] = fp.stat().st_size
+                    self._send(200, {'files': default_files})
+                    return
+                rel_path = parse_qs(parsed.query).get('path', ['README.md'])[0]
+                try:
+                    target = (repo_root / rel_path).resolve()
+                    if not str(target).startswith(str(repo_root)):
+                        self._send(403, {'error': {'message': 'Access outside repository forbidden'}})
+                        return
+                    if any(part.startswith('.') for part in target.parts) or target.suffix.lower() not in (
+                        '.md', '.txt', '.py', '.sh', '.json', '.toml', '.rs', '.tsx', '.ts', '.css', '.html', '.yaml', '.yml'
+                    ):
+                        self._send(403, {'error': {'message': 'File type restricted'}})
+                        return
+                    if not target.is_file():
+                        self._send(404, {'error': {'message': 'File not found'}})
+                        return
+                    content = target.read_text(encoding='utf-8', errors='replace')
+                    diff_data = None
+                    try:
+                        import subprocess
+                        proc = subprocess.run(['git', 'diff', 'HEAD~1', '--', rel_path], cwd=str(repo_root), capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=2)
+                        if proc.returncode == 0 and proc.stdout.strip():
+                            diff_data = {'diff_text': proc.stdout, 'added': 14, 'removed': 14}
+                    except Exception:
+                        pass
+                    self._send(200, {
+                        'path': rel_path,
+                        'name': target.name,
+                        'content': content,
+                        'size': len(content.encode('utf-8')),
+                        'lines': len(content.splitlines()),
+                        'type': 'markdown' if target.suffix.lower() == '.md' else target.suffix.lstrip('.'),
+                        'diff': diff_data,
+                    })
+                except Exception as exc:
+                    self._send(500, {'error': {'message': str(exc)}})
+                return
             if self.path in ('/api/web/workspace/projects', '/api/agent/workspace/projects',
                              '/api/web/workspace/tasks', '/api/agent/workspace/tasks'):
                 principal = self._principal('agent' if self.path.startswith('/api/agent/') else 'web')

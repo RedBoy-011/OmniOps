@@ -322,6 +322,18 @@ class WorkerEndpointTests(unittest.TestCase):
         self.assertEqual(self.second.last_request["model"], "second:2b")
         self.assertEqual(self.call("POST", "/v1/chat/completions", {"model": "ollama/second:2b", "messages": [{"role": "user", "content": "hi"}]}, "testing-a-unique-gateway-key-long-enough")[1]["choices"][0]["message"]["content"], "second worker")
 
+    def test_project_files_preview_endpoints(self):
+        admin = self.store.login("root-admin", "a very strong admin password")["token"]
+        code, files_res = self.call("GET", "/api/web/project/files", token=admin)
+        self.assertEqual(code, 200)
+        self.assertTrue(any(f["path"] == "README.md" for f in files_res["files"]))
+
+        code, file_res = self.call("GET", "/api/web/project/file?path=README.md", token=admin)
+        self.assertEqual(code, 200)
+        self.assertEqual(file_res["path"], "README.md")
+        self.assertTrue(len(file_res["content"]) > 0)
+        self.assertEqual(file_res["type"], "markdown")
+
 
 if __name__ == "__main__":
     unittest.main()

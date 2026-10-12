@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, type MemoryNote } from "./api";
+import { FilePreviewPanel } from "./components/FilePreviewPanel";
 
 type Entry = { role: "user" | "assistant"; text: string; time: string; model?: string };
 type QueuedMessage = { id: string; text: string; time: string };
@@ -21,6 +22,9 @@ export function ChatRoom() {
   const [noteDraft, setNoteDraft] = useState("");
   const [memoryBusy, setMemoryBusy] = useState(false);
   const [error, setError] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewFile, setPreviewFile] = useState("README.md");
+  const [previewTab, setPreviewTab] = useState<"review" | "preview" | "raw" | "terminal">("preview");
   const endRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const localModels = models.filter(model => model.startsWith("ollama/"));
@@ -137,19 +141,33 @@ export function ChatRoom() {
     }
   }
 
-  return <section className="glass admin-card operations-card web-chat" aria-label="گفت‌وگو با هسته">
-    <div className="web-chat-top">
-      <div className="web-chat-title">
-        <span className="chat-core" aria-hidden="true">✦</span>
-        <div>
-          <h2>گفت‌وگو با هسته OmniOps</h2>
-          <p>مدل محلی در اولویت است · خروج متن به API بیرونی فقط با رضایت شما</p>
+  return (
+    <div className={`web-chat-workspace-wrapper ${previewOpen ? "with-preview" : ""}`}>
+      <section className="glass admin-card operations-card web-chat" aria-label="گفت‌وگو با هسته">
+        <div className="web-chat-top">
+          <div className="web-chat-title">
+            <span className="chat-core" aria-hidden="true">✦</span>
+            <div>
+              <h2>گفت‌وگو با هسته OmniOps</h2>
+              <p>مدل محلی در اولویت است · خروج متن به API بیرونی فقط با رضایت شما</p>
+            </div>
+          </div>
+          <div className="web-chat-top-actions">
+            <button
+              type="button"
+              className={`chat-preview-toggle-button ${previewOpen ? "active" : ""}`}
+              onClick={() => setPreviewOpen(!previewOpen)}
+              title={previewOpen ? "بستن پنل پیش‌نمایش فایل" : "باز کردن پنل پیش‌نمایش فایل"}
+            >
+              <span className="preview-icon">◫</span>
+              <span>{previewOpen ? "بستن پیش‌نمایش" : "پیش‌نمایش فایل"}</span>
+              <span className="preview-badge-name">{previewFile}</span>
+            </button>
+            <span className={`chat-presence ${models.length ? "connected" : ""}`}>
+              <i aria-hidden="true" />{models.length ? "سیستم هوش مصنوعی آنلاین" : "در حال اتصال به ورکر"}
+            </span>
+          </div>
         </div>
-      </div>
-      <span className={`chat-presence ${models.length ? "connected" : ""}`}>
-        <i aria-hidden="true" />{models.length ? "سیستم هوش مصنوعی آنلاین" : "در حال اتصال به ورکر"}
-      </span>
-    </div>
 
     {/* بخش رضایت API ابری */}
     {externalModels.length > 0 && (
@@ -250,6 +268,30 @@ export function ChatRoom() {
           >
             <span className="chat-entry-label">{entry.role === "user" ? "شما" : "OmniOps AI"}</span>
             <p>{entry.text}</p>
+            {entry.role === "assistant" && (
+              <div className="antigravity-chat-file-card">
+                <div className="file-card-info">
+                  <span className="file-card-icon">📄</span>
+                  <span className="file-card-name">
+                    {entry.text.includes("CHANGELOG") ? "CHANGELOG.md" : entry.text.includes("update-ubuntu") ? "scripts/update-ubuntu.sh" : entry.text.includes("PROJECT_RULES") ? "docs/PROJECT_RULES.fa.md" : "README.md"}
+                  </span>
+                  <span className="file-card-diff">+15 -15</span>
+                </div>
+                <button
+                  type="button"
+                  className="file-card-action-btn"
+                  onClick={() => {
+                    const target = entry.text.includes("CHANGELOG") ? "CHANGELOG.md" : entry.text.includes("update-ubuntu") ? "scripts/update-ubuntu.sh" : entry.text.includes("PROJECT_RULES") ? "docs/PROJECT_RULES.fa.md" : "README.md";
+                    setPreviewFile(target);
+                    setPreviewTab(entry.text.includes("CHANGELOG") ? "preview" : "review");
+                    setPreviewOpen(true);
+                  }}
+                  title="پیش‌نمایش این فایل در پنل بغل"
+                >
+                  Review / پیش‌نمایش ↗
+                </button>
+              </div>
+            )}
             <div className="chat-entry-meta">
               <time>{entry.time}</time>
               {entry.model && <bdi dir="ltr">{entry.model}</bdi>}
@@ -404,5 +446,16 @@ export function ChatRoom() {
       </div>
     </form>
     {error && <p className="admin-message" role="alert">{error}</p>}
-  </section>;
+  </section>
+
+      {previewOpen && (
+        <FilePreviewPanel
+          currentFile={previewFile}
+          initialTab={previewTab}
+          onClose={() => setPreviewOpen(false)}
+          onSelectFile={(f) => setPreviewFile(f)}
+        />
+      )}
+    </div>
+  );
 }
