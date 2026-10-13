@@ -172,6 +172,57 @@ class IdentityStore:
             self._audit(db, user_id, "bootstrap_admin", user_id)
             return user_id
 
+    def reset_admin(self, username: str, password: str, mobile: str = "09120000000") -> str:
+        display, key = _normalize_username(username)
+        number = _normalize_mobile(mobile)
+        encoded = _password_hash(password)
+        with self._lock, self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT id FROM users WHERE role='superadmin' LIMIT 1").fetchone()
+            if row:
+                user_id = row["id"]
+                conflict = db.execute(
+                    "SELECT id FROM users WHERE (username_key=? OR mobile=?) AND id != ? LIMIT 1",
+                    (key, number, user_id),
+                ).fetchone()
+                if conflict:
+                    cid = conflict["id"]
+                    db.execute("DELETE FROM sessions WHERE user_id=?", (cid,))
+                    db.execute("DELETE FROM pairings WHERE user_id=?", (cid,))
+                    db.execute("DELETE FROM users WHERE id=?", (cid,))
+                db.execute(
+                    "UPDATE users SET username=?, username_key=?, mobile=?, password_hash=?, "
+                    "status='active', capabilities=?, decided_at=? WHERE id=?",
+                    (display, key, number, encoded, json.dumps(ADMIN_CAPABILITIES), int(self.clock()), user_id),
+                )
+                db.execute("UPDATE sessions SET revoked=1 WHERE user_id=?", (user_id,))
+                self._audit(db, user_id, "admin_reset", user_id)
+                return user_id
+
+            existing = db.execute(
+                "SELECT id FROM users WHERE username_key=? OR mobile=? LIMIT 1",
+                (key, number),
+            ).fetchone()
+            if existing:
+                user_id = existing["id"]
+                db.execute(
+                    "UPDATE users SET username=?, username_key=?, mobile=?, password_hash=?, "
+                    "status='active', role='superadmin', capabilities=?, decided_at=? WHERE id=?",
+                    (display, key, number, encoded, json.dumps(ADMIN_CAPABILITIES), int(self.clock()), user_id),
+                )
+                db.execute("UPDATE sessions SET revoked=1 WHERE user_id=?", (user_id,))
+                self._audit(db, user_id, "admin_reset", user_id)
+                return user_id
+
+            user_id = uuid.uuid4().hex
+            db.execute(
+                "INSERT INTO users VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (user_id, display, key, number, encoded, "active", "superadmin",
+                 json.dumps(ADMIN_CAPABILITIES), int(self.clock()), None, None),
+            )
+            self._audit(db, user_id, "admin_reset", user_id)
+            return user_id
+
     def has_active_admin(self) -> bool:
         with self._db() as db:
             return db.execute(

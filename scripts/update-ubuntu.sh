@@ -273,10 +273,10 @@ from pathlib import Path
 sys.path.insert(0, '$repo')
 from omniops.identity import IdentityStore
 store = IdentityStore(Path('$db_file'), '$OMNIOPS_SIGNING_KEY'.encode())
-store.bootstrap_admin('$admin_user', '$admin_pass', '$admin_mobile')
+store.reset_admin('$admin_user', '$admin_pass', '$admin_mobile')
 "
   admin_user_created="$admin_user"
-  printf '✅ حساب مدیر ارشد "%s" با موفقیت در پایگاه‌داده ایجاد شد.\n' "$admin_user"
+  printf '✅ حساب مدیر ارشد "%s" با موفقیت در پایگاه‌داده تنظیم و به‌روزرسانی شد.\n' "$admin_user"
   printf '======================================================================\n\n'
 fi
 
@@ -397,9 +397,11 @@ else
   systemctl restart omniops-master-tls.service 2>/dev/null || true
 fi
 
-# ۱۴. ایجاد میانبر سیستمی برای صدور آسان توکن تبادل گره‌ها
-chmod +x "$repo/scripts/issue-token.sh" 2>/dev/null || true
+# ۱۴. ایجاد میانبر سیستمی برای صدور آسان توکن تبادل گره‌ها و بازنشانی ادمین
+chmod +x "$repo/scripts/issue-token.sh" "$repo/scripts/reset-admin.sh" 2>/dev/null || true
 ln -sf "$repo/scripts/issue-token.sh" /usr/local/bin/omniops-token 2>/dev/null || true
+ln -sf "$repo/scripts/reset-admin.sh" /usr/local/bin/omniops-reset-admin 2>/dev/null || true
+ln -sf "$repo/scripts/reset-admin.sh" /usr/local/bin/omniops-admin 2>/dev/null || true
 
 # تولید یک توکن اتصال اولیه برای نمایش به کاربر
 worker_token="$(python3 -m omniops.node_admin --local-root --role worker --token --raw 2>/dev/null || true)"
@@ -433,6 +435,8 @@ cat << EOF
   💡 برای صدور توکن‌های تبادل جدید در هر زمان، در همین سرور دستور زیر را بزنید:
      omniops-token worker    (برای اتصال سرور عملیاتی)
      omniops-token edge      (برای اتصال سرور لبه)
+  🔑 برای تغییر یا بازنشانی رمز عبور مدیر ارشد در هر زمان:
+     omniops-reset-admin
 EOF
 fi
 

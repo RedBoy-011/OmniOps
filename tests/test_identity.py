@@ -95,6 +95,39 @@ class IdentityTests(unittest.TestCase):
             self.store.login("admin", "a sufficiently strong password")
         self.assertEqual(error.exception.status, 429)
 
+    def test_reset_admin_updates_existing_admin_and_revokes_sessions(self):
+        login1 = self.store.login("admin", "a sufficiently strong password")
+        old_token = login1["token"]
+        self.store.authenticate(old_token)
+
+        updated_id = self.store.reset_admin("newadmin", "brand new strong password", "09129999999")
+        self.assertEqual(updated_id, self.admin_id)
+
+        # Old session must be revoked
+        with self.assertRaises(IdentityError):
+            self.store.authenticate(old_token)
+
+        # Old password must fail
+        with self.assertRaises(IdentityError):
+            self.store.login("admin", "a sufficiently strong password")
+
+        # New credentials succeed
+        login2 = self.store.login("newadmin", "brand new strong password")
+        self.assertEqual(login2["user"]["username"], "newadmin")
+        self.assertEqual(login2["user"]["role"], "superadmin")
+        self.assertTrue(self.store.has_active_admin())
+
+    def test_reset_admin_creates_admin_if_none_exists(self):
+        fresh_path = Path(self.temp.name) / "fresh.db"
+        fresh_store = IdentityStore(fresh_path, b"k" * 32, lambda: self.now[0])
+        self.assertFalse(fresh_store.has_active_admin())
+
+        user_id = fresh_store.reset_admin("fresh_admin", "fresh password 1234", "09127777777")
+        self.assertTrue(fresh_store.has_active_admin())
+        login = fresh_store.login("fresh_admin", "fresh password 1234")
+        self.assertEqual(login["user"]["id"], user_id)
+        self.assertEqual(login["user"]["role"], "superadmin")
+
 
 if __name__ == "__main__":
     unittest.main()
