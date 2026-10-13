@@ -1,14 +1,259 @@
 import { useEffect, useState } from "react";
 import { api, type ManagedNode, type ModelPull, type NodeTokenResponse } from "./api";
 
+export type CuratedOllamaModel = {
+  id: string;
+  name: string;
+  category: "lightweight" | "coding" | "reasoning" | "chat" | "vision" | "embedding";
+  categoryLabel: string;
+  size: string;
+  recommendedRam: string;
+  desc: string;
+  badge?: string;
+};
+
+export const CURATED_OLLAMA_MODELS: CuratedOllamaModel[] = [
+  // 🚀 مدل‌های بسیار سبک و سریع
+  {
+    id: "qwen3:0.6b",
+    name: "Qwen 3 (0.6B) · بسیار سبک و فوق‌سریع",
+    category: "lightweight",
+    categoryLabel: "🚀 بسیار سبک و سریع (رم ۲ تا ۴ گیگابایت)",
+    size: "۵۰۰ مگابایت",
+    recommendedRam: "۲ گیگابایت",
+    desc: "کم‌حجم‌ترین مدل کوئن؛ فوق‌العاده سریع برای ماشین‌های با منابع محدود و تست اتصال سرور.",
+    badge: "فوق‌سریع"
+  },
+  {
+    id: "qwen2.5:1.5b",
+    name: "Qwen 2.5 (1.5B) · چت و متن سبک",
+    category: "lightweight",
+    categoryLabel: "🚀 بسیار سبک و سریع (رم ۲ تا ۴ گیگابایت)",
+    size: "۹۸۰ مگابایت",
+    recommendedRam: "۴ گیگابایت",
+    desc: "مدل کم‌مصرف با تسلط بسیار خوب روی زبان فارسی و انگلیسی.",
+  },
+  {
+    id: "deepseek-r1:1.5b",
+    name: "DeepSeek R1 (1.5B) · استدلال سبک",
+    category: "lightweight",
+    categoryLabel: "🚀 بسیار سبک و سریع (رم ۲ تا ۴ گیگابایت)",
+    size: "۱.۱ گیگابایت",
+    recommendedRam: "۴ گیگابایت",
+    desc: "سبک‌ترین نسخه موتور تفکر و استدلال دیپ‌سیک؛ اجرای روان روی تمامی سرورها.",
+    badge: "استدلال سریع"
+  },
+  {
+    id: "llama3.2:1b",
+    name: "Llama 3.2 (1B) · لاما فوق‌سبک متا",
+    category: "lightweight",
+    categoryLabel: "🚀 بسیار سبک و سریع (رم ۲ تا ۴ گیگابایت)",
+    size: "۱.۳ گیگابایت",
+    recommendedRam: "۴ گیگابایت",
+    desc: "مدل بهینه‌شده نسل ۳.۲ شرکت متا برای خلاصه‌سازی و پردازش لبه.",
+  },
+  {
+    id: "llama3.2:3b",
+    name: "Llama 3.2 (3B) · لاما ۳.۲ متوازن",
+    category: "lightweight",
+    categoryLabel: "🚀 بسیار سبک و سریع (رم ۲ تا ۴ گیگابایت)",
+    size: "۲.۰ گیگابایت",
+    recommendedRam: "۴ تا ۶ گیگابایت",
+    desc: "تعادل عالی بین مصرف حافظه و کیفیت خروجی، مناسب سرورهای متوسط.",
+    badge: "محبوب"
+  },
+  {
+    id: "gemma2:2b",
+    name: "Gemma 2 (2B) · سبک و دقیق گوگل",
+    category: "lightweight",
+    categoryLabel: "🚀 بسیار سبک و سریع (رم ۲ تا ۴ گیگابایت)",
+    size: "۱.۶ گیگابایت",
+    recommendedRam: "۴ گیگابایت",
+    desc: "مدل ساخت شرکت گوگل با آموزش پیشرفته و دقت زبانی بالا.",
+  },
+
+  // 💻 کدنویسی و برنامه‌نویسی
+  {
+    id: "qwen2.5-coder:1.5b",
+    name: "Qwen 2.5 Coder (1.5B) · کدنویسی سبک",
+    category: "coding",
+    categoryLabel: "💻 تخصصی کدنویسی و برنامه‌نویسی",
+    size: "۱.۰ گیگابایت",
+    recommendedRam: "۴ گیگابایت",
+    desc: "مدل دستیار برنامه‌نویسی بسیار سبک با توانایی تحلیل و رفع باگ توابع.",
+  },
+  {
+    id: "qwen2.5-coder:7b",
+    name: "Qwen 2.5 Coder (7B) · پرچمدار کدنویسی",
+    category: "coding",
+    categoryLabel: "💻 تخصصی کدنویسی و برنامه‌نویسی",
+    size: "۴.۷ گیگابایت",
+    recommendedRam: "۸ تا ۱۲ گیگابایت",
+    desc: "یکی از قدرتمندترین مدل‌های باز برای برنامه‌نویسی در پایتون، جاوااسکریپت، Go و داکر.",
+    badge: "پیشنهاد اصلی کدنویسی"
+  },
+  {
+    id: "deepseek-coder:6.7b",
+    name: "DeepSeek Coder (6.7B) · متخصص کد و دیباگ",
+    category: "coding",
+    categoryLabel: "💻 تخصصی کدنویسی و برنامه‌نویسی",
+    size: "۳.۸ گیگابایت",
+    recommendedRam: "۸ گیگابایت",
+    desc: "مدل محبوب توسعه‌دهندگان برای طراحی تست، ریفکتور و کارهای DevOps.",
+  },
+  {
+    id: "codellama:7b",
+    name: "Code Llama (7B) · دستیار کد متا",
+    category: "coding",
+    categoryLabel: "💻 تخصصی کدنویسی و برنامه‌نویسی",
+    size: "۳.۸ گیگابایت",
+    recommendedRam: "۸ گیگابایت",
+    desc: "مدل تخصصی ساخت شرکت متا بر پایه لاما برای خطوط فرمان و اسکریپت‌نویسی.",
+  },
+
+  // 🧠 استدلال عمیق و تفکر (Deep Thinking)
+  {
+    id: "deepseek-r1:7b",
+    name: "DeepSeek R1 (7B) · تفکر و استدلال عمیق",
+    category: "reasoning",
+    categoryLabel: "🧠 استدلال، منطق و تفکر عمیق (Reasoning)",
+    size: "۴.۷ گیگابایت",
+    recommendedRam: "۸ تا ۱۰ گیگابایت",
+    desc: "موتور استدلال با ارائه زنجیره تفکر (Thinking Chain) برای حل مسائل پیچیده.",
+    badge: "هوشمند"
+  },
+  {
+    id: "deepseek-r1:8b",
+    name: "DeepSeek R1 (8B) · استدلال پایه لاما",
+    category: "reasoning",
+    categoryLabel: "🧠 استدلال، منطق و تفکر عمیق (Reasoning)",
+    size: "۴.۹ گیگابایت",
+    recommendedRam: "۱۰ گیگابایت",
+    desc: "ترکیب استدلال دیپ‌سیک با بستر لاما ۳ برای مسائل ریاضی و الگوریتمی.",
+  },
+  {
+    id: "deepseek-r1:14b",
+    name: "DeepSeek R1 (14B) · تفکر پیشرفته (سرورهای قوی)",
+    category: "reasoning",
+    categoryLabel: "🧠 استدلال، منطق و تفکر عمیق (Reasoning)",
+    size: "۹.۰ گیگابایت",
+    recommendedRam: "۱۶ گیگابایت",
+    desc: "نسخه ۱۴ میلیاردی دیپ‌سیک با استدلال قوی مناسب سرورهای اختصاصی دارای رم بالا.",
+  },
+
+  // 💬 چت عمومی و چندزبانه
+  {
+    id: "qwen2.5:7b",
+    name: "Qwen 2.5 (7B) · چت فارسی و عمومی عالی",
+    category: "chat",
+    categoryLabel: "💬 چت عمومی، ترجمه و چندزبانه (فارسی/انگلیسی)",
+    size: "۴.۷ گیگابایت",
+    recommendedRam: "۸ گیگابایت",
+    desc: "تسلط فوق‌العاده بر نگارش و فهم زبان فارسی، پاسخ‌گویی دقیق به پرسش‌ها.",
+    badge: "عالی برای فارسی"
+  },
+  {
+    id: "llama3.1:8b",
+    name: "Llama 3.1 (8B) · پرچمدار محبوب متا",
+    category: "chat",
+    categoryLabel: "💬 چت عمومی، ترجمه و چندزبانه (فارسی/انگلیسی)",
+    size: "۴.۹ گیگابایت",
+    recommendedRam: "۸ تا ۱۲ گیگابایت",
+    desc: "مدل استاندارد و پایدار هوش مصنوعی با پنجره بافت ۱۲۸ هزار توکنی.",
+  },
+  {
+    id: "gemma2:9b",
+    name: "Gemma 2 (9B) · مدل برجسته گوگل",
+    category: "chat",
+    categoryLabel: "💬 چت عمومی، ترجمه و چندزبانه (فارسی/انگلیسی)",
+    size: "۵.۵ گیگابایت",
+    recommendedRam: "۱۰ تا ۱۲ گیگابایت",
+    desc: "خروجی باکیفیت و ساختارمند در درک متون علمی و عمومی.",
+  },
+  {
+    id: "mistral:7b",
+    name: "Mistral (7B) · میسترال فرانسوی محبوب",
+    category: "chat",
+    categoryLabel: "💬 چت عمومی، ترجمه و چندزبانه (فارسی/انگلیسی)",
+    size: "۴.۱ گیگابایت",
+    recommendedRam: "۸ گیگابایت",
+    desc: "مدل بهینه و بسیار محبوب اروپایی با سرعت پاسخ‌دهی بالا.",
+  },
+  {
+    id: "phi3.5:3.8b",
+    name: "Phi-3.5 (3.8B) · هوش بهینه مایکروسافت",
+    category: "chat",
+    categoryLabel: "💬 چت عمومی، ترجمه و چندزبانه (فارسی/انگلیسی)",
+    size: "۲.۲ گیگابایت",
+    recommendedRam: "۴ تا ۶ گیگابایت",
+    desc: "مدل مهندسی‌شده مایکروسافت با دانش بالا نسبت به اندازه کم‌حجم آن.",
+  },
+
+  // 👁️ مدل‌های بینایی و تحلیل عکس
+  {
+    id: "llava:7b",
+    name: "LLaVA (7B) · تحلیل عکس، تصویر و متن",
+    category: "vision",
+    categoryLabel: "👁️ بینایی ماشین و تحلیل تصویر (Vision)",
+    size: "۴.۷ گیگابایت",
+    recommendedRam: "۸ تا ۱۲ گیگابایت",
+    desc: "درک همزمان تصاویر و متون؛ مناسب برای تحلیل اسناد، نمودارها و عکس‌ها.",
+  },
+  {
+    id: "moondream:latest",
+    name: "Moondream 2 · تحلیل عکس بسیار سبک",
+    category: "vision",
+    categoryLabel: "👁️ بینایی ماشین و تحلیل تصویر (Vision)",
+    size: "۱.۷ گیگابایت",
+    recommendedRam: "۴ گیگابایت",
+    desc: "مدل بینایی کم‌حجم مناسب شناسایی محتوای عکس‌ها با منابع محدود.",
+  },
+
+  // 🔍 مدل‌های امبدینگ و جستجوی معنایی
+  {
+    id: "all-minilm:latest",
+    name: "All-MiniLM · امبدینگ سریع و بسیار سبک",
+    category: "embedding",
+    categoryLabel: "🔍 مدل‌های برداری و امبدینگ (Embedding / RAG)",
+    size: "۱۲۰ مگابایت",
+    recommendedRam: "۱ گیگابایت",
+    desc: "مدل برداری بسیار سریع برای جستجوی معنایی اسناد و RAG سازمانی.",
+  },
+  {
+    id: "nomic-embed-text:latest",
+    name: "Nomic Embed Text · امبدینگ پیشرفته",
+    category: "embedding",
+    categoryLabel: "🔍 مدل‌های برداری و امبدینگ (Embedding / RAG)",
+    size: "۲۷۰ مگابایت",
+    recommendedRam: "۲ گیگابایت",
+    desc: "مدل تخصصی با ابعاد بافت بزرگ برای طبقه‌بندی و پایگاه‌های برداری.",
+  },
+  {
+    id: "bge-m3:latest",
+    name: "BGE-M3 · امبدینگ چندزبانه قوی",
+    category: "embedding",
+    categoryLabel: "🔍 مدل‌های برداری و امبدینگ (Embedding / RAG)",
+    size: "۵۶۰ مگابایت",
+    recommendedRam: "۲ تا ۴ گیگابایت",
+    desc: "پشتیبانی عالی از بیش از ۱۰۰ زبان شامل فارسی برای بازیابی اطلاعات.",
+  },
+];
+
+const MODEL_CATEGORIES = Array.from(new Set(CURATED_OLLAMA_MODELS.map((m) => m.categoryLabel)));
+
 export function NodeManager() {
   const secure = window.location.protocol === "https:";
   const [nodes, setNodes] = useState<ManagedNode[]>([]);
   const [jobs, setJobs] = useState<ModelPull[]>([]);
-  const [model, setModel] = useState("");
+  const [nodeModels, setNodeModels] = useState<Record<string, string>>({});
+  const [showCatalog, setShowCatalog] = useState<Record<string, boolean>>({});
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+
+  const setNodeModel = (nodeId: string, val: string) => {
+    setNodeModels((prev) => ({ ...prev, [nodeId]: val }));
+  };
 
   // Connection Modal & Token State
   const [showModal, setShowModal] = useState(false);
@@ -104,14 +349,14 @@ export function NodeManager() {
     }
   }
 
-  async function installModel(node: ManagedNode) {
-    const selected = model.trim();
-    if (busy || !selected || !window.confirm(`مدل «${selected}» روی «${node.name}» دریافت شود؟ حجم فایل و زمان دانلود به مدل بستگی دارد.`)) return;
+  async function installModel(node: ManagedNode, customModel?: string) {
+    const selected = (customModel || nodeModels[node.id] || "").trim();
+    if (busy || !selected || !window.confirm(`مدل «${selected}» روی «${node.name}» دریافت شود؟\n\nحجم فایل و زمان دانلود به مدل انتخابی بستگی دارد.`)) return;
     setBusy(true); setMessage("");
     try {
       await api.createModelPull(node.id, selected);
       setJobs((await api.modelPulls()).jobs);
-      setMessage("درخواست دانلود ثبت شد. پیشرفت هر ۱۵ ثانیه تازه می‌شود.");
+      setMessage(`درخواست دانلود مدل «${selected}» ثبت شد. پیشرفت هر ۱۵ ثانیه تازه می‌شود.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "درخواست دانلود ناموفق بود."); }
     finally { setBusy(false); }
   }
@@ -337,39 +582,130 @@ export function NodeManager() {
                       </>
                     )}
 
-                    {node.role === "worker" && !node.revoked_at && (
-                      <div className="node-pull">
-                        <label htmlFor={`model-${node.id}`}>دریافت مدل هوش مصنوعی Ollama:</label>
-                        <input
-                          id={`model-${node.id}`}
-                          dir="ltr"
-                          value={model}
-                          onChange={(e) => setModel(e.target.value)}
-                          placeholder="مثلاً qwen2.5-coder:7b"
-                          maxLength={128}
-                        />
-                        <button
-                          type="button"
-                          className="quiet-button"
-                          disabled={busy || !online || !model.trim() || jobs.some((job) => job.node_id === node.id && (job.status === "queued" || job.status === "running"))}
-                          onClick={() => void installModel(node)}
-                        >
-                          دریافت روی این Worker
-                        </button>
-                        {jobs
-                          .filter((job) => job.node_id === node.id)
-                          .slice(0, 3)
-                          .map((job) => (
-                            <div className="node-pull-status" key={job.id} role="status">
-                              <bdi dir="ltr">{job.model}</bdi> · {job.status === "queued" ? "در صف" : job.status === "running" ? (job.action === "delete" ? "در حال حذف" : "در حال دریافت") : job.status === "completed" ? (job.action === "delete" ? "حذف شد" : "آماده") : "ناموفق"}
-                              {job.action === "pull" && (
-                                <progress max={100} value={job.progress ?? undefined} aria-label={`پیشرفت دریافت ${job.model}`} />
-                              )}
-                              <small>{job.progress == null ? "پیشرفت نامشخص" : `${job.progress.toLocaleString("fa-IR")}٪`} · {job.detail}</small>
+                    {node.role === "worker" && !node.revoked_at && (() => {
+                      const currentModel = nodeModels[node.id] || "";
+                      const selectedModelInfo = CURATED_OLLAMA_MODELS.find((m) => m.id === currentModel);
+                      const isCatalogOpen = showCatalog[node.id] || false;
+                      const hasActivePull = jobs.some((job) => job.node_id === node.id && (job.status === "queued" || job.status === "running"));
+
+                      return (
+                        <div className="node-pull">
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "6px" }}>
+                            <label htmlFor={`model-select-${node.id}`}>
+                              <strong>دریافت مدل هوش مصنوعی Ollama:</strong>
+                            </label>
+                            <button
+                              type="button"
+                              className="quiet-button"
+                              style={{ fontSize: "11px", padding: "3px 9px", borderColor: isCatalogOpen ? "#f28aab" : undefined }}
+                              onClick={() => setShowCatalog((prev) => ({ ...prev, [node.id]: !prev[node.id] }))}
+                            >
+                              {isCatalogOpen ? "بستن کاتالوگ مدل‌ها ✕" : "📦 نمایش کاتالوگ مدل‌های پیشنهادی"}
+                            </button>
+                          </div>
+
+                          {/* منوی بازشونده انتخاب مدل دسته‌بندی‌شده */}
+                          <select
+                            id={`model-select-${node.id}`}
+                            value={CURATED_OLLAMA_MODELS.some((m) => m.id === currentModel) ? currentModel : (currentModel ? "custom" : "")}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val !== "custom" && val !== "") {
+                                setNodeModel(node.id, val);
+                              }
+                            }}
+                          >
+                            <option value="">-- برای انتخاب کلیک کنید (فهرست مدل‌های محبوب و کاربردی) --</option>
+                            {MODEL_CATEGORIES.map((cat) => (
+                              <optgroup key={cat} label={cat}>
+                                {CURATED_OLLAMA_MODELS.filter((m) => m.categoryLabel === cat).map((m) => {
+                                  const isInstalled = node.metrics?.models?.includes(m.id);
+                                  return (
+                                    <option key={m.id} value={m.id} disabled={isInstalled}>
+                                      {m.name} · {m.size} {isInstalled ? " (از قبل نصب است ✅)" : ""}
+                                    </option>
+                                  );
+                                })}
+                              </optgroup>
+                            ))}
+                            <option value="custom">✏️ مدل دلخواه دیگر (تایپ دستی نام تگ مدل)</option>
+                          </select>
+
+                          {/* کاتالوگ سریع چیپ‌ها با کلیک */}
+                          {isCatalogOpen && (
+                            <div style={{ padding: "11px", borderRadius: "12px", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.08)", marginTop: "4px" }}>
+                              <div style={{ fontSize: "11px", color: "#fca5c5", marginBottom: "8px", fontWeight: "bold" }}>
+                                💡 برای انتخاب آسان، روی هر مدل کلیک کنید:
+                              </div>
+                              <div className="node-chips-row">
+                                {CURATED_OLLAMA_MODELS.map((m) => {
+                                  const isInstalled = node.metrics?.models?.includes(m.id);
+                                  const isSelected = currentModel === m.id;
+                                  return (
+                                    <button
+                                      type="button"
+                                      key={m.id}
+                                      className={`node-chip ${isSelected ? "selected" : ""}`}
+                                      disabled={isInstalled}
+                                      onClick={() => setNodeModel(node.id, m.id)}
+                                      title={m.desc}
+                                    >
+                                      {m.badge ? `★ ${m.id}` : m.id} {isInstalled ? "✓" : `(${m.size})`}
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             </div>
-                          ))}
-                      </div>
-                    )}
+                          )}
+
+                          {/* کارت مشخصات مدل انتخابی */}
+                          {selectedModelInfo && (
+                            <div className="node-model-card">
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "6px" }}>
+                                <strong style={{ color: "#fff", fontSize: "12px" }}>{selectedModelInfo.name}</strong>
+                                <span className="node-model-badge">📦 حجم: {selectedModelInfo.size} · ⚡ رم پیشنهادی: {selectedModelInfo.recommendedRam}</span>
+                              </div>
+                              <p style={{ margin: 0, color: "#d9c4d1" }}>{selectedModelInfo.desc}</p>
+                            </div>
+                          )}
+
+                          {/* فیلد ورودی متن تگ و دکمه دریافت */}
+                          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                            <input
+                              id={`model-${node.id}`}
+                              dir="ltr"
+                              value={currentModel}
+                              onChange={(e) => setNodeModel(node.id, e.target.value)}
+                              placeholder="نام تگ مدل (مثلاً qwen2.5-coder:7b یا مدل دلخواه)"
+                              maxLength={128}
+                              style={{ flex: "1 1 200px" }}
+                            />
+                            <button
+                              type="button"
+                              className="submit-button"
+                              style={{ minWidth: "170px" }}
+                              disabled={busy || !online || !currentModel.trim() || hasActivePull}
+                              onClick={() => void installModel(node)}
+                            >
+                              ⬇️ دریافت روی این Worker
+                            </button>
+                          </div>
+
+                          {jobs
+                            .filter((job) => job.node_id === node.id)
+                            .slice(0, 3)
+                            .map((job) => (
+                              <div className="node-pull-status" key={job.id} role="status">
+                                <bdi dir="ltr">{job.model}</bdi> · {job.status === "queued" ? "در صف" : job.status === "running" ? (job.action === "delete" ? "در حال حذف" : "در حال دریافت") : job.status === "completed" ? (job.action === "delete" ? "حذف شد" : "آماده") : "ناموفق"}
+                                {job.action === "pull" && (
+                                  <progress max={100} value={job.progress ?? undefined} aria-label={`پیشرفت دریافت ${job.model}`} />
+                                )}
+                                <small>{job.progress == null ? "پیشرفت نامشخص" : `${job.progress.toLocaleString("fa-IR")}٪`} · {job.detail}</small>
+                              </div>
+                            ))}
+                        </div>
+                      );
+                    })()}
 
                     <div className="node-tile-actions">
                       {!node.revoked_at && (

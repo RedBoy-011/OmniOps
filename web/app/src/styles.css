@@ -148,9 +148,19 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 .node-models li { padding: 3px 0; text-align: left; }
 .node-grant { display: block; direction: ltr; unicode-bidi: isolate; font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; user-select: all; color: #ffe2ea; }
 
-.node-pull { display: grid; gap: 8px; margin: 14px 0; padding: 12px; border: 1px solid #f5a1bd27; border-radius: 12px; background: #ffffff08; }
+.node-pull { display: grid; gap: 9px; margin: 14px 0; padding: 14px; border: 1px solid #f5a1bd35; border-radius: 14px; background: rgba(255, 255, 255, 0.04); }
 .node-pull label { font-size: 12px; }
-.node-pull input { width: 100%; min-width: 0; padding: 9px 12px; border: 1px solid #f5a1bd55; border-radius: 9px; background: #140e19; color: #f4edf2; }
+.node-pull input, .node-pull select { width: 100%; min-width: 0; padding: 10px 13px; border: 1px solid #f5a1bd55; border-radius: 10px; background: #140e19; color: #f4edf2; font-family: inherit; font-size: 12px; transition: border-color .2s, box-shadow .2s; }
+.node-pull input:focus, .node-pull select:focus { border-color: #f28aab; box-shadow: 0 0 0 3px rgba(242, 138, 171, 0.25); outline: none; }
+.node-pull select optgroup { background: #1a1020; color: #ffb5cb; font-weight: bold; }
+.node-pull select option { background: #140e19; color: #f4edf2; padding: 6px; }
+.node-model-card { padding: 11px 14px; border-radius: 12px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(245, 161, 189, 0.28); font-size: 11px; display: grid; gap: 6px; line-height: 1.8; }
+.node-model-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 6px; background: rgba(220, 72, 118, 0.22); color: #fca5c5; font-size: 10px; font-weight: bold; }
+.node-chips-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 5px; }
+.node-chip { padding: 5px 10px; border-radius: 9px; font-size: 11px; cursor: pointer; border: 1px solid rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.05); color: #e2d3dc; transition: all .2s; font-family: inherit; }
+.node-chip:hover:not(:disabled) { border-color: #f28aab; background: rgba(242, 138, 171, 0.2); color: #fff; }
+.node-chip.selected { border-color: #10b981; background: rgba(16, 185, 129, 0.2); color: #a7f3d0; font-weight: bold; }
+.node-chip:disabled { opacity: 0.5; cursor: not-allowed; }
 .node-pull-status { display: grid; gap: 5px; overflow-wrap: anywhere; font-size: 12px; }
 .node-pull-status progress { width: 100%; height: 9px; accent-color: #d24876; }
 
