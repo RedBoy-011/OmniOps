@@ -3447,5 +3447,253 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
   color: #c7d2fe;
 }
 
+/* ========================================================
+   Security Audit Trail & Event Logs
+   ======================================================== */
+.audit-log-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
 
+.audit-filters-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 
+.audit-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.audit-search-input {
+  width: 100%;
+  padding-left: 36px;
+  background: rgba(15, 23, 42, 0.6) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.clear-search-btn {
+  position: absolute;
+  left: 10px;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px;
+}
+
+.clear-search-btn:hover {
+  color: #fff;
+}
+
+.audit-category-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.audit-filter-chip {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  font-size: 11.5px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.audit-filter-chip:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.audit-filter-chip.active {
+  background: rgba(168, 85, 247, 0.25);
+  border-color: #c084fc;
+  color: #fff;
+  font-weight: 600;
+}
+
+.audit-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.4);
+}
+
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: right;
+}
+
+.audit-table th {
+  padding: 10px 14px;
+  background: rgba(30, 41, 59, 0.6);
+  color: #94a3b8;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.audit-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: #e2e8f0;
+}
+
+.audit-table tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.audit-col-time {
+  white-space: nowrap;
+  font-family: monospace;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.audit-event-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.audit-event-badge.badge-login {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: #7dd3fc;
+}
+
+.audit-event-badge.badge-user {
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: #a5b4fc;
+}
+
+.audit-event-badge.badge-success {
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: #86efac;
+}
+
+.audit-event-badge.badge-danger {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+.audit-event-badge.badge-warning {
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  color: #fde047;
+}
+
+.audit-event-badge.badge-info {
+  background: rgba(14, 165, 233, 0.12);
+  border: 1px solid rgba(14, 165, 233, 0.3);
+  color: #38bdf8;
+}
+
+.audit-event-badge.badge-purple {
+  background: rgba(168, 85, 247, 0.12);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  color: #d8b4fe;
+}
+
+.audit-event-badge.badge-neutral {
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #cbd5e1;
+}
+
+.audit-subject-tag {
+  font-family: monospace;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #e2e8f0;
+}
+
+/* ========================================================
+   Chat Session Search, Export & Prompt Starters
+   ======================================================== */
+.session-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 140px;
+  max-width: 200px;
+}
+
+.session-search-input {
+  width: 100%;
+  padding: 4px 8px 4px 24px;
+  border-radius: 8px;
+  font-size: 11px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+  outline: none;
+}
+
+.session-search-input:focus {
+  border-color: #38bdf8;
+}
+
+.clear-session-search {
+  position: absolute;
+  left: 6px;
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.export-chat-btn, .copy-chat-btn {
+  font-size: 11px !important;
+  padding: 4px 10px !important;
+  border-radius: 8px !important;
+}
+
+.chat-prompt-templates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  width: 100%;
+  max-width: 680px;
+  margin: 14px 0 16px;
+}
+
+.prompt-template-chip {
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: right;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.prompt-template-chip:hover {
+  background: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #fff;
+  transform: translateY(-1px);
+}

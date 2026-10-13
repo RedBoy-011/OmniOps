@@ -8,6 +8,7 @@ import { DatabaseBackupCard } from "./components/DatabaseBackupCard";
 import { UpdateNotificationBanner } from "./components/UpdateNotificationBanner";
 import { UserManagementCard } from "./components/UserManagementCard";
 import { UserProfileModal } from "./components/UserProfileModal";
+import { SecurityAuditCard } from "./components/SecurityAuditCard";
 
 const choices = [
   ["chat", "گفت‌وگو"],
@@ -19,7 +20,7 @@ const choices = [
   ["agent.pair", "اتصال ایجنت"],
 ] as const;
 
-type AdminTab = "nodes" | "providers" | "users" | "health" | "backups";
+type AdminTab = "nodes" | "providers" | "users" | "health" | "backups" | "audit";
 
 type Props = {
   user: Profile;
@@ -309,6 +310,16 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
           >
             💾 پشتیبان‌گیری دیتابیس
           </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={adminTab === "audit"}
+            className={`admin-nav-tab ${adminTab === "audit" ? "active" : ""}`}
+            onClick={() => setAdminTab("audit")}
+          >
+            🛡️ دفترچه ممیزی و امنیت
+          </button>
         </div>
 
         {/* ۱. تب سرورها و مدل‌ها */}
@@ -492,6 +503,11 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
         {/* ۵. تب پشتیبان‌گیری دیتابیس */}
         <div hidden={adminTab !== "backups"}>
           <DatabaseBackupCard />
+        </div>
+
+        {/* ۶. تب ممیزی امنیتی و لاگ رویدادها */}
+        <div hidden={adminTab !== "audit"}>
+          <SecurityAuditCard />
         </div>
 
         {message && <p className="admin-message" role="status" aria-live="polite">{message}</p>}

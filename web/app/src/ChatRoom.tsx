@@ -33,10 +33,50 @@ export function ChatRoom() {
   const [projectFiles, setProjectFiles] = useState<{ path: string; name: string; type: string }[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [includeSystemContext, setIncludeSystemContext] = useState(false);
+  const [sessionSearch, setSessionSearch] = useState("");
+  const [copiedChat, setCopiedChat] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const localModels = models.filter(model => model.startsWith("ollama/"));
   const externalModels = models.filter(model => model.startsWith("gemini/") || model.startsWith("openrouter/") || model.startsWith("deepseek/") || model.startsWith("openai/"));
+
+  function exportMarkdown() {
+    if (entries.length === 0) return;
+    const activeSession = sessions.find((s) => s.id === currentSessionId);
+    const title = activeSession?.title || "گفتگوی OmniOps";
+    let md = `# ${title}\n\nتاریخ خروجی: ${new Date().toLocaleString("fa-IR")}\n\n---\n\n`;
+    for (const e of entries) {
+      if (e.role === "user") {
+        md += `### 👤 کاربر (${e.time}):\n${e.text}\n\n`;
+      } else {
+        md += `### 🤖 هوش مصنوعی [${e.model || "مدل"}] (${e.time}):\n${e.text}\n\n---\n\n`;
+      }
+    }
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${title.replace(/[\/\\?%*:|"<>]/g, "_")}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function copyFullChat() {
+    if (entries.length === 0) return;
+    const activeSession = sessions.find((s) => s.id === currentSessionId);
+    const title = activeSession?.title || "گفتگوی OmniOps";
+    let txt = `=== ${title} ===\n\n`;
+    for (const e of entries) {
+      txt += `[${e.role === "user" ? "کاربر" : `هوش مصنوعی (${e.model || ""})`}] (${e.time}):\n${e.text}\n\n`;
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(txt);
+        setCopiedChat(true);
+        setTimeout(() => setCopiedChat(false), 3000);
+      }
+    } catch {}
+  }
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [entries, busy]);
 
@@ -320,6 +360,26 @@ export function ChatRoom() {
             </div>
           </div>
           <div className="web-chat-top-actions">
+            {entries.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  className="quiet-button export-chat-btn"
+                  onClick={exportMarkdown}
+                  title="دانلود متن گفتگو در قالب فایل Markdown"
+                >
+                  📥 خروجی MD
+                </button>
+                <button
+                  type="button"
+                  className="quiet-button copy-chat-btn"
+                  onClick={() => void copyFullChat()}
+                  title="کپی کل متن گفتگو در کلیپ‌بورد"
+                >
+                  {copiedChat ? "کپی شد ✓" : "📋 کپی گفتگو"}
+                </button>
+              </>
+            )}
             <button
               type="button"
               className={`chat-preview-toggle-button ${previewOpen ? "active" : ""}`}
@@ -348,11 +408,36 @@ export function ChatRoom() {
             <span className="plus-icon">+</span>
             <span>گفتگوی جدید</span>
           </button>
+
+          {sessions.length > 2 && (
+            <div className="session-search-wrap">
+              <input
+                type="text"
+                className="session-search-input"
+                placeholder="🔍 فیلتر تاپیک‌ها..."
+                value={sessionSearch}
+                onChange={(e) => setSessionSearch(e.target.value)}
+              />
+              {sessionSearch && (
+                <button
+                  type="button"
+                  className="clear-search-btn"
+                  onClick={() => setSessionSearch("")}
+                  title="پاک کردن"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="chat-sessions-scroll">
             {sessions.length === 0 ? (
               <span style={{ fontSize: "11px", color: "#9ca3af", padding: "0 8px" }}>گفتگوی فعالی ثبت نشده است</span>
             ) : (
-              sessions.map((sess) => {
+              sessions
+                .filter((s) => !sessionSearch.trim() || s.title.toLowerCase().includes(sessionSearch.trim().toLowerCase()))
+                .map((sess) => {
                 const isActive = sess.id === currentSessionId;
                 return (
                   <div
@@ -461,8 +546,40 @@ export function ChatRoom() {
       {entries.length === 0 && (
         <div className="chat-welcome">
           <span className="chat-welcome-icon" aria-hidden="true">✧</span>
-          <strong>از اینجا شروع کنید</strong>
-          <p>یک سؤال بپرسید یا یکی از پیشنهادها را برای بررسی زیرساخت انتخاب نمایید.</p>
+          <strong>فضای کاربری هوش مصنوعی سازمانی</strong>
+          <p>یک سؤال مطرح کنید یا از الگوهای آماده زیر برای شروع کار استفاده نمایید:</p>
+
+          <div className="chat-prompt-templates">
+            <button
+              type="button"
+              className="prompt-template-chip"
+              onClick={() => setDraft("لطفاً متن یا گزارش زیر را تحلیل کن و خلاصه‌سازی اجرایی آن را به همراه مهم‌ترین اقدامات مورد نیاز ارائه بده:\n\n")}
+            >
+              📝 خلاصه‌سازی گزارش و اسناد
+            </button>
+            <button
+              type="button"
+              className="prompt-template-chip"
+              onClick={() => setDraft("لطفاً یک نامه رسمی اداری و سازمانی با لحن محترمانه و لحن استاندارد درباره موضوع زیر تنظیم کن:\n\n")}
+            >
+              ✉️ نگارش نامه رسمی اداری
+            </button>
+            <button
+              type="button"
+              className="prompt-template-chip"
+              onClick={() => setDraft("خطای زیر در سیستم رخ داده است؛ لطفاً دلیل رخ‌دادن خطا و راهکار دقیق و گام‌به‌گام رفع آن را توضیح بده:\n\n")}
+            >
+              🔍 تحلیل و رفع خطای فنی
+            </button>
+            <button
+              type="button"
+              className="prompt-template-chip"
+              onClick={() => setDraft("داده‌ها و آمارهای زیر را بررسی کن و مهم‌ترین روندها، بینش‌ها و شاخص‌های کلیدی را استخراج کن:\n\n")}
+            >
+              📊 تحلیل داده و بینش آماری
+            </button>
+          </div>
+
           <div className="chat-suggestions">
             {suggestions.map(text => (
               <button type="button" className="quiet-button" key={text} onClick={() => setDraft(text)}>

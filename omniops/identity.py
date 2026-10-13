@@ -673,3 +673,22 @@ class IdentityStore:
         if not backup_target.is_file() or not backup_target.is_relative_to(backups_dir):
             raise IdentityError("Backup file not found", 404)
         return backup_target
+
+    def list_audit(self, principal: dict, limit: int = 100, event: str | None = None) -> list[dict]:
+        if principal.get("role") != "superadmin":
+            raise IdentityError("Superadmin access required", 403)
+        with self._db() as db:
+            query = """
+                SELECT a.id, a.actor_id, a.event, a.subject_id, a.created_at, u.username as actor_name
+                FROM audit a
+                LEFT JOIN users u ON a.actor_id = u.id
+            """
+            params = []
+            if event:
+                query += " WHERE a.event = ?"
+                params.append(event)
+            query += " ORDER BY a.created_at DESC LIMIT ?"
+            params.append(max(1, min(int(limit), 200)))
+            rows = db.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+

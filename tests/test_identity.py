@@ -233,6 +233,29 @@ class IdentityTests(unittest.TestCase):
         self.assertIn("active_web_sessions", report["stats"])
         self.assertGreaterEqual(report["stats"]["active_web_sessions"], 1)
 
+    def test_list_audit_requires_superadmin_and_filters(self):
+        admin = self._admin()
+        # Admin can view audit logs
+        logs = self.store.list_audit(admin)
+        self.assertIsInstance(logs, list)
+        self.assertGreaterEqual(len(logs), 1)
+
+        # Register and approve a member
+        member_id = self.store.register("test_auditee", "a strong password 1234", "09124444444")
+        self.store.decide(admin, member_id, True)
+        member_login = self.store.login("test_auditee", "a strong password 1234")
+        member_principal = self.store.authenticate(member_login["token"])
+
+        # Member is forbidden from accessing audit logs
+        with self.assertRaises(IdentityError) as err:
+            self.store.list_audit(member_principal)
+        self.assertEqual(err.exception.status, 403)
+
+        # Filtering by event works
+        login_logs = self.store.list_audit(admin, event="login")
+        self.assertGreaterEqual(len(login_logs), 1)
+        self.assertTrue(all(item["event"] == "login" for item in login_logs))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -160,6 +160,15 @@ export type UpdateResult = {
   restart_recommended?: boolean;
 };
 
+export type AuditLog = {
+  id: string;
+  actor_id: string | null;
+  actor_name: string | null;
+  event: string;
+  subject_id: string | null;
+  created_at: number;
+};
+
 export type Operations = {
   master: "up";
   hardware?: SystemMetrics;
@@ -375,4 +384,6 @@ export const api = {
     request<{ user: ManagedUser }>("/api/user/profile", "POST", data),
   changePassword: (old_password: string, new_password: string) =>
     request<{ status: string; message: string }>("/api/user/change-password", "POST", { old_password, new_password }),
+  auditLogs: (limit = 100, event?: string) =>
+    request<{ logs: AuditLog[] }>(`/api/admin/audit?limit=${limit}${event ? `&event=${encodeURIComponent(event)}` : ""}`),
 };

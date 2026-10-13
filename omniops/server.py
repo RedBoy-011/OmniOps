@@ -1003,6 +1003,28 @@ def make_server(
                 except IdentityError as exc:
                     self._send(exc.status, {"error": {"message": str(exc)}})
                 return
+            if parsed.path == "/api/admin/audit":
+                principal = self._principal()
+                if principal is None:
+                    return
+                if principal["role"] != "superadmin":
+                    self._send(403, {"error": {"message": "Superadmin access required"}})
+                    return
+                if identity_store is None:
+                    self._send(503, {"error": {"message": "Identity service is not configured"}})
+                    return
+                query_params = parse_qs(parsed.query)
+                limit_str = query_params.get("limit", ["100"])[0]
+                event_filter = query_params.get("event", [None])[0]
+                try:
+                    limit = int(limit_str)
+                except ValueError:
+                    limit = 100
+                try:
+                    self._send(200, {"logs": identity_store.list_audit(principal, limit=limit, event=event_filter)})
+                except IdentityError as exc:
+                    self._send(exc.status, {"error": {"message": str(exc)}})
+                return
             if parsed.path == "/api/user/profile":
                 principal = self._principal("web")
                 if principal is None:
