@@ -2010,3 +2010,238 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
   background: #2a2c35;
   color: #38bdf8;
 }
+
+/* ============================================================
+   Hardware Telemetry & System Health Card Styles
+   ============================================================ */
+
+.system-health-section {
+  margin-top: 24px;
+}
+
+.health-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.auto-refresh-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #94a3b8;
+  cursor: pointer;
+  user-select: none;
+}
+
+.auto-refresh-toggle input[type="checkbox"] {
+  accent-color: #38bdf8;
+  cursor: pointer;
+}
+
+.refresh-telemetry-btn {
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.1);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.refresh-telemetry-btn:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: #38bdf8;
+}
+
+.telemetry-meta-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0 16px 0;
+  font-size: 11px;
+}
+
+.telemetry-time-badge,
+.telemetry-uptime-badge,
+.telemetry-platform-badge {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: #cbd5e1;
+}
+
+.telemetry-uptime-badge {
+  color: #a7f3d0;
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.2);
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.health-card {
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  backdrop-filter: blur(12px);
+  transition: border-color 0.2s, transform 0.2s;
+}
+
+.health-card:hover {
+  border-color: rgba(56, 189, 248, 0.3);
+  transform: translateY(-1px);
+}
+
+.health-card.gpu-active {
+  border-color: rgba(16, 185, 129, 0.3);
+  background: radial-gradient(circle at 10% 10%, rgba(16, 185, 129, 0.06), rgba(15, 23, 42, 0.65));
+}
+
+.health-card.gpu-cpu-only {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.health-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.health-icon {
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.health-card-header strong {
+  display: block;
+  font-size: 13px;
+  color: #f1f5f9;
+}
+
+.health-card-header small {
+  display: block;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.gpu-model-name {
+  max-width: 170px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.health-value-badge {
+  margin-right: auto;
+  font-size: 16px;
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.health-progress-track {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.health-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.health-details-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.cpu-only-note {
+  font-size: 11px;
+  color: #94a3b8;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  line-height: 1.5;
+}
+
+.cpu-only-note p {
+  margin: 0 0 2px 0;
+  color: #cbd5e1;
+  font-weight: 500;
+}
+
+.cpu-only-note small {
+  display: block;
+  color: #64748b;
+}
+
+.health-runtime-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.runtime-stat-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 6px 12px;
+  border-radius: 8px;
+}
+
+.runtime-stat-pill strong {
+  color: #f1f5f9;
+}
+
+.runtime-stat-pill .pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.runtime-stat-pill .status-up {
+  color: #34d399;
+}
+
+.runtime-stat-pill .status-no_models {
+  color: #fbbf24;
+}
+
+.runtime-stat-pill .status-unreachable {
+  color: #f87171;
+}
+
+.text-danger {
+  color: #f87171 !important;
+}
+

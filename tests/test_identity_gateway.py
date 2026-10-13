@@ -335,5 +335,28 @@ class WorkerEndpointTests(unittest.TestCase):
         self.assertEqual(file_res["type"], "markdown")
 
 
+    def test_system_metrics_endpoint(self):
+        self.assertEqual(self.call("GET", "/api/admin/system/metrics")[0], 401)
+        self.store.register("operator-metrics", "operator password 123!", "09127777777", "127.0.0.1")
+        principal = self.store.authenticate(self.admin, "web")
+        pending_id = [u["id"] for u in self.store.pending(principal) if u["username"] == "operator-metrics"][0]
+        self.store.decide(principal, pending_id, True, ["chat"])
+        member = self.call("POST", "/api/auth/login", {"username": "operator-metrics", "password": "operator password 123!"})[1]["token"]
+        self.assertEqual(self.call("GET", "/api/admin/system/metrics", token=member)[0], 403)
+
+        code, metrics = self.call("GET", "/api/admin/system/metrics", token=self.admin)
+        self.assertEqual(code, 200)
+        self.assertIn("cpu", metrics)
+        self.assertIn("ram", metrics)
+        self.assertIn("disk", metrics)
+        self.assertIn("gpu", metrics)
+        self.assertIn("runtime", metrics)
+        self.assertGreaterEqual(metrics["cpu"]["cores"], 1)
+
+        code, ops = self.call("GET", "/api/admin/operations", token=self.admin)
+        self.assertEqual(code, 200)
+        self.assertIn("hardware", ops)
+
+
 if __name__ == "__main__":
     unittest.main()

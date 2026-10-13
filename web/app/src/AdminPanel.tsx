@@ -7,6 +7,7 @@ import { ChatRoom } from "./ChatRoom";
 import { WorkspaceTasks } from "./WorkspaceTasks";
 import { CustomizationsPanel } from "./CustomizationsPanel";
 import { ClientDownloadsCard } from "./components/ClientDownloadsCard";
+import { SystemHealthCard } from "./components/SystemHealthCard";
 
 const choices = [
   ["chat", "گفت‌وگو"], ["provider.use", "مدل API بیرونی"], ["skill.use", "مهارت‌ها"], ["tool.read", "مشاهدهٔ ابزار"],
@@ -214,6 +215,7 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
             />
           </div>
         </>}
+        {user.role === "superadmin" && <SystemHealthCard />}
         {user.role === "superadmin" && <section className="glass admin-card operations-card">
           <div className="card-title"><div><h2>وضعیت گره‌ها و مدل‌های محلی</h2><p>بررسی خودکار هر ۱۵ ثانیه از Master و Ollama.</p></div><button className="quiet-button" onClick={() => void refreshOperations()}>بررسی دوباره</button></div>
           {operationsError && <p className="admin-message" role="alert">{operationsError}</p>}

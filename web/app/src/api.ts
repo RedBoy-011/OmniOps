@@ -49,7 +49,63 @@ export type ProjectFileDetail = {
   type: string;
   diff?: { diff_text?: string; added?: number; removed?: number } | null;
 };
-export type Operations = { master: "up"; ollama: { url: string; status: NodeStatus["status"]; models: LocalModel[] }; nodes: NodeStatus[] };
+export type SystemMetrics = {
+  server_time: number;
+  uptime_seconds: number;
+  cpu: {
+    percent: number;
+    cores: number;
+    load_avg: number[] | null;
+  };
+  ram: {
+    total_bytes: number;
+    used_bytes: number;
+    free_bytes: number;
+    percent: number;
+    total_gb: number;
+    used_gb: number;
+    free_gb: number;
+  };
+  disk: {
+    path: string;
+    total_bytes: number;
+    used_bytes: number;
+    free_bytes: number;
+    percent: number;
+    total_gb: number;
+    used_gb: number;
+    free_gb: number;
+  };
+  gpu: {
+    available: boolean;
+    name: string;
+    vram_total_mb: number | null;
+    vram_used_mb: number | null;
+    vram_free_mb: number | null;
+    vram_percent: number | null;
+    temperature_c: number | null;
+    gpu_utilization_percent: number | null;
+  };
+  runtime: {
+    os: string;
+    os_release: string;
+    platform_string: string;
+    python_version: string;
+    active_inferences: number;
+    max_inferences: number;
+    worker_nodes_count: number;
+    active_sessions_count: number;
+    ollama_status: string;
+    ollama_model_count: number;
+  };
+};
+
+export type Operations = {
+  master: "up";
+  hardware?: SystemMetrics;
+  ollama: { url: string; status: NodeStatus["status"]; models: LocalModel[] };
+  nodes: NodeStatus[];
+};
 
 let volatileWebToken: string | null = null;
 export function keepSessionInMemory(token: string) { volatileWebToken = token; }
@@ -203,4 +259,5 @@ export const api = {
   logout: () => request<{ status: string }>("/api/auth/logout", "POST", {}),
   projectFiles: () => request<{ files: ProjectFileSummary[] }>("/api/web/project/files"),
   projectFile: (path: string) => request<ProjectFileDetail>(`/api/web/project/file?path=${encodeURIComponent(path)}`),
+  systemMetrics: () => request<SystemMetrics>("/api/admin/system/metrics"),
 };

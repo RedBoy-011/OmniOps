@@ -13,6 +13,7 @@ import mimetypes
 import os
 import re
 import ssl
+import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -26,6 +27,7 @@ from .providers import ProviderRegistry
 from .profile_memory import ProfileMemory
 from .workspace import WorkspaceStore
 from .mobile_orchestrator import MobileApprovalStore
+from . import telemetry
 
 MAX_BODY_BYTES = 384 * 1024
 LAN_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
@@ -57,6 +59,9 @@ def make_server(
     memory = ProfileMemory(identity_store) if identity_store else None
     workspace = WorkspaceStore(identity_store) if identity_store else None
     mobile_store = MobileApprovalStore(identity_store) if identity_store else None
+    active_inferences_lock = threading.Lock()
+    active_inferences = [0]
+    max_concurrent_inferences = int(os.environ.get("OMNIOPS_MAX_CONCURRENT_INFERENCES", "4"))
 
     def current_ollama() -> OllamaClient:
         endpoint = identity_store.ollama_endpoint() if identity_store else None
@@ -109,49 +114,57 @@ def make_server(
                 fcontent = attached.get('content')[:16000]
                 effective_prompt = f"[پیوست فایل پروژه: {fname}]\n```\n{fcontent}\n```\n\n{prompt.strip()}"
 
-            def completed(result):
-                if save_history and memory is not None:
-                    memory.remember_chat(principal, prompt.strip(), result['reply'], result['model'])
-                return result
-
-            def external(model):
-                if not allow_external:
-                    raise IdentityError('Explicit external data consent required', 403)
-                if not isinstance(self.connection, ssl.SSLSocket) or self.connection.version() != 'TLSv1.3':
-                    raise IdentityError('Direct TLS 1.3 required for external chat', 426)
-                if providers is None:
-                    raise IdentityError('Provider registry unavailable', 503)
-                return completed(providers.complete(principal, model, effective_prompt))
-
-            if requested.startswith(('gemini/', 'openrouter/')):
-                return external(requested)
+            with active_inferences_lock:
+                if active_inferences[0] >= max_concurrent_inferences:
+                    raise IdentityError('ظرفیت پردازش همزمان مدل تکمیل است؛ لطفاً چند لحظه بعد مجدداً تلاش کنید.', 429)
+                active_inferences[0] += 1
             try:
-                client = current_ollama()
-                models = client.list_chat_models()
-                selected = choose_local_chat_model(models, requested, effective_prompt)
-                candidates = [selected] if requested != 'auto' else [selected] + [
-                    item.name for item in models if item.name != selected
-                ]
-            except (ValueError, OllamaError) as exc:
+                def completed(result):
+                    if save_history and memory is not None:
+                        memory.remember_chat(principal, prompt.strip(), result['reply'], result['model'])
+                    return result
+
+                def external(model):
+                    if not allow_external:
+                        raise IdentityError('Explicit external data consent required', 403)
+                    if not isinstance(self.connection, ssl.SSLSocket) or self.connection.version() != 'TLSv1.3':
+                        raise IdentityError('Direct TLS 1.3 required for external chat', 426)
+                    if providers is None:
+                        raise IdentityError('Provider registry unavailable', 503)
+                    return completed(providers.complete(principal, model, effective_prompt))
+
+                if requested.startswith(('gemini/', 'openrouter/')):
+                    return external(requested)
+                try:
+                    client = current_ollama()
+                    models = client.list_chat_models()
+                    selected = choose_local_chat_model(models, requested, effective_prompt)
+                    candidates = [selected] if requested != 'auto' else [selected] + [
+                        item.name for item in models if item.name != selected
+                    ]
+                except (ValueError, OllamaError) as exc:
+                    if requested == 'auto' and allow_external and providers is not None:
+                        candidate = providers.fallback_model(principal)
+                        if candidate:
+                            return external(candidate)
+                    if isinstance(exc, OllamaError):
+                        raise
+                    raise IdentityError(str(exc), 404) from exc
+                last_error = None
+                for candidate in candidates:
+                    try:
+                        answer = client.chat(candidate, [{'role': 'user', 'content': effective_prompt}])
+                        return completed({'reply': answer, 'model': f'ollama/{candidate}'})
+                    except OllamaError as exc:
+                        last_error = exc
                 if requested == 'auto' and allow_external and providers is not None:
                     candidate = providers.fallback_model(principal)
                     if candidate:
                         return external(candidate)
-                if isinstance(exc, OllamaError):
-                    raise
-                raise IdentityError(str(exc), 404) from exc
-            last_error = None
-            for candidate in candidates:
-                try:
-                    answer = client.chat(candidate, [{'role': 'user', 'content': effective_prompt}])
-                    return completed({'reply': answer, 'model': f'ollama/{candidate}'})
-                except OllamaError as exc:
-                    last_error = exc
-            if requested == 'auto' and allow_external and providers is not None:
-                candidate = providers.fallback_model(principal)
-                if candidate:
-                    return external(candidate)
-            raise last_error or OllamaError('No local chat model is available')
+                raise last_error or OllamaError('No local chat model is available')
+            finally:
+                with active_inferences_lock:
+                    active_inferences[0] = max(0, active_inferences[0] - 1)
 
         def _stream_chat(self, principal: dict, payload: dict):
             if 'chat' not in principal['capabilities']:
@@ -176,90 +189,100 @@ def make_server(
                 fcontent = attached.get('content')[:16000]
                 effective_prompt = f"[پیوست فایل پروژه: {fname}]\n```\n{fcontent}\n```\n\n{prompt.strip()}"
 
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
-            self.send_header('Cache-Control', 'no-cache, no-transform')
-            self.send_header('Connection', 'keep-alive')
-            self.send_header('X-Accel-Buffering', 'no')
-            self.end_headers()
-
-            def send_event(data_dict):
-                try:
-                    raw = f"data: {json.dumps(data_dict, ensure_ascii=False)}\n\n".encode('utf-8')
-                    self.wfile.write(raw)
-                    self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError, OSError):
-                    pass
-
-            if requested.startswith(('gemini/', 'openrouter/')):
-                if not allow_external:
-                    send_event({'error': 'Explicit external data consent required'})
+            with active_inferences_lock:
+                if active_inferences[0] >= max_concurrent_inferences:
+                    self._send(429, {'error': {'message': 'ظرفیت پردازش همزمان مدل تکمیل است؛ لطفاً چند لحظه بعد مجدداً تلاش کنید.'}})
                     return
-                if not isinstance(self.connection, ssl.SSLSocket) or self.connection.version() != 'TLSv1.3':
-                    send_event({'error': 'Direct TLS 1.3 required for external chat'})
-                    return
-                if providers is None:
-                    send_event({'error': 'Provider registry unavailable'})
-                    return
-                try:
-                    res = providers.complete(principal, requested, effective_prompt)
-                    reply = res.get('reply', '')
-                    model_used = res.get('model', requested)
-                    send_event({'chunk': reply, 'model': model_used})
-                    send_event({'done': True, 'model': model_used, 'reply': reply})
-                    if save_history and memory is not None:
-                        memory.remember_chat(principal, prompt.strip(), reply, model_used)
-                except Exception as exc:
-                    send_event({'error': str(exc)})
-                return
+                active_inferences[0] += 1
 
             try:
-                client = current_ollama()
-                models = client.list_chat_models()
-                selected = choose_local_chat_model(models, requested, effective_prompt)
-                candidates = [selected] if requested != 'auto' else [selected] + [
-                    item.name for item in models if item.name != selected
-                ]
-            except Exception as exc:
-                send_event({'error': str(exc)})
-                return
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+                self.send_header('Cache-Control', 'no-cache, no-transform')
+                self.send_header('Connection', 'keep-alive')
+                self.send_header('X-Accel-Buffering', 'no')
+                self.end_headers()
 
-            chosen_candidate = None
-            full_reply_parts = []
-            for candidate in candidates:
+                def send_event(data_dict):
+                    try:
+                        raw = f"data: {json.dumps(data_dict, ensure_ascii=False)}\n\n".encode('utf-8')
+                        self.wfile.write(raw)
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        pass
+
+                if requested.startswith(('gemini/', 'openrouter/')):
+                    if not allow_external:
+                        send_event({'error': 'Explicit external data consent required'})
+                        return
+                    if not isinstance(self.connection, ssl.SSLSocket) or self.connection.version() != 'TLSv1.3':
+                        send_event({'error': 'Direct TLS 1.3 required for external chat'})
+                        return
+                    if providers is None:
+                        send_event({'error': 'Provider registry unavailable'})
+                        return
+                    try:
+                        res = providers.complete(principal, requested, effective_prompt)
+                        reply = res.get('reply', '')
+                        model_used = res.get('model', requested)
+                        send_event({'chunk': reply, 'model': model_used})
+                        send_event({'done': True, 'model': model_used, 'reply': reply})
+                        if save_history and memory is not None:
+                            memory.remember_chat(principal, prompt.strip(), reply, model_used)
+                    except Exception as exc:
+                        send_event({'error': str(exc)})
+                    return
+
                 try:
-                    for chunk in client.chat_stream(candidate, [{'role': 'user', 'content': effective_prompt}]):
-                        if not chosen_candidate:
-                            chosen_candidate = candidate
-                        full_reply_parts.append(chunk)
-                        send_event({'chunk': chunk, 'model': f'ollama/{candidate}'})
-                    if chosen_candidate:
-                        break
-                except Exception:
-                    continue
+                    client = current_ollama()
+                    models = client.list_chat_models()
+                    selected = choose_local_chat_model(models, requested, effective_prompt)
+                    candidates = [selected] if requested != 'auto' else [selected] + [
+                        item.name for item in models if item.name != selected
+                    ]
+                except Exception as exc:
+                    send_event({'error': str(exc)})
+                    return
 
-            if chosen_candidate:
-                full_reply = "".join(full_reply_parts)
-                model_name = f'ollama/{chosen_candidate}'
-                send_event({'done': True, 'model': model_name, 'reply': full_reply})
-                if save_history and memory is not None:
-                    memory.remember_chat(principal, prompt.strip(), full_reply, model_name)
-            else:
-                if requested == 'auto' and allow_external and providers is not None:
-                    fallback_m = providers.fallback_model(principal)
-                    if fallback_m:
-                        try:
-                            res = providers.complete(principal, fallback_m, effective_prompt)
-                            reply = res.get('reply', '')
-                            send_event({'chunk': reply, 'model': fallback_m})
-                            send_event({'done': True, 'model': fallback_m, 'reply': reply})
-                            if save_history and memory is not None:
-                                memory.remember_chat(principal, prompt.strip(), reply, fallback_m)
-                            return
-                        except Exception as exc:
-                            send_event({'error': str(exc)})
-                            return
-                send_event({'error': 'No local chat model is available or streaming failed'})
+                chosen_candidate = None
+                full_reply_parts = []
+                for candidate in candidates:
+                    try:
+                        for chunk in client.chat_stream(candidate, [{'role': 'user', 'content': effective_prompt}]):
+                            if not chosen_candidate:
+                                chosen_candidate = candidate
+                            full_reply_parts.append(chunk)
+                            send_event({'chunk': chunk, 'model': f'ollama/{candidate}'})
+                        if chosen_candidate:
+                            break
+                    except Exception:
+                        continue
+
+                if chosen_candidate:
+                    full_reply = "".join(full_reply_parts)
+                    model_name = f'ollama/{chosen_candidate}'
+                    send_event({'done': True, 'model': model_name, 'reply': full_reply})
+                    if save_history and memory is not None:
+                        memory.remember_chat(principal, prompt.strip(), full_reply, model_name)
+                else:
+                    if requested == 'auto' and allow_external and providers is not None:
+                        fallback_m = providers.fallback_model(principal)
+                        if fallback_m:
+                            try:
+                                res = providers.complete(principal, fallback_m, effective_prompt)
+                                reply = res.get('reply', '')
+                                send_event({'chunk': reply, 'model': fallback_m})
+                                send_event({'done': True, 'model': fallback_m, 'reply': reply})
+                                if save_history and memory is not None:
+                                    memory.remember_chat(principal, prompt.strip(), reply, fallback_m)
+                                return
+                            except Exception as exc:
+                                send_event({'error': str(exc)})
+                                return
+                    send_event({'error': 'No local chat model is available or streaming failed'})
+            finally:
+                with active_inferences_lock:
+                    active_inferences[0] = max(0, active_inferences[0] - 1)
 
         def _static(self) -> bool:
             if web_dist is None or (self.path != "/" and not self.path.startswith("/assets/") and self.path != "/fonts/Vazirmatn-OFL.txt"):
@@ -777,6 +800,42 @@ def make_server(
                 else:
                     self._send(200, {"models": models})
                 return
+            if self.path == "/api/admin/system/metrics":
+                principal = self._principal()
+                if principal is None:
+                    return
+                if principal["role"] != "superadmin":
+                    self._send(403, {"error": {"message": "Superadmin access required"}})
+                    return
+                repo_root = Path(__file__).resolve().parent.parent
+                worker_count = len(nodes.list_nodes(principal)) if nodes else 0
+                active_sessions = 1
+                try:
+                    active_sessions = len(identity_store.pending(principal)) if identity_store else 1
+                except Exception:
+                    pass
+                ollama_status = "unknown"
+                ollama_models = 0
+                try:
+                    c = current_ollama()
+                    m_list = c.list_models()
+                    ollama_status = "up" if m_list else "no_models"
+                    ollama_models = len(m_list)
+                except Exception:
+                    ollama_status = "unreachable"
+                    ollama_models = 0
+
+                metrics = telemetry.get_system_metrics(
+                    repo_root=repo_root,
+                    active_inferences=active_inferences[0],
+                    max_inferences=max_concurrent_inferences,
+                    worker_nodes_count=worker_count,
+                    active_sessions_count=active_sessions,
+                    ollama_status=ollama_status,
+                    ollama_model_count=ollama_models,
+                )
+                self._send(200, metrics)
+                return
             if self.path == "/api/admin/operations":
                 principal = self._principal()
                 if principal is None:
@@ -796,7 +855,13 @@ def make_server(
                     model_list = []
                     worker_status = "unreachable"
                     latency_ms = None
-                self._send(200, {"master": "up", "ollama": {
+                repo_root = Path(__file__).resolve().parent.parent
+                hw = telemetry.get_system_metrics(
+                    repo_root=repo_root,
+                    active_inferences=active_inferences[0],
+                    max_inferences=max_concurrent_inferences,
+                )
+                self._send(200, {"master": "up", "hardware": hw, "ollama": {
                     "url": client.base_url, "status": worker_status, "models": model_list,
                 }, "nodes": [
                     {"id": "master", "kind": "master", "status": "up", "checked_at": checked_at},
