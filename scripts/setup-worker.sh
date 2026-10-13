@@ -82,6 +82,11 @@ if [[ -z "$repo" ]]; then
 fi
 
 cd "$repo"
+if [[ -d .git ]]; then
+  printf 'در حال همگام‌سازی کدهای مخزن محلی Worker با آخرین نسخه گیت‌هاب...\n'
+  git fetch --prune origin main 2>/dev/null || true
+  git reset --hard origin/main 2>/dev/null || true
+fi
 
 # ۳. تشخیص آی‌پی خصوصی سرور Worker
 detect_worker_ip() {
@@ -321,6 +326,14 @@ done
 # ۶. ثبت و جفت‌سازی امن گره با سرور Master
 printf '\nدر حال جفت‌سازی و ثبت نود در سرور Master...\n'
 systemctl stop omniops-worker-node.service 2>/dev/null || true
+
+# پاک‌سازی فایل‌های موقت یا اثرانگشت‌های منقضی‌شده قبلی
+rm -f /etc/omniops-node/ca.sha256 /var/lib/omniops-node/node-identity.json 2>/dev/null || true
+if [[ -n "$ca_fingerprint" ]]; then
+  mkdir -p /etc/omniops-node
+  printf '%s' "$ca_fingerprint" > /etc/omniops-node/ca.sha256
+  chmod 644 /etc/omniops-node/ca.sha256
+fi
 
 export OMNIOPS_MASTER_URL="$master_url"
 export OMNIOPS_CA_FILE="$ca_file"

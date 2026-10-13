@@ -38,7 +38,9 @@ else
   read -r -p 'CA SHA256 fingerprint from the trusted Master SSH session: ' expected_fingerprint </dev/tty
   expected_fingerprint="${expected_fingerprint,,}"
 fi
-[[ "$expected_fingerprint" =~ ^[0-9a-f]{64}$ && "$actual_fingerprint" == "$expected_fingerprint" ]] || fail 'CA fingerprint mismatch; do not enroll.'
+expected_fingerprint="$(echo "${expected_fingerprint:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+actual_fingerprint="$(echo "${actual_fingerprint:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+[[ "$expected_fingerprint" =~ ^[0-9a-f]{64}$ && "$actual_fingerprint" == "$expected_fingerprint" ]] || fail "CA fingerprint mismatch: actual ($actual_fingerprint) != expected ($expected_fingerprint); do not enroll."
 python3 - "$master_url" "$ca_source" <<'PY' || fail 'Master TLS certificate, SAN, or health could not be verified.'
 from omniops.node_client import NodeClient
 import json, sys

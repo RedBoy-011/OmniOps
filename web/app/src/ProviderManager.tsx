@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, type ApiProvider } from "./api";
 
@@ -102,8 +102,21 @@ export function ProviderManager() {
   }
   useEffect(() => { if (secure) void refresh().catch(() => {}); }, [secure]);
   return <section className="glass admin-card operations-card provider-manager" aria-label="مدیریت Providerهای API">
-    <div className="card-title"><div><h2>Providerهای API و هزینهٔ مدل‌ها</h2><p>کلیدها فقط روی HTTPS خصوصی ثبت می‌شوند. تست، فهرست مدل و قیمت هر سرویس از همان کارت قابل مدیریت است.</p></div></div>
-    {!secure ? <p className="empty-note">برای ثبت کلید API و پراکسی، پنل خصوصی را از نشانی HTTPS معتبر Master باز کنید.</p>
+    {!secure ? (
+      <div style={{ padding: "18px", borderRadius: "14px", background: "rgba(124, 58, 237, 0.08)", border: "1px solid rgba(124, 58, 237, 0.3)", margin: "10px 0" }}>
+        <p style={{ margin: "0 0 10px", fontSize: "13px", color: "#e9d5ff", lineHeight: "1.8" }}>
+          🔒 <strong>ثبت کلیدهای API و پراکسی نیازمند درگاه امن HTTPS است:</strong>
+          <br />
+          جهت محافظت از لو رفتن کلیدها در شبکه محلی، این بخش از طریق درگاه امن پورت <strong>9443</strong> در دسترس است:
+        </p>
+        <a
+          href={`https://${window.location.hostname}:9443/`}
+          style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "9px 18px", borderRadius: "10px", background: "#7c3aed", color: "#fff", textDecoration: "none", fontSize: "12px", fontWeight: "bold" }}
+        >
+          🚀 ورود به پنل امن: https://{window.location.hostname}:9443/
+        </a>
+      </div>
+    )
       : <><div className="provider-shared-proxy"><div><strong>پراکسی مشترک خروجی</strong><small>نشانی پیشنهادی برای کارت‌های Provider؛ انتخاب SOCKS در هر کارت مستقل است.</small></div>
         <input dir="ltr" aria-label="نشانی پراکسی مشترک" value={defaultProxy} onChange={e => setDefaultProxy(e.target.value)} placeholder="socks5h://IP:PORT" /></div>
         {error && <p className="admin-message" role="alert">{error}</p>}

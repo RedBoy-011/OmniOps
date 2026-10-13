@@ -159,9 +159,22 @@ export function NodeManager() {
       </div>
 
       {!secure ? (
-        <p className="empty-note">
-          این بخش پس از فعال‌سازی TLS مستقیم روی Master و نصب گواهی معتبر در دسترس است. از اتصال بدون رمزگذاری برای الحاق سرورها استفاده نکنید.
-        </p>
+        <div style={{ padding: "18px", borderRadius: "14px", background: "rgba(124, 58, 237, 0.08)", border: "1px solid rgba(124, 58, 237, 0.3)", margin: "10px 0" }}>
+          <p style={{ margin: "0 0 10px", fontSize: "13px", color: "#e9d5ff", lineHeight: "1.8" }}>
+            🔒 <strong>درگاه امن اختصاصی TLS برای مدیریت سرورها فعال است:</strong>
+            <br />
+            سرور Master شما دارای درگاه رمزنگاری‌شده TLS 1.3 اختصاصی روی پورت <strong>9443</strong> است. برای دسترسی به پنل مدیریت سرورها، صدور توکن و اتصال گره‌ها، کافیست پنل را از نشانی امن HTTPS باز کنید:
+          </p>
+          <a
+            href={`https://${window.location.hostname}:9443/`}
+            style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "9px 18px", borderRadius: "10px", background: "#7c3aed", color: "#fff", textDecoration: "none", fontSize: "12px", fontWeight: "bold" }}
+          >
+            🚀 ورود به پنل امن: https://{window.location.hostname}:9443/
+          </a>
+          <p style={{ margin: "10px 0 0", fontSize: "11px", color: "#9ca3af", lineHeight: "1.7" }}>
+            💡 راهنما: هنگام باز کردن نشانی فوق در مرورگر، پیام هشدار گواهی محلی نمایش داده می‌شود. کافیست روی دکمهٔ <strong>Advanced</strong> کلیک کرده و سپس <strong>Proceed to {window.location.hostname} (unsafe)</strong> را بزنید. نیازی به خرید دامنه یا SSL تجاری نیست.
+          </p>
+        </div>
       ) : (
         <>
           <div className="pending-actions" style={{ marginBottom: "16px" }}>
