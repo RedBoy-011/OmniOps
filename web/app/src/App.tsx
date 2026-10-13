@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { AuthPage } from "./AuthPage";
 import { AdminPanel } from "./AdminPanel";
+import { UserWorkspace } from "./UserWorkspace";
 import { api, forgetSession, keepSessionInMemory, getStoredToken, type LoginResult } from "./api";
 
 export default function App() {
@@ -16,6 +17,17 @@ export default function App() {
     }
     return null;
   });
+
+  const [plane, setPlane] = useState<"admin" | "workspace">("workspace");
+
+  // Sync plane when session is initialized or user role changes
+  useEffect(() => {
+    if (session?.user.role === "superadmin") {
+      setPlane("admin");
+    } else {
+      setPlane("workspace");
+    }
+  }, [session?.user.role]);
 
   // Verify and sync token in background on mount
   useEffect(() => {
@@ -35,7 +47,6 @@ export default function App() {
         });
       })
       .catch(() => {
-        // Token expired or invalid
         forgetSession();
         setSession(null);
       });
@@ -50,17 +61,41 @@ export default function App() {
       }
     } catch {}
     setSession(result);
+    setPlane(result.user.role === "superadmin" ? "admin" : "workspace");
   }
 
   function logout() {
     void api.logout().catch(() => undefined).finally(() => {
       forgetSession();
       setSession(null);
+      setPlane("workspace");
     });
   }
 
-  return session
-    ? <AdminPanel user={session.user} initialPending={session.pending_count} onLogout={logout} />
-    : <AuthPage onLogin={signedIn} />;
-}
+  if (!session) {
+    return <AuthPage onLogin={signedIn} />;
+  }
 
+  const isSuperadmin = session.user.role === "superadmin";
+
+  // For superadmin, allow toggling between Admin Mission Control and User AI Workspace
+  if (isSuperadmin) {
+    return plane === "admin" ? (
+      <AdminPanel
+        user={session.user}
+        initialPending={session.pending_count}
+        onLogout={logout}
+        onSwitchToWorkspace={() => setPlane("workspace")}
+      />
+    ) : (
+      <UserWorkspace
+        user={session.user}
+        onLogout={logout}
+        onSwitchToAdmin={() => setPlane("admin")}
+      />
+    );
+  }
+
+  // Regular users are strictly routed to UserWorkspace with NO admin switcher
+  return <UserWorkspace user={session.user} onLogout={logout} />;
+}
