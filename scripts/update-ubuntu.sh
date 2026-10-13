@@ -8,6 +8,33 @@ trap 'printf "\n⚠️ اسکریپت در خط %s با خطا مواجه شد. 
 [[ "$(id -u)" == 0 ]] || fail 'این اسکریپت باید با دسترسی مدیر ارشد (root یا sudo) اجرا شود.'
 [[ -d /run/systemd/system ]] || fail 'این اسکریپت نیازمند توزیع اوبونتو/دبیان همراه با systemd است.'
 
+# تابع خواندن امن و تعاملی از ترمینال کاربر حتی در صورت اجرای با curl | bash
+prompt_terminal() {
+  local prompt_text="$1"
+  local var_name="$2"
+  local default_val="${3:-}"
+  local is_secret="${4:-0}"
+  local res=""
+
+  if [[ -r /dev/tty ]]; then
+    if [[ "$is_secret" -eq 1 ]]; then
+      read -s -r -p "$prompt_text" res </dev/tty || true
+      printf '\n' >&2
+    else
+      read -r -p "$prompt_text" res </dev/tty || true
+    fi
+  elif [[ -t 0 ]]; then
+    if [[ "$is_secret" -eq 1 ]]; then
+      read -s -r -p "$prompt_text" res || true
+      printf '\n' >&2
+    else
+      read -r -p "$prompt_text" res || true
+    fi
+  fi
+  res="$(echo "${res:-$default_val}" | tr -d '\r\n')"
+  eval "$var_name=\"\$res\""
+}
+
 # ۱. نصب خودکار پیش‌نیازهای پایه‌ای سیستم در صورت عدم وجود
 missing_tools=()
 for tool in git python3 curl systemctl; do
@@ -96,10 +123,11 @@ if [[ -z "${OMNIOPS_BIND_HOST:-}" ]]; then
     export OMNIOPS_BIND_HOST="$saved_host"
   else
     detected_ip="$(detect_lan_ip)"
-    if [[ -r /dev/tty && -t 0 ]]; then
+    if [[ -r /dev/tty || -t 0 ]]; then
       printf '\n=======================================================\n'
       printf '🔍 آی‌پی شبکه شناسایی‌شده سرور: %s\n' "$detected_ip"
-      read -r -p "آیا مایلید پنل روی این آی‌پی گوش دهد؟ [Enter برای تأیید یا ورود آی‌پی]: " user_ip </dev/tty || true
+      user_ip=""
+      prompt_terminal "آیا مایلید پنل روی این آی‌پی گوش دهد؟ [Enter برای تأیید یا ورود آی‌پی]: " user_ip "$detected_ip"
       export OMNIOPS_BIND_HOST="${user_ip:-$detected_ip}"
     else
       export OMNIOPS_BIND_HOST="$detected_ip"
@@ -122,20 +150,81 @@ else
     printf '  🔍 سیستم OmniOps قبلاً روی این سرور راه‌اندازی شده است.\n'
     printf '======================================================================\n'
     printf '  [1] به‌روزرسانی سریع هسته (حفظ کامل حساب‌ها و داده‌ها) [پیش‌فرض]\n'
-    printf '  [2] بازنشانی رمز عبور مدیر ارشد یا نصب مجدد (Reset Admin / Reinstall)\n'
+    printf '  [2] بازنشانی مشخصات و رمز عبور مدیر ارشد (Reset SuperAdmin Password)\n'
+    printf '  [3] نصب مجدد تمیز (پاک‌سازی پایگاه‌داده و راه‌اندازی از صفر - Fresh Reinstall)\n'
+    printf '  [4] حذف و پاک‌سازی کامل پروژه از روی سرور (Uninstall / Clean Purge)\n'
     printf '======================================================================\n'
-    upgrade_choice="1"
-    if [[ -r /dev/tty && -t 0 ]]; then
-      read -r -p "لطفاً گزینه مورد نظر را انتخاب کنید [1/2] (Enter برای گزینه 1): " user_choice </dev/tty || true
-      if [[ "$user_choice" == "2" ]]; then
-        upgrade_choice="2"
+    user_choice="1"
+    prompt_terminal "لطفاً گزینه مورد نظر را انتخاب کنید [1/2/3/4، پیش‌فرض: 1]: " user_choice "1"
+    user_choice="$(echo "$user_choice" | tr -d '[:space:]')"
+
+    case "$user_choice" in
+      2)
         needs_bootstrap=1
         printf '>>> حالت بازنشانی مشخصات مدیر ارشد فعال شد.\n'
-      fi
-    fi
-    if [[ "$upgrade_choice" == "1" ]]; then
-      printf '>>> حالت به‌روزرسانی سریع فعال است. حساب‌های مدیر و تنظیمات حفظ می‌شوند.\n'
-    fi
+        ;;
+      3)
+        confirm_reinstall="n"
+        prompt_terminal "⚠️ آیا از پاک‌سازی پایگاه‌داده قبلی و نصب مجدد از صفر اطمینان دارید؟ (y/N) [N]: " confirm_reinstall "n"
+        if [[ "$confirm_reinstall" =~ ^[Yy] ]]; then
+          backup_dir="/var/backups/omniops"
+          mkdir -p "$backup_dir" 2>/dev/null || true
+          if [[ -f "$db_file" ]]; then
+            cp "$db_file" "$backup_dir/identity-pre-reinstall-$(date +%Y%m%d%H%M%S).db" 2>/dev/null || true
+            rm -f "$db_file"
+          fi
+          # پاک‌سازی متغیرهای محیطی کلیدهای قبلی
+          unset OMNIOPS_API_KEY OMNIOPS_SIGNING_KEY
+          needs_bootstrap=1
+          printf '>>> پایگاه‌داده قبلی آرشیو شد و فرآیند نصب مجدد تمیز فعال گردید.\n'
+        else
+          printf '>>> عملیات لغو شد؛ ادامه فرآیند به‌روزرسانی سریع عادی...\n'
+        fi
+        ;;
+      4)
+        confirm_uninstall="n"
+        prompt_terminal "⚠️ هشدار: آیا از توقف سرویس‌ها و حذف کامل OmniOps از این سرور اطمینان دارید؟ (y/N) [N]: " confirm_uninstall "n"
+        if [[ "$confirm_uninstall" =~ ^[Yy] ]]; then
+          printf '\nدر حال توقف و غیرفعال‌سازی سرویس‌های OmniOps...\n'
+          systemctl stop omniops-master.service 2>/dev/null || true
+          systemctl disable omniops-master.service 2>/dev/null || true
+          systemctl stop omniops-master-tls.service 2>/dev/null || true
+          systemctl disable omniops-master-tls.service 2>/dev/null || true
+
+          printf 'در حال حذف فایل‌های سرویس systemd...\n'
+          rm -f /etc/systemd/system/omniops-master.service /etc/systemd/system/omniops-master-tls.service
+          systemctl daemon-reload 2>/dev/null || true
+
+          rm -f /usr/local/bin/omniops-token 2>/dev/null || true
+
+          purge_data="n"
+          prompt_terminal "آیا مایل به حذف کامل فایل‌های تنظیمات (/etc/omniops) و پایگاه‌داده هستید؟ (y/N) [N]: " purge_data "n"
+          if [[ "$purge_data" =~ ^[Yy] ]]; then
+            rm -rf /etc/omniops 2>/dev/null || true
+            rm -rf "$repo/data" 2>/dev/null || true
+            printf 'فایل‌های داده و تنظیمات پاک‌سازی شدند.\n'
+          fi
+
+          cat << 'EOF'
+
+╔══════════════════════════════════════════════════════════════════════╗
+║        سیستم OmniOps با موفقیت از روی این سرور حذف و پاک شد!         ║
+╚══════════════════════════════════════════════════════════════════════╝
+  • کلیه سرویس‌های پس‌زمینه متوقف و غیرفعال شدند.
+  • فایل‌های سرویس systemd حذف گردیدند.
+  • میانبر دستورات omniops-token حذف شد.
+  • در صورت تمایل، می‌توانید دایرکتوری مخزن را نیز به صورت دستی حذف نمایید.
+══════════════════════════════════════════════════════════════════════
+EOF
+          exit 0
+        else
+          printf '>>> عملیات حذف لغو شد؛ ادامه فرآیند به‌روزرسانی عادی...\n'
+        fi
+        ;;
+      *)
+        printf '>>> حالت به‌روزرسانی سریع فعال است. حساب‌های مدیر و تنظیمات حفظ می‌شوند.\n'
+        ;;
+    esac
   fi
 fi
 
@@ -151,28 +240,16 @@ if [[ "$needs_bootstrap" -eq 1 ]]; then
   export OMNIOPS_SIGNING_KEY="${OMNIOPS_SIGNING_KEY:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')}"
 
   admin_user=""
-  while [[ -z "$admin_user" ]]; do
-    if [[ -r /dev/tty && -t 0 ]]; then
-      read -r -p "نام کاربری مدیر ارشد [پیش‌فرض: admin]: " admin_user </dev/tty || true
-    fi
-    admin_user="${admin_user:-admin}"
-  done
+  prompt_terminal "نام کاربری مدیر ارشد [پیش‌فرض: admin]: " admin_user "admin"
 
   admin_mobile=""
-  while [[ -z "$admin_mobile" ]]; do
-    if [[ -r /dev/tty && -t 0 ]]; then
-      read -r -p "شماره موبایل مدیر ارشد [پیش‌فرض: 09120000000]: " admin_mobile </dev/tty || true
-    fi
-    admin_mobile="${admin_mobile:-09120000000}"
-  done
+  prompt_terminal "شماره موبایل مدیر ارشد [پیش‌فرض: 09120000000]: " admin_mobile "09120000000"
 
   admin_pass=""
   while true; do
-    if [[ -r /dev/tty && -t 0 ]]; then
-      read -s -r -p "رمز عبور مدیر ارشد (حداقل ۱۲ نویسه): " admin_pass </dev/tty || true
-      printf '\n'
-      read -s -r -p "تکرار رمز عبور مدیر ارشد: " admin_pass_confirm </dev/tty || true
-      printf '\n'
+    if [[ -r /dev/tty || -t 0 ]]; then
+      prompt_terminal "رمز عبور مدیر ارشد (حداقل ۱۲ نویسه): " admin_pass "" 1
+      prompt_terminal "تکرار رمز عبور مدیر ارشد: " admin_pass_confirm "" 1
     else
       admin_pass="$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')"
       admin_pass_confirm="$admin_pass"
