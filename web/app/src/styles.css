@@ -2392,4 +2392,194 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
   background: rgba(248, 113, 113, 0.15);
 }
 
+/* =========================================================================
+   GitHub Update Notification Banner & Modal
+   ========================================================================= */
+
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  border-radius: 14px;
+  margin-bottom: 18px;
+  backdrop-filter: blur(10px);
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.update-alert-banner {
+  background: linear-gradient(135deg, rgba(234, 88, 12, 0.22), rgba(180, 83, 9, 0.32));
+  border: 1px solid rgba(251, 146, 60, 0.45);
+  box-shadow: 0 4px 20px rgba(234, 88, 12, 0.2);
+}
+
+.update-success-banner {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.28));
+  border: 1px solid rgba(52, 211, 153, 0.45);
+  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.2);
+}
+
+.update-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.update-banner-icon {
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.update-banner-content strong {
+  display: block;
+  font-size: 13px;
+  color: #fff;
+  margin-bottom: 2px;
+}
+
+.update-banner-content p {
+  margin: 0;
+  font-size: 11px;
+  color: #fbd5c0;
+}
+
+.update-success-banner .update-banner-content p {
+  color: #a7f3d0;
+}
+
+.update-banner-content code {
+  background: rgba(0, 0, 0, 0.35);
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 11px;
+  color: #ffedd5;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.update-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.update-action-btn {
+  background: linear-gradient(135deg, #f97316, #ea580c);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(234, 88, 12, 0.4);
+  transition: all 0.2s ease;
+}
+
+.update-action-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #fb923c, #f97316);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(234, 88, 12, 0.55);
+}
+
+.update-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.update-dismiss-btn {
+  background: transparent;
+  border: none;
+  color: #fed7aa;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+
+.update-dismiss-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+/* Modal */
+.update-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.update-modal {
+  width: min(90vw, 480px);
+  background: #181120;
+  border: 1px solid rgba(251, 146, 60, 0.35);
+  border-radius: 20px;
+  padding: 24px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+
+.update-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.modal-icon {
+  font-size: 24px;
+}
+
+.update-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #fff;
+}
+
+.update-modal-body p {
+  font-size: 13px;
+  color: #cbd5e1;
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+
+.update-modal-body ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+  font-size: 12px;
+  color: #94a3b8;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.update-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 14px;
+}
+
+
 

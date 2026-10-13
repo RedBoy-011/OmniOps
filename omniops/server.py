@@ -28,6 +28,7 @@ from .profile_memory import ProfileMemory
 from .workspace import WorkspaceStore
 from .mobile_orchestrator import MobileApprovalStore
 from . import telemetry
+from . import updater
 
 MAX_BODY_BYTES = 384 * 1024
 LAN_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
@@ -500,7 +501,7 @@ def make_server(
                 "/api/web/workspace/attachments/remove", "/api/agent/workspace/attachments/remove",
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/test-socks", "/api/admin/providers/enable", "/api/admin/providers/price",
-                "/api/admin/system/backups",
+                "/api/admin/system/backups", "/api/admin/system/update",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
@@ -569,6 +570,11 @@ def make_server(
                     if principal["role"] != "superadmin":
                         raise IdentityError("Superadmin access required", 403)
                     self._send(201, store.create_backup(principal))
+                elif path == "/api/admin/system/update":
+                    if principal["role"] != "superadmin":
+                        raise IdentityError("Superadmin access required", 403)
+                    repo_root = Path(__file__).resolve().parent.parent
+                    self._send(200, updater.apply_update(repo_root=repo_root))
                 elif path in ('/api/chat/sessions', '/api/agent/sessions'):
                     self._send(201, {'session': memory.create_session(principal, payload.get('title'))})
                 elif path in ('/api/chat/sessions/rename', '/api/agent/sessions/rename'):
@@ -913,6 +919,17 @@ def make_server(
                     except IdentityError as exc:
                         self._send(exc.status, {"error": {"message": str(exc)}})
                     return
+            if parsed.path == "/api/admin/system/update-status":
+                principal = self._principal()
+                if principal is None:
+                    return
+                if principal["role"] != "superadmin":
+                    self._send(403, {"error": {"message": "Superadmin access required"}})
+                    return
+                force = parse_qs(parsed.query).get('force', ['false'])[0].lower() == 'true'
+                repo_root = Path(__file__).resolve().parent.parent
+                self._send(200, updater.check_for_updates(repo_root=repo_root, force_refresh=force))
+                return
             if self.path == "/api/admin/operations":
                 principal = self._principal()
                 if principal is None:

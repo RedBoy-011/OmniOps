@@ -3,6 +3,7 @@ import json
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
@@ -405,7 +406,25 @@ class WorkerEndpointTests(unittest.TestCase):
             data = res.read()
             self.assertGreater(len(data), 0)
 
+    def test_system_update_endpoints(self):
+        admin = self.store.login("root-admin", "a very strong admin password")["token"]
+
+        # Check update status
+        code, status_res = self.call("GET", "/api/admin/system/update-status", token=admin)
+        self.assertEqual(code, 200)
+        self.assertIn("update_available", status_res)
+        self.assertIn("current_commit", status_res)
+        self.assertIn("latest_commit", status_res)
+
+        # Apply update
+        with patch("omniops.updater.apply_update", return_value={"status": "updated", "message": "ok", "previous_commit": "1111111", "new_commit": "2222222"}):
+            code, update_res = self.call("POST", "/api/admin/system/update", {}, token=admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(update_res["status"], "updated")
+            self.assertEqual(update_res["new_commit"], "2222222")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

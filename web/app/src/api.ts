@@ -107,6 +107,27 @@ export type DatabaseBackup = {
   created_at: number;
 };
 
+export type UpdateStatus = {
+  update_available: boolean;
+  current_commit: string;
+  current_full_commit: string;
+  latest_commit: string;
+  latest_full_commit: string;
+  branch: string;
+  last_checked: number;
+  error?: string | null;
+};
+
+export type UpdateResult = {
+  status: "updated" | "error";
+  message: string;
+  previous_commit?: string;
+  new_commit?: string;
+  rebuilt_frontend?: boolean;
+  pull_output?: string;
+  restart_recommended?: boolean;
+};
+
 export type Operations = {
   master: "up";
   hardware?: SystemMetrics;
@@ -296,4 +317,6 @@ export const api = {
   databaseBackups: () => request<{ backups: DatabaseBackup[] }>("/api/admin/system/backups"),
   createDatabaseBackup: () => request<{ status: string; filename: string; size_bytes: number; created_at: number }>("/api/admin/system/backups", "POST", {}),
   downloadBackupUrl: (filename: string) => `/api/admin/system/backups/download?filename=${encodeURIComponent(filename)}`,
+  updateStatus: (force = false) => request<UpdateStatus>(`/api/admin/system/update-status${force ? "?force=true" : ""}`),
+  applyUpdate: () => request<UpdateResult>("/api/admin/system/update", "POST", {}),
 };
