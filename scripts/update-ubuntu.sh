@@ -332,11 +332,27 @@ fi
 printf 'در حال ساخت فایل‌های پنل وب فارسی (React + Vite)...\n'
 (cd "$repo/web/app" && npm ci && npm run build)
 
-# ۱۰. اجرای آزمون‌های خودکار هسته
+# ۱۰. آماده‌سازی و همگام‌سازی بسته‌های نصاب کلاینت‌ها (ویندوز و اندروید)
+printf 'در حال بررسی و آماده‌سازی فایل‌های نصاب کلاینت‌ها در downloads/...\n'
+mkdir -p "$repo/downloads"
+if [[ ! -f "$repo/downloads/OmniOps-Coucou-v1.0.apk" || ! -f "$repo/downloads/OmniOps-Mobile.apk" ]]; then
+  if [[ -f "$repo/scripts/build_android_apk.py" ]]; then
+    python3 "$repo/scripts/build_android_apk.py" 2>/dev/null || true
+  fi
+fi
+if curl -fsSL -I "https://github.com/RedBoy-011/OmniOps/releases/latest/download/OmniOps-Edge-Setup.exe" 2>/dev/null | grep -q "200\|302"; then
+  curl -fsSL "https://github.com/RedBoy-011/OmniOps/releases/latest/download/OmniOps-Edge-Setup.exe" -o "$repo/downloads/OmniOps-Edge-Setup.exe" 2>/dev/null || true
+fi
+if curl -fsSL -I "https://github.com/RedBoy-011/OmniOps/releases/latest/download/OmniOps-Coucou-v1.0.apk" 2>/dev/null | grep -q "200\|302"; then
+  curl -fsSL "https://github.com/RedBoy-011/OmniOps/releases/latest/download/OmniOps-Coucou-v1.0.apk" -o "$repo/downloads/OmniOps-Coucou-v1.0.apk" 2>/dev/null || true
+  cp -f "$repo/downloads/OmniOps-Coucou-v1.0.apk" "$repo/downloads/OmniOps-Mobile.apk" 2>/dev/null || true
+fi
+
+# ۱۱. اجرای آزمون‌های خودکار هسته
 printf 'در حال اعتبارسنجی و اجرای آزمون‌های هسته...\n'
 python3 -m unittest discover -s tests -q
 
-# ۱۱. پیکربندی و راه‌اندازی سرویس systemd
+# ۱۲. پیکربندی و راه‌اندازی سرویس systemd
 python_path="$(command -v python3)"
 cat > "$unit" <<EOF
 [Unit]

@@ -25,9 +25,7 @@ agent/windows-edge/src-tauri/icons/*
 web/app/public/fonts/omniops-iransharp/
 agent/windows-edge/public/fonts/omniops-iransharp/
 
-# Downloads binaries
-downloads/*.exe
-downloads/*.apk
+# Archive binaries (track official small setup/apk packages in downloads/)
 downloads/*.zip
 downloads/*.tar.gz
-!downloads/README.md
+downloads/*.iso

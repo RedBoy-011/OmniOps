@@ -174,7 +174,7 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
               className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 rounded-xl text-xs text-center transition flex items-center justify-center gap-2 shadow-lg shadow-cyan-950"
             >
               <span>⬇️</span>
-              <span>دانلود نصاب مستقیم ویندوز (7.2 MB)</span>
+              <span>دانلود نصاب مستقیم ویندوز (.exe)</span>
             </a>
 
             <div className="flex gap-2">
@@ -282,7 +282,7 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
               className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs text-center transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950"
             >
               <span>⬇️</span>
-              <span>دانلود مستقیم فایل نصاب APK (4.8 MB)</span>
+              <span>دانلود مستقیم فایل نصاب APK (.apk)</span>
             </a>
 
             <div className="flex gap-2">

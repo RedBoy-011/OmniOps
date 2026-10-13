@@ -3,10 +3,11 @@ name: Windows validation and installer
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: windows-build-${{ github.ref }}
@@ -90,3 +91,40 @@ jobs:
             agent/windows-edge/src-tauri/target/release/bundle/nsis/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 7
+
+  release:
+    name: Publish client binaries to GitHub Releases
+    needs: [validate, windows]
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install cryptography
+        run: python -m pip install cryptography==46.0.7
+      - name: Build Android APK
+        run: python scripts/build_android_apk.py
+      - uses: actions/download-artifact@v7
+        with:
+          name: omniops-windows-x64-unsigned-preview
+          path: windows-artifacts/
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets/
+          cp -f downloads/OmniOps-Coucou-v1.0.apk release-assets/
+          cp -f downloads/OmniOps-Mobile.apk release-assets/
+          find windows-artifacts/ -name "*-setup.exe" -exec cp -f {} release-assets/OmniOps-Edge-Setup.exe \;
+          if [ -f windows-artifacts/SHA256SUMS.txt ]; then
+            cp -f windows-artifacts/SHA256SUMS.txt release-assets/
+          fi
+      - name: Release to GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: release-assets/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
