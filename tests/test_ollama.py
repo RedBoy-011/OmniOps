@@ -42,6 +42,15 @@ class FakeOllama(BaseHTTPRequestHandler):
         if getattr(self.server, 'fail_first_chat', False) and payload['model'] == 'test:1b':
             self.send_error(503)
             return
+        if payload.get("stream"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson")
+            self.end_headers()
+            part1 = json.dumps({"message": {"role": "assistant", "content": "پاسخ "}}).encode() + b"\n"
+            part2 = json.dumps({"message": {"role": "assistant", "content": "جریانی"}, "done": True}).encode() + b"\n"
+            self.wfile.write(part1)
+            self.wfile.write(part2)
+            return
         self._reply({"message": {"role": "assistant", "content": "پاسخ واقعی آزمایشی"}})
 
 
@@ -97,6 +106,11 @@ class OllamaAdapterTests(unittest.TestCase):
     def test_failure_is_reported_instead_of_fabricated_answer(self):
         with self.assertRaises(OllamaError):
             self.client._json_request("/missing")
+
+    def test_chat_stream_yields_chunks_line_by_line(self):
+        chunks = list(self.client.chat_stream("test:1b", [{"role": "user", "content": "سلام"}]))
+        self.assertEqual("".join(chunks), "پاسخ جریانی")
+        self.assertTrue(self.server.last_request["stream"])
 
     def test_external_ollama_address_is_rejected(self):
         with self.assertRaises(ValueError):

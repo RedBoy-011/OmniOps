@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 
 import { AnimatePresence, motion } from "motion/react";
 import { api, type MemoryNote } from "./api";
 import { FilePreviewPanel } from "./components/FilePreviewPanel";
+import { MarkdownMessage } from "./components/MarkdownMessage";
 
 type Entry = { role: "user" | "assistant"; text: string; time: string; model?: string };
 type QueuedMessage = { id: string; text: string; time: string };
@@ -25,6 +26,10 @@ export function ChatRoom() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState("README.md");
   const [previewTab, setPreviewTab] = useState<"review" | "preview" | "raw" | "terminal">("preview");
+  const [attachedFile, setAttachedFile] = useState<{ path: string; name: string; content?: string } | null>(null);
+  const [showFilePicker, setShowFilePicker] = useState(false);
+  const [projectFiles, setProjectFiles] = useState<{ path: string; name: string; type: string }[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const localModels = models.filter(model => model.startsWith("ollama/"));
@@ -80,15 +85,103 @@ export function ChatRoom() {
     finally { setMemoryBusy(false); }
   }
 
+  async function handleOpenFilePicker() {
+    if (showFilePicker) {
+      setShowFilePicker(false);
+      return;
+    }
+    setShowFilePicker(true);
+    if (projectFiles.length === 0) {
+      setLoadingFiles(true);
+      try {
+        const res = await api.projectFiles();
+        setProjectFiles(res.files);
+      } catch {
+        // ignore
+      } finally {
+        setLoadingFiles(false);
+      }
+    }
+  }
+
+  async function handleSelectFileToAttach(file: { path: string; name: string }) {
+    setShowFilePicker(false);
+    try {
+      const res = await api.projectFile(file.path);
+      setAttachedFile({ path: file.path, name: file.name, content: res.content });
+    } catch {
+      setAttachedFile({ path: file.path, name: file.name, content: "" });
+    }
+  }
+
   async function executePrompt(message: string) {
     setBusy(true);
     setError("");
-    setEntries((before) => [...before, { role: "user", text: message, time: new Date().toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" }) }]);
-    try {
-      const result = await api.webChat(message, selected, externalConsent, saveHistory);
-      setEntries((before) => [...before, { role: "assistant", text: result.reply, model: result.model, time: new Date().toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" }) }]);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "پاسخ مدل دریافت نشد."); }
-    finally { setBusy(false); }
+    const fileToAttach = attachedFile;
+    setAttachedFile(null);
+
+    const userTime = new Date().toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+    const userDisplayMessage = fileToAttach ? `📎 [فایل پیوست: ${fileToAttach.name}]\n${message}` : message;
+
+    setEntries((before) => [
+      ...before,
+      { role: "user", text: userDisplayMessage, time: userTime },
+      { role: "assistant", text: "", model: selected === "auto" ? "هوشمند خودکار" : selected, time: userTime },
+    ]);
+
+    await api.webChatStream(
+      message,
+      selected,
+      externalConsent,
+      saveHistory,
+      fileToAttach ? { name: fileToAttach.name, content: fileToAttach.content || "" } : null,
+      (chunk, model) => {
+        setEntries((before) => {
+          if (before.length === 0) return before;
+          const next = [...before];
+          const last = next[next.length - 1];
+          if (last && last.role === "assistant") {
+            next[next.length - 1] = {
+              ...last,
+              text: last.text + chunk,
+              model: model || last.model,
+            };
+          }
+          return next;
+        });
+      },
+      (fullReply, model) => {
+        setEntries((before) => {
+          if (before.length === 0) return before;
+          const next = [...before];
+          const last = next[next.length - 1];
+          if (last && last.role === "assistant") {
+            next[next.length - 1] = {
+              ...last,
+              text: fullReply || last.text,
+              model: model || last.model,
+            };
+          }
+          return next;
+        });
+        setBusy(false);
+      },
+      (errMsg) => {
+        setError(errMsg);
+        setEntries((before) => {
+          const next = [...before];
+          const last = next[next.length - 1];
+          if (last && last.role === "assistant") {
+            next[next.length - 1] = {
+              ...last,
+              text: last.text ? last.text : `⚠️ ${errMsg}`,
+            };
+          }
+          return next;
+        });
+        setBusy(false);
+      }
+    );
   }
 
   async function send(event: FormEvent<HTMLFormElement>) {
@@ -267,7 +360,16 @@ export function ChatRoom() {
             transition={{ duration: .25 }}
           >
             <span className="chat-entry-label">{entry.role === "user" ? "شما" : "OmniOps AI"}</span>
-            <p>{entry.text}</p>
+            {entry.role === "assistant" ? (
+              <div className="chat-message-bubble-content">
+                <MarkdownMessage content={entry.text} />
+                {busy && index === entries.length - 1 && (
+                  <span className="chat-streaming-cursor" aria-hidden="true">▍</span>
+                )}
+              </div>
+            ) : (
+              <p style={{ whiteSpace: "pre-wrap" }}>{entry.text}</p>
+            )}
             {entry.role === "assistant" && (
               <div className="antigravity-chat-file-card">
                 <div className="file-card-info">
@@ -357,6 +459,18 @@ export function ChatRoom() {
     <form className="web-chat-form" ref={formRef} onSubmit={(event) => void send(event)}>
       <label className="sr-only" htmlFor="web-chat-input">پیام</label>
       <div className="antigravity-composer">
+        {attachedFile && (
+          <div className="chat-attached-file-pill">
+            <span>📄 {attachedFile.name}</span>
+            <button
+              type="button"
+              onClick={() => setAttachedFile(null)}
+              title="حذف پیوست"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <textarea
           id="web-chat-input"
           value={draft}
@@ -368,6 +482,42 @@ export function ChatRoom() {
         />
 
         <div className="antigravity-composer-footer">
+          {/* دکمه پیوست فایل پروژه */}
+          <div style={{ position: "relative" }}>
+            <button
+              type="button"
+              className={`chat-attach-file-btn ${attachedFile ? "active" : ""}`}
+              onClick={() => void handleOpenFilePicker()}
+              title="پیوست فایل پروژه به چت"
+            >
+              <span>📎</span>
+              <span>{attachedFile ? attachedFile.name : "پیوست فایل"}</span>
+            </button>
+
+            {showFilePicker && (
+              <div className="chat-file-picker-dropdown">
+                <div className="chat-file-picker-header">
+                  <span>انتخاب فایل پروژه</span>
+                  <button type="button" onClick={() => setShowFilePicker(false)} style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer" }}>✕</button>
+                </div>
+                {loadingFiles ? (
+                  <div style={{ padding: "8px", fontSize: "11px", color: "#8c7b88" }}>در حال دریافت فایل‌ها…</div>
+                ) : (
+                  projectFiles.map(f => (
+                    <div
+                      key={f.path}
+                      className="chat-file-picker-item"
+                      onClick={() => void handleSelectFileToAttach(f)}
+                    >
+                      <span>📄</span>
+                      <span style={{ direction: "ltr", textAlign: "left", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
           {/* دکمه انتخاب مدل و منوی سهمیه (تصویر ۲ و ۳) */}
           <div className="antigravity-model-picker-container">
             <button

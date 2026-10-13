@@ -81,7 +81,89 @@ export const api = {
   pending: () => request<{ users: PendingUser[] }>("/api/admin/pending"),
   operations: () => request<Operations>("/api/admin/operations"),
   webModels: () => request<{ models: string[] }>("/api/web/models"),
-  webChat: (message: string, model: string, allow_external = false, save_history = false) => request<{ reply: string; model: string }>("/api/web/chat", "POST", { message, model, allow_external, save_history }),
+  webChat: (message: string, model: string, allow_external = false, save_history = false, attached_file?: { name: string; content: string } | null) =>
+    request<{ reply: string; model: string }>("/api/web/chat", "POST", { message, model, allow_external, save_history, attached_file }),
+  webChatStream: async (
+    message: string,
+    model: string,
+    allow_external: boolean,
+    save_history: boolean,
+    attached_file: { name: string; content: string } | null,
+    onChunk: (chunk: string, model?: string) => void,
+    onDone: (fullReply: string, model?: string) => void,
+    onError: (err: string) => void
+  ) => {
+    const token = localStorage.getItem("omniops_token") || "";
+    try {
+      const response = await fetch("/api/web/chat/stream", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          message,
+          model,
+          allow_external,
+          save_history,
+          attached_file,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorJson = await response.json().catch(() => ({}));
+        throw new Error(errorJson.error?.message || `HTTP ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("مرورگر از دریافت پاسخ جریانی (Stream) پشتیبانی نمی‌کند.");
+      }
+
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+      let fullReply = "";
+      let modelUsed = model;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("data:")) {
+            try {
+              const data = JSON.parse(trimmed.slice(5).trim());
+              if (data.error) {
+                onError(data.error);
+                return;
+              }
+              if (data.chunk) {
+                fullReply += data.chunk;
+                if (data.model) modelUsed = data.model;
+                onChunk(data.chunk, data.model);
+              }
+              if (data.done) {
+                if (data.model) modelUsed = data.model;
+                if (data.reply) fullReply = data.reply;
+                onDone(fullReply, modelUsed);
+                return;
+              }
+            } catch {
+              // ignore parse error on incomplete chunks
+            }
+          }
+        }
+      }
+      onDone(fullReply, modelUsed);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "خطا در برقراری ارتباط جریانی با سرور");
+    }
+  },
   projects: () => request<{ projects: WorkspaceProject[] }>("/api/web/workspace/projects"),
   createProject: (name: string) => request<{ id: string; name: string }>("/api/web/workspace/projects", "POST", { name }),
   attachments: (project_id: string) => request<{ attachments: WorkspaceAttachment[] }>(`/api/web/workspace/attachments?project_id=${encodeURIComponent(project_id)}`),

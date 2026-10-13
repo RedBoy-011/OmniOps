@@ -117,3 +117,41 @@ class OllamaClient:
         if not isinstance(message, dict) or not isinstance(message.get("content"), str):
             raise OllamaError("Ollama returned no assistant text")
         return message["content"]
+
+    def chat_stream(self, model: str, messages: list[dict[str, str]]):
+        if not model or not messages:
+            raise ValueError("A model and at least one message are required")
+        if any(
+            not isinstance(message, dict)
+            or message.get("role") not in {"system", "user", "assistant"}
+            or not isinstance(message.get("content"), str)
+            for message in messages
+        ):
+            raise ValueError("Messages must have a supported role and text content")
+        body = json.dumps({"model": model, "messages": messages, "stream": True}).encode("utf-8")
+        request = Request(
+            self.base_url + "/api/chat",
+            data=body,
+            headers={"Accept": "application/x-ndjson, application/json", "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with self._opener.open(request, timeout=self.chat_timeout_seconds) as response:
+                for line in response:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                        text = chunk.get("message", {}).get("content", "")
+                        if text:
+                            yield text
+                        if chunk.get("done", False):
+                            break
+                    except (ValueError, UnicodeDecodeError):
+                        continue
+        except HTTPError as exc:
+            exc.close()
+            raise OllamaError(f"Ollama request failed: HTTP {exc.code}") from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            raise OllamaError(f"Ollama request failed: {exc}") from exc
