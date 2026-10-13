@@ -168,12 +168,26 @@ export type Operations = {
 };
 
 let volatileWebToken: string | null = null;
-export function keepSessionInMemory(token: string) { volatileWebToken = token; }
-export function forgetSession() { volatileWebToken = null; }
+export function keepSessionInMemory(token: string) {
+  volatileWebToken = token;
+  try { localStorage.setItem("omniops_token", token); } catch {}
+}
+export function forgetSession() {
+  volatileWebToken = null;
+  try {
+    localStorage.removeItem("omniops_token");
+    localStorage.removeItem("omniops_user");
+    localStorage.removeItem("omniops_pending_count");
+  } catch {}
+}
+export function getStoredToken(): string | null {
+  return volatileWebToken || (typeof localStorage !== "undefined" ? localStorage.getItem("omniops_token") : null);
+}
 
 async function request<T>(path: string, method = "GET", payload?: object): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (volatileWebToken) headers.Authorization = `Bearer ${volatileWebToken}`;
+  const token = volatileWebToken || (typeof localStorage !== "undefined" ? localStorage.getItem("omniops_token") : null);
+  if (token) headers.Authorization = `Bearer ${token}`;
   let response: Response;
   try {
     response = await fetch(path, {
@@ -194,6 +208,7 @@ async function request<T>(path: string, method = "GET", payload?: object): Promi
 export const api = {
   login: (username: string, password: string) => request<LoginResult>("/api/auth/login", "POST", { username, password }),
   register: (username: string, password: string, mobile: string) => request<{ status: string; message: string }>("/api/auth/register", "POST", { username, password, mobile }),
+  me: () => request<{ user: Profile; pending_count?: number }>("/api/auth/me"),
   pending: () => request<{ users: PendingUser[] }>("/api/admin/pending"),
   operations: () => request<Operations>("/api/admin/operations"),
   webModels: () => request<{ models: string[] }>("/api/web/models"),
@@ -322,6 +337,7 @@ export const api = {
   managedNodes: () => request<{ nodes: ManagedNode[] }>("/api/admin/nodes"),
   modelPulls: () => request<{ jobs: ModelPull[] }>("/api/admin/nodes/model-pulls"),
   createModelPull: (node_id: string, model: string) => request<{ id: string; status: string }>("/api/admin/nodes/model-pulls", "POST", { node_id, model }),
+  cancelModelPull: (id: string) => request<{ status: string; id: string }>("/api/admin/nodes/model-pulls/cancel", "POST", { id }),
   deleteModel: (node_id: string, model: string) => request<{ id: string; status: string }>("/api/admin/nodes/model-delete", "POST", { node_id, model }),
   providers: () => request<{ providers: ApiProvider[] }>("/api/admin/providers"),
   saveProvider: (kind: string, api_key: string | null, network_mode: "direct" | "socks", proxy_url: string) =>

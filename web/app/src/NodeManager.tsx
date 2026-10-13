@@ -263,19 +263,34 @@ export function NodeManager() {
   const [seconds, setSeconds] = useState(0);
   const [copied, setCopied] = useState(false);
 
+  const hasActiveDownloads = jobs.some((j) => j.status === "queued" || j.status === "running");
+
+  const refreshData = async (silent = false) => {
+    try {
+      const [result, pulls] = await Promise.all([api.managedNodes(), api.modelPulls()]);
+      setNodes(result.nodes);
+      setJobs(pulls.jobs);
+      setReady(true);
+      if (!silent) setMessage("");
+    } catch {
+      if (!silent) setMessage("فهرست گره‌ها دریافت نشد.");
+    }
+  };
+
   useEffect(() => {
     if (!secure) return;
-    let active = true;
-    const refresh = async () => {
-      try {
-        const [result, pulls] = await Promise.all([api.managedNodes(), api.modelPulls()]);
-        if (active) { setNodes(result.nodes); setJobs(pulls.jobs); setReady(true); setMessage(""); }
-      } catch { if (active) setMessage("فهرست گره‌ها دریافت نشد."); }
-    };
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 15000);
-    return () => { active = false; window.clearInterval(interval); };
+    void refreshData();
   }, [secure]);
+
+  useEffect(() => {
+    if (!secure) return;
+    // When downloads are running, poll every 1.5s for real-time progress; otherwise poll every 8s
+    const intervalMs = hasActiveDownloads ? 1500 : 8000;
+    const timer = window.setInterval(() => {
+      void refreshData(true);
+    }, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [secure, hasActiveDownloads]);
 
   // Default Master URL derivation when modal opens
   const openModal = (role: "worker" | "edge" = "worker") => {
@@ -355,10 +370,53 @@ export function NodeManager() {
     setBusy(true); setMessage("");
     try {
       await api.createModelPull(node.id, selected);
-      setJobs((await api.modelPulls()).jobs);
-      setMessage(`درخواست دانلود مدل «${selected}» ثبت شد. پیشرفت هر ۱۵ ثانیه تازه می‌شود.`);
+      await refreshData(true);
+      setMessage(`درخواست دانلود مدل «${selected}» ثبت شد. پیشرفت به صورت زنده نمایش داده می‌شود.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "درخواست دانلود ناموفق بود."); }
     finally { setBusy(false); }
+  }
+
+  async function retryModelPull(node: ManagedNode, model: string, failedJobId?: string) {
+    if (busy) return;
+    setBusy(true);
+    setMessage(`در حال ارسال مجدد درخواست دانلود «${model}» روی «${node.name}»...`);
+    try {
+      if (failedJobId) {
+        await api.cancelModelPull(failedJobId).catch(() => undefined);
+      }
+      await api.createModelPull(node.id, model);
+      await refreshData(true);
+      setMessage(`🔄 دانلود مجدد مدل «${model}» آغاز شد. (ادامه دانلود از لایه‌های ذخیره‌شده)`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "تلاش مجدد دانلود ناموفق بود.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function dismissModelPull(jobId: string) {
+    if (busy) return;
+    try {
+      await api.cancelModelPull(jobId);
+      setJobs((prev) => prev.filter((j) => j.id !== jobId));
+      setMessage("گزارش وضعیت دانلود با موفقیت حذف شد.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "حذف گزارش ناموفق بود.");
+    }
+  }
+
+  async function cancelActiveModelPull(jobId: string, model: string) {
+    if (busy || !window.confirm(`آیا از لغو فرایند دانلود مدل «${model}» اطمینان دارید؟`)) return;
+    setBusy(true);
+    try {
+      await api.cancelModelPull(jobId);
+      await refreshData(true);
+      setMessage(`فرایند دانلود «${model}» لغو شد.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "لغو دانلود ناموفق بود.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function deleteModel(node: ManagedNode, selected: string) {
@@ -366,7 +424,7 @@ export function NodeManager() {
     setBusy(true); setMessage("");
     try {
       await api.deleteModel(node.id, selected);
-      setJobs((await api.modelPulls()).jobs);
+      await refreshData(true);
       setMessage("درخواست حذف ثبت شد. موجودی Worker به‌زودی تازه می‌شود.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "حذف مدل ممکن نشد."); }
     finally { setBusy(false); }
@@ -689,20 +747,106 @@ export function NodeManager() {
                             >
                               ⬇️ دریافت روی این Worker
                             </button>
+                            {hasActivePull && (
+                              <button
+                                type="button"
+                                className="quiet-button live-refresh-btn"
+                                onClick={() => void refreshData(false)}
+                                title="بروزرسانی دستی دریافت پیشرفت"
+                              >
+                                🔄 بروزرسانی زنده
+                              </button>
+                            )}
                           </div>
 
                           {jobs
                             .filter((job) => job.node_id === node.id)
-                            .slice(0, 3)
-                            .map((job) => (
-                              <div className="node-pull-status" key={job.id} role="status">
-                                <bdi dir="ltr">{job.model}</bdi> · {job.status === "queued" ? "در صف" : job.status === "running" ? (job.action === "delete" ? "در حال حذف" : "در حال دریافت") : job.status === "completed" ? (job.action === "delete" ? "حذف شد" : "آماده") : "ناموفق"}
-                                {job.action === "pull" && (
-                                  <progress max={100} value={job.progress ?? undefined} aria-label={`پیشرفت دریافت ${job.model}`} />
-                                )}
-                                <small>{job.progress == null ? "پیشرفت نامشخص" : `${job.progress.toLocaleString("fa-IR")}٪`} · {job.detail}</small>
-                              </div>
-                            ))}
+                            .slice(0, 5)
+                            .map((job) => {
+                              const isPull = job.action === "pull";
+                              const isRunning = job.status === "running";
+                              const isQueued = job.status === "queued";
+                              const isCompleted = job.status === "completed";
+                              const isFailed = job.status === "failed";
+
+                              return (
+                                <div
+                                  className={`node-pull-status ${isRunning ? "status-running" : isFailed ? "status-failed" : isCompleted ? "status-completed" : "status-queued"}`}
+                                  key={job.id}
+                                  role="status"
+                                >
+                                  <div className="pull-status-top">
+                                    <div className="pull-status-info">
+                                      <bdi dir="ltr" className="pull-model-tag">{job.model}</bdi>
+                                      <span className="pull-status-badge">
+                                        {isQueued && "⏳ در صف شروع"}
+                                        {isRunning && (
+                                          <span className="live-pulse">
+                                            <span className="pulse-dot" />
+                                            {isPull ? "⚡ در حال دانلود زنده..." : "🗑️ در حال حذف..."}
+                                          </span>
+                                        )}
+                                        {isCompleted && "✅ آماده و تکمیل شد"}
+                                        {isFailed && "⚠️ دانلود متوقف / ناموفق"}
+                                      </span>
+                                    </div>
+                                    <div className="pull-status-actions">
+                                      {isFailed && isPull && (
+                                        <button
+                                          type="button"
+                                          className="retry-pull-btn"
+                                          disabled={busy}
+                                          onClick={() => void retryModelPull(node, job.model, job.id)}
+                                          title="تلاش مجدد و ادامه دانلود از لایه‌های موجود"
+                                        >
+                                          🔄 ادامه و تلاش مجدد
+                                        </button>
+                                      )}
+                                      {(isRunning || isQueued) && (
+                                        <button
+                                          type="button"
+                                          className="cancel-pull-btn"
+                                          disabled={busy}
+                                          onClick={() => void cancelActiveModelPull(job.id, job.model)}
+                                          title="لغو این فرایند"
+                                        >
+                                          ⏹️ لغو
+                                        </button>
+                                      )}
+                                      {(isCompleted || isFailed) && (
+                                        <button
+                                          type="button"
+                                          className="dismiss-pull-btn"
+                                          disabled={busy}
+                                          onClick={() => void dismissModelPull(job.id)}
+                                          title="حذف این وضعیت"
+                                        >
+                                          ✕ بستن
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {isPull && (isRunning || isQueued || job.progress != null) && (
+                                    <div className="pull-progress-wrap">
+                                      <progress
+                                        max={100}
+                                        value={job.progress ?? undefined}
+                                        className={`pull-progress-bar ${isRunning ? "animating" : ""}`}
+                                        aria-label={`پیشرفت دریافت ${job.model}`}
+                                      />
+                                      <span className="pull-percent-text">
+                                        {job.progress != null ? `${job.progress.toLocaleString("fa-IR")}٪` : (isRunning ? "در حال دریافت..." : "در انتظار...")}
+                                      </span>
+                                    </div>
+                                  )}
+
+                                  <div className="pull-detail-line">
+                                    <small>{job.detail || (isQueued ? "در انتظار پاسخ Worker..." : "")}</small>
+                                  </div>
+                                </div>
+                              );
+                            })}
                         </div>
                       );
                     })()}

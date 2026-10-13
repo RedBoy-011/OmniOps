@@ -385,7 +385,7 @@ def make_server(
             if path not in {"/api/nodes/enroll", "/api/nodes/heartbeat", "/api/nodes/rotate",
                             "/api/admin/nodes/grants", "/api/admin/nodes/grants/revoke",
                             "/api/admin/nodes/revoke", "/api/admin/nodes/delete", "/api/admin/nodes/token",
-                            "/api/admin/nodes/model-pulls", "/api/admin/nodes/model-delete",
+                            "/api/admin/nodes/model-pulls", "/api/admin/nodes/model-pulls/cancel", "/api/admin/nodes/model-delete",
                             "/api/nodes/model-pulls/claim", "/api/nodes/model-pulls/report"}:
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
@@ -408,6 +408,8 @@ def make_server(
                     self._send(201, nodes.issue(principal, body.get("role")))
                 elif path == "/api/admin/nodes/model-pulls":
                     self._send(201, nodes.queue_model_pull(principal, body.get("node_id"), body.get("model")))
+                elif path == "/api/admin/nodes/model-pulls/cancel":
+                    self._send(200, nodes.cancel_model_pull(principal, body.get("id")))
                 elif path == "/api/admin/nodes/model-delete":
                     self._send(201, nodes.queue_model_delete(principal, body.get("node_id"), body.get("model")))
                 elif path == "/api/nodes/model-pulls/claim":

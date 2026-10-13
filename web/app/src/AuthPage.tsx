@@ -6,9 +6,14 @@ type AuthPageProps = { onLogin: (result: LoginResult) => void };
 
 export function AuthPage({ onLogin }: AuthPageProps) {
   const [mode, setMode] = useState<"login" | "register">("login");
-  const [username, setUsername] = useState("");
+  const [username, setUsername] = useState(() => {
+    return (typeof localStorage !== "undefined" && localStorage.getItem("omniops_saved_username")) || "";
+  });
   const [password, setPassword] = useState("");
   const [mobile, setMobile] = useState("");
+  const [rememberMe, setRememberMe] = useState(() => {
+    return typeof localStorage !== "undefined" && localStorage.getItem("omniops_remember_me") === "true";
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [completed, setCompleted] = useState("");
@@ -28,6 +33,17 @@ export function AuthPage({ onLogin }: AuthPageProps) {
     setCompleted("");
     try {
       if (mode === "login") {
+        if (rememberMe) {
+          try {
+            localStorage.setItem("omniops_remember_me", "true");
+            localStorage.setItem("omniops_saved_username", username.trim());
+          } catch {}
+        } else {
+          try {
+            localStorage.removeItem("omniops_remember_me");
+            localStorage.removeItem("omniops_saved_username");
+          } catch {}
+        }
         onLogin(await api.login(username.trim(), password));
       } else {
         const result = await api.register(username.trim(), password, mobile.trim());
@@ -59,7 +75,19 @@ export function AuthPage({ onLogin }: AuthPageProps) {
                     <input id="login-username" className="form-input" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
                     <label className="form-label" htmlFor="login-password">رمز عبور</label>
                     <input id="login-password" className="form-input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-                    <button className="submit-button" disabled={busy}>{busy ? "در حال بررسی…" : "ورود امن"}</button>
+                    <div className="remember-me-container">
+                      <label className="remember-me-label" htmlFor="login-remember-me">
+                        <input
+                          id="login-remember-me"
+                          type="checkbox"
+                          className="remember-me-checkbox"
+                          checked={rememberMe}
+                          onChange={(e) => setRememberMe(e.target.checked)}
+                        />
+                        <span>مرا به خاطر بسپار (ذخیره مشخصات ورود)</span>
+                      </label>
+                    </div>
+                    <button className="submit-button" disabled={busy}>{busy ? "در حال بررسی…" : "ورود به سامانه"}</button>
                   </form>
                 </motion.div>
               )}

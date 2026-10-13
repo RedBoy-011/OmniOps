@@ -113,6 +113,17 @@ class NodeRegistryTests(unittest.TestCase):
         self.assertEqual(self.nodes.queue_model_pull(self.admin, worker['id'], 'second:latest')['status'], 'queued')
         self.assertEqual(queued['id'], job['id'])
 
+    def test_cancel_and_dismiss_model_pull(self):
+        worker = self.nodes.enroll(self.nodes.issue(self.admin, 'worker')['grant'], 'worker-cancel')
+        self.nodes.heartbeat(worker['id'], worker['credential'], {})
+        queued = self.nodes.queue_model_pull(self.admin, worker['id'], 'llama3.2:1b')
+        self.assertEqual(len(self.nodes.list_model_pulls(self.admin)), 1)
+        res = self.nodes.cancel_model_pull(self.admin, queued['id'])
+        self.assertEqual(res['status'], 'ok')
+        self.assertEqual(len(self.nodes.list_model_pulls(self.admin)), 0)
+        with self.assertRaises(IdentityError):
+            self.nodes.cancel_model_pull(self.admin, 12345)
+
     def test_model_delete_queue_claim_and_audit(self):
         worker = self.nodes.enroll(self.nodes.issue(self.admin, 'worker')['grant'], 'worker-delete')
         self.nodes.heartbeat(worker['id'], worker['credential'], {'models': ['scratch:latest']})

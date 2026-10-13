@@ -229,6 +229,16 @@ class NodeRegistry:
                               "FROM model_pulls ORDER BY created_at DESC LIMIT 100").fetchall()
             return [dict(row) for row in rows]
 
+    def cancel_model_pull(self, principal, job_id):
+        self._admin(principal)
+        if not isinstance(job_id, str):
+            raise IdentityError("Invalid job ID", 400)
+        with self.identity._lock, self.identity._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("DELETE FROM model_pulls WHERE id=?", (job_id,))
+            self.identity._audit(db, principal["id"], "model_pull_dismissed", job_id)
+        return {"status": "ok", "id": job_id}
+
     def claim_model_pull(self, node_id, credential):
         with self.identity._lock, self.identity._db() as db:
             db.execute('BEGIN IMMEDIATE')

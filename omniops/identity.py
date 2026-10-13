@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
-WEB_TTL = 3600
+WEB_TTL = 30 * 86400
 AGENT_TTL = 8 * 3600
 AGENT_LEASE = 50
 PIN_TTL = 120
