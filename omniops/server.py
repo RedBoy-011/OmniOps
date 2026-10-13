@@ -114,6 +114,10 @@ def make_server(
                 fcontent = attached.get('content')[:16000]
                 effective_prompt = f"[پیوست فایل پروژه: {fname}]\n```\n{fcontent}\n```\n\n{prompt.strip()}"
 
+            session_id = payload.get('session_id')
+            if session_id is not None and not isinstance(session_id, str):
+                raise IdentityError('Invalid session ID')
+
             with active_inferences_lock:
                 if active_inferences[0] >= max_concurrent_inferences:
                     raise IdentityError('ظرفیت پردازش همزمان مدل تکمیل است؛ لطفاً چند لحظه بعد مجدداً تلاش کنید.', 429)
@@ -121,7 +125,7 @@ def make_server(
             try:
                 def completed(result):
                     if save_history and memory is not None:
-                        memory.remember_chat(principal, prompt.strip(), result['reply'], result['model'])
+                        memory.remember_chat(principal, prompt.strip(), result['reply'], result['model'], session_id=session_id)
                     return result
 
                 def external(model):
@@ -189,6 +193,10 @@ def make_server(
                 fcontent = attached.get('content')[:16000]
                 effective_prompt = f"[پیوست فایل پروژه: {fname}]\n```\n{fcontent}\n```\n\n{prompt.strip()}"
 
+            session_id = payload.get('session_id')
+            if session_id is not None and not isinstance(session_id, str):
+                raise IdentityError('Invalid session ID')
+
             with active_inferences_lock:
                 if active_inferences[0] >= max_concurrent_inferences:
                     self._send(429, {'error': {'message': 'ظرفیت پردازش همزمان مدل تکمیل است؛ لطفاً چند لحظه بعد مجدداً تلاش کنید.'}})
@@ -228,7 +236,7 @@ def make_server(
                         send_event({'chunk': reply, 'model': model_used})
                         send_event({'done': True, 'model': model_used, 'reply': reply})
                         if save_history and memory is not None:
-                            memory.remember_chat(principal, prompt.strip(), reply, model_used)
+                            memory.remember_chat(principal, prompt.strip(), reply, model_used, session_id=session_id)
                     except Exception as exc:
                         send_event({'error': str(exc)})
                     return
@@ -263,7 +271,7 @@ def make_server(
                     model_name = f'ollama/{chosen_candidate}'
                     send_event({'done': True, 'model': model_name, 'reply': full_reply})
                     if save_history and memory is not None:
-                        memory.remember_chat(principal, prompt.strip(), full_reply, model_name)
+                        memory.remember_chat(principal, prompt.strip(), full_reply, model_name, session_id=session_id)
                 else:
                     if requested == 'auto' and allow_external and providers is not None:
                         fallback_m = providers.fallback_model(principal)
@@ -274,7 +282,7 @@ def make_server(
                                 send_event({'chunk': reply, 'model': fallback_m})
                                 send_event({'done': True, 'model': fallback_m, 'reply': reply})
                                 if save_history and memory is not None:
-                                    memory.remember_chat(principal, prompt.strip(), reply, fallback_m)
+                                    memory.remember_chat(principal, prompt.strip(), reply, fallback_m, session_id=session_id)
                                 return
                             except Exception as exc:
                                 send_event({'error': str(exc)})
@@ -461,6 +469,8 @@ def make_server(
             if path not in {
                 "/api/auth/register", "/api/auth/login", "/api/auth/logout",
                 "/api/agent/pairing", "/api/agent/redeem", "/api/agent/heartbeat", "/api/agent/logout", "/api/agent/chat", "/api/web/chat",
+                "/api/chat/sessions", "/api/chat/sessions/rename", "/api/chat/sessions/delete",
+                "/api/agent/sessions", "/api/agent/sessions/rename", "/api/agent/sessions/delete",
                 "/api/chat/history/clear", "/api/chat/memory/add", "/api/chat/memory/remove",
                 "/api/agent/history/clear", "/api/agent/memory/add", "/api/agent/memory/remove",
                 "/api/web/workspace/projects", "/api/agent/workspace/projects",
@@ -534,8 +544,14 @@ def make_server(
                     self._send(200, {"url": candidate.base_url, "status": "up", "models": [
                         {"id": f"ollama/{entry.name}", "size_bytes": entry.size_bytes} for entry in models
                     ]})
+                elif path in ('/api/chat/sessions', '/api/agent/sessions'):
+                    self._send(201, {'session': memory.create_session(principal, payload.get('title'))})
+                elif path in ('/api/chat/sessions/rename', '/api/agent/sessions/rename'):
+                    self._send(200, memory.rename_session(principal, payload.get('id'), payload.get('title')))
+                elif path in ('/api/chat/sessions/delete', '/api/agent/sessions/delete'):
+                    self._send(200, memory.delete_session(principal, payload.get('id')))
                 elif path in ('/api/chat/history/clear', '/api/agent/history/clear'):
-                    memory.delete_history(principal)
+                    memory.delete_history(principal, session_id=payload.get('session_id'))
                     self._send(200, {'status': 'cleared'})
                 elif path in ('/api/chat/memory/add', '/api/agent/memory/add'):
                     self._send(201, {'id': memory.add_note(principal, payload.get('content'))})
@@ -729,13 +745,18 @@ def make_server(
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 return
-            if self.path in ('/api/chat/history', '/api/chat/memory', '/api/agent/history', '/api/agent/memory'):
-                principal = self._principal('agent' if self.path.startswith('/api/agent/') else 'web')
+            if parsed.path in ('/api/chat/sessions', '/api/agent/sessions',
+                              '/api/chat/history', '/api/chat/memory',
+                              '/api/agent/history', '/api/agent/memory'):
+                principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
                 if principal is None:
                     return
                 try:
-                    if self.path.endswith('/history'):
-                        self._send(200, {'entries': memory.history(principal)})
+                    if parsed.path.endswith('/sessions'):
+                        self._send(200, {'sessions': memory.list_sessions(principal)})
+                    elif parsed.path.endswith('/history'):
+                        sess_id = parse_qs(parsed.query).get('session_id', [None])[0]
+                        self._send(200, {'entries': memory.history(principal, session_id=sess_id)})
                     else:
                         self._send(200, {'notes': memory.notes(principal)})
                 except IdentityError as exc:

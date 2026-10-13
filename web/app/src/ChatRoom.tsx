@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { api, type MemoryNote } from "./api";
+import { api, type MemoryNote, type ChatSession } from "./api";
 import { FilePreviewPanel } from "./components/FilePreviewPanel";
 import { MarkdownMessage } from "./components/MarkdownMessage";
 
@@ -18,7 +18,9 @@ export function ChatRoom() {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
-  const [saveHistory, setSaveHistory] = useState(false);
+  const [saveHistory, setSaveHistory] = useState(true);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [notes, setNotes] = useState<MemoryNote[]>([]);
   const [noteDraft, setNoteDraft] = useState("");
   const [memoryBusy, setMemoryBusy] = useState(false);
@@ -46,16 +48,33 @@ export function ChatRoom() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : "فهرست مدل‌ها در دسترس نیست."); }
   }
 
-  useEffect(() => { void refresh(); void refreshNotes(); }, []);
+  useEffect(() => {
+    void refresh();
+    void refreshNotes();
+    void refreshSessions();
+  }, []);
 
   async function refreshNotes() {
     try { setNotes((await api.memoryNotes()).notes); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "حافظه بارگذاری نشد."); }
   }
 
-  async function loadHistory() {
+  async function refreshSessions() {
     try {
-      const result = await api.chatHistory();
+      const res = await api.chatSessions();
+      setSessions(res.sessions);
+      if (res.sessions.length > 0 && !currentSessionId) {
+        setCurrentSessionId(res.sessions[0].id);
+        void loadHistory(res.sessions[0].id);
+      }
+    } catch {
+      // ignore session loading error
+    }
+  }
+
+  async function loadHistory(sessionId?: string | null) {
+    try {
+      const result = await api.chatHistory(sessionId || undefined);
       setEntries(result.entries.flatMap(item => [
         { role: "user" as const, text: item.prompt, time: new Date(item.created_at * 1000).toLocaleString("fa-IR") },
         { role: "assistant" as const, text: item.reply, model: item.model, time: new Date(item.created_at * 1000).toLocaleString("fa-IR") },
@@ -64,9 +83,54 @@ export function ChatRoom() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : "تاریخچه بارگذاری نشد."); }
   }
 
+  async function createNewSession(customTitle?: string) {
+    try {
+      const res = await api.createChatSession(customTitle);
+      const newSess = res.session;
+      setSessions(prev => [newSess, ...prev]);
+      setCurrentSessionId(newSess.id);
+      setEntries([]);
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "ایجاد گفتگوی جدید با خطا مواجه شد.");
+    }
+  }
+
+  async function switchSession(id: string) {
+    if (id === currentSessionId) return;
+    setCurrentSessionId(id);
+    void loadHistory(id);
+  }
+
+  async function removeSession(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!window.confirm("این موضوع گفتگو و پیام‌های آن حذف شوند؟")) return;
+    try {
+      await api.deleteChatSession(id);
+      const updated = sessions.filter(s => s.id !== id);
+      setSessions(updated);
+      if (currentSessionId === id) {
+        if (updated.length > 0) {
+          setCurrentSessionId(updated[0].id);
+          void loadHistory(updated[0].id);
+        } else {
+          setCurrentSessionId(null);
+          setEntries([]);
+        }
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "خطا در حذف گفتگو");
+    }
+  }
+
   async function clearHistory() {
-    if (!window.confirm("تاریخچهٔ ذخیره‌شدهٔ همین حساب پاک شود؟")) return;
-    try { await api.clearChatHistory(); setEntries([]); setError(""); }
+    if (!window.confirm("پیام‌های این گفتگو پاک شوند؟")) return;
+    try {
+      await api.clearChatHistory(currentSessionId || undefined);
+      setEntries([]);
+      setError("");
+      void refreshSessions();
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : "عملیات روی حافظه انجام نشد."); }
   }
 
@@ -135,6 +199,7 @@ export function ChatRoom() {
       externalConsent,
       saveHistory,
       fileToAttach ? { name: fileToAttach.name, content: fileToAttach.content || "" } : null,
+      currentSessionId,
       (chunk, model) => {
         setEntries((before) => {
           if (before.length === 0) return before;
@@ -165,6 +230,7 @@ export function ChatRoom() {
           return next;
         });
         setBusy(false);
+        void refreshSessions();
       },
       (errMsg) => {
         setError(errMsg);
@@ -262,6 +328,54 @@ export function ChatRoom() {
           </div>
         </div>
 
+        {/* نوار مدیریت تاپیک‌ها و گفتگوهای چندگانه */}
+        <div className="chat-sessions-bar" aria-label="موضوعات گفتگو">
+          <button
+            type="button"
+            className="new-session-button"
+            onClick={() => void createNewSession()}
+            disabled={busy}
+            title="شروع یک گفتگوی تازه"
+          >
+            <span className="plus-icon">+</span>
+            <span>گفتگوی جدید</span>
+          </button>
+          <div className="chat-sessions-scroll">
+            {sessions.length === 0 ? (
+              <span style={{ fontSize: "11px", color: "#9ca3af", padding: "0 8px" }}>گفتگوی فعالی ثبت نشده است</span>
+            ) : (
+              sessions.map((sess) => {
+                const isActive = sess.id === currentSessionId;
+                return (
+                  <div
+                    key={sess.id}
+                    className={`session-pill ${isActive ? "active" : ""}`}
+                    onClick={() => void switchSession(sess.id)}
+                    role="button"
+                    tabIndex={0}
+                    title={sess.title}
+                  >
+                    <span className="session-pill-icon">{isActive ? "💬" : "🗨️"}</span>
+                    <span className="session-pill-title">{sess.title}</span>
+                    {sess.message_count > 0 && (
+                      <span className="session-pill-count">{sess.message_count}</span>
+                    )}
+                    <button
+                      type="button"
+                      className="session-delete-btn"
+                      onClick={(e) => void removeSession(sess.id, e)}
+                      title="حذف این گفتگو"
+                      aria-label={`حذف گفتگوی ${sess.title}`}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
     {/* بخش رضایت API ابری */}
     {externalModels.length > 0 && (
       <label className="chat-external-consent">
@@ -325,7 +439,7 @@ export function ChatRoom() {
           />{" "}
           ذخیرهٔ گفتگوهای بعدی در حساب من
         </label>
-        <button type="button" className="quiet-button" onClick={() => void loadHistory()}>
+        <button type="button" className="quiet-button" onClick={() => void loadHistory(currentSessionId)}>
           نمایش تاریخچه
         </button>
         <button type="button" className="quiet-button danger" onClick={() => void clearHistory()}>

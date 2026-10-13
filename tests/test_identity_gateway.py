@@ -357,6 +357,32 @@ class WorkerEndpointTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertIn("hardware", ops)
 
+    def test_chat_sessions_endpoints(self):
+        admin = self.store.login("root-admin", "a very strong admin password")["token"]
+        code, sess_res = self.call("POST", "/api/chat/sessions", {"title": "تست چند نشستی"}, token=admin)
+        self.assertEqual(code, 201)
+        sess_id = sess_res["session"]["id"]
+        self.assertEqual(sess_res["session"]["title"], "تست چند نشستی")
+
+        code, list_res = self.call("GET", "/api/chat/sessions", token=admin)
+        self.assertEqual(code, 200)
+        self.assertTrue(any(s["id"] == sess_id for s in list_res["sessions"]))
+
+        code, chat_res = self.call("POST", "/api/web/chat", {"message": "پیام ۱", "save_history": True, "session_id": sess_id}, token=admin)
+        self.assertEqual(code, 200)
+
+        code, hist_res = self.call("GET", f"/api/chat/history?session_id={sess_id}", token=admin)
+        self.assertEqual(code, 200)
+        self.assertTrue(any(h["prompt"] == "پیام ۱" for h in hist_res["entries"]))
+
+        code, rename_res = self.call("POST", "/api/chat/sessions/rename", {"id": sess_id, "title": "عنوان جدید"}, token=admin)
+        self.assertEqual(code, 200)
+        self.assertEqual(rename_res["title"], "عنوان جدید")
+
+        code, del_res = self.call("POST", "/api/chat/sessions/delete", {"id": sess_id}, token=admin)
+        self.assertEqual(code, 200)
+        self.assertEqual(del_res["status"], "deleted")
+
 
 if __name__ == "__main__":
     unittest.main()

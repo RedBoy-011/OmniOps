@@ -6,7 +6,8 @@ export type Profile = {
   capabilities: string[];
 };
 
-export type ChatHistory = { id: string; prompt: string; reply: string; model: string; created_at: number };
+export type ChatSession = { id: string; title: string; created_at: number; updated_at: number; message_count: number };
+export type ChatHistory = { id: string; prompt: string; reply: string; model: string; created_at: number; session_id?: string | null };
 export type MemoryNote = { id: string; content: string; created_at: number };
 export type WorkspaceProject = { id: string; name: string; created_at: number };
 export type WorkspaceAttachment = { id: string; project_id: string; name: string; mime: string; size: number; created_at: number };
@@ -137,19 +138,34 @@ export const api = {
   pending: () => request<{ users: PendingUser[] }>("/api/admin/pending"),
   operations: () => request<Operations>("/api/admin/operations"),
   webModels: () => request<{ models: string[] }>("/api/web/models"),
-  webChat: (message: string, model: string, allow_external = false, save_history = false, attached_file?: { name: string; content: string } | null) =>
-    request<{ reply: string; model: string }>("/api/web/chat", "POST", { message, model, allow_external, save_history, attached_file }),
+  webChat: (
+    message: string,
+    model: string,
+    allow_external = false,
+    save_history = false,
+    attached_file?: { name: string; content: string } | null,
+    session_id?: string | null
+  ) =>
+    request<{ reply: string; model: string }>("/api/web/chat", "POST", {
+      message,
+      model,
+      allow_external,
+      save_history,
+      attached_file,
+      session_id,
+    }),
   webChatStream: async (
     message: string,
     model: string,
     allow_external: boolean,
     save_history: boolean,
     attached_file: { name: string; content: string } | null,
+    session_id: string | null | undefined,
     onChunk: (chunk: string, model?: string) => void,
     onDone: (fullReply: string, model?: string) => void,
     onError: (err: string) => void
   ) => {
-    const token = localStorage.getItem("omniops_token") || "";
+    const token = localStorage.getItem("omniops_token") || volatileWebToken || "";
     try {
       const response = await fetch("/api/web/chat/stream", {
         method: "POST",
@@ -163,6 +179,7 @@ export const api = {
           allow_external,
           save_history,
           attached_file,
+          session_id,
         }),
       });
 
@@ -228,8 +245,14 @@ export const api = {
   taskDrafts: () => request<{ tasks: TaskDraft[] }>("/api/web/workspace/tasks"),
   createTaskDraft: (project_id: string, description: string) => request<{ id: string; status: string }>("/api/web/workspace/tasks", "POST", { project_id, description }),
   cancelTaskDraft: (id: string) => request<{ status: string }>("/api/web/workspace/tasks/cancel", "POST", { id }),
-  chatHistory: () => request<{ entries: ChatHistory[] }>("/api/chat/history"),
-  clearChatHistory: () => request<{ status: string }>("/api/chat/history/clear", "POST", {}),
+  chatHistory: (sessionId?: string) =>
+    request<{ entries: ChatHistory[] }>(sessionId ? `/api/chat/history?session_id=${encodeURIComponent(sessionId)}` : "/api/chat/history"),
+  clearChatHistory: (sessionId?: string) =>
+    request<{ status: string }>("/api/chat/history/clear", "POST", sessionId ? { session_id: sessionId } : {}),
+  chatSessions: () => request<{ sessions: ChatSession[] }>("/api/chat/sessions"),
+  createChatSession: (title?: string) => request<{ session: ChatSession }>("/api/chat/sessions", "POST", { title }),
+  renameChatSession: (id: string, title: string) => request<{ id: string; title: string }>("/api/chat/sessions/rename", "POST", { id, title }),
+  deleteChatSession: (id: string) => request<{ status: string; id: string }>("/api/chat/sessions/delete", "POST", { id }),
   memoryNotes: () => request<{ notes: MemoryNote[] }>("/api/chat/memory"),
   addMemory: (content: string) => request<{ id: string }>("/api/chat/memory/add", "POST", { content }),
   removeMemory: (id: string) => request<{ status: string }>("/api/chat/memory/remove", "POST", { id }),

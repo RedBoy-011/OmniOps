@@ -2245,3 +2245,151 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
   color: #f87171 !important;
 }
 
+/* =========================================================================
+   Chat Sessions Bar (Multi-Session Topics & Switcher)
+   ========================================================================= */
+
+.chat-sessions-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(22, 14, 27, 0.65);
+  border: 1px solid rgba(255, 191, 209, 0.16);
+  border-radius: 14px;
+  margin-bottom: 12px;
+  backdrop-filter: blur(8px);
+}
+
+.new-session-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, #a33567, #7f2b52);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 10px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(163, 53, 103, 0.3);
+}
+
+.new-session-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #be3e78, #943260);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(163, 53, 103, 0.45);
+}
+
+.new-session-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.new-session-button .plus-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.chat-sessions-scroll {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 3px 2px;
+  scrollbar-width: thin;
+  scrollbar-color: #a33567 transparent;
+  flex: 1;
+}
+
+.chat-sessions-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.chat-sessions-scroll::-webkit-scrollbar-thumb {
+  background: #a33567;
+  border-radius: 4px;
+}
+
+.session-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #d1d5db;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 220px;
+}
+
+.session-pill:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+.session-pill.active {
+  background: linear-gradient(135deg, rgba(163, 53, 103, 0.35), rgba(74, 28, 49, 0.45));
+  border-color: #ff94b8;
+  color: #ffffff;
+  box-shadow: 0 2px 10px rgba(163, 53, 103, 0.25);
+  font-weight: 600;
+}
+
+.session-pill-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.session-pill-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-pill-count {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fce7f3;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 12px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.session-pill.active .session-pill-count {
+  background: #a33567;
+  color: #fff;
+}
+
+.session-delete-btn {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+  margin-right: 2px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.session-delete-btn:hover {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.15);
+}
+
+

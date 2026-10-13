@@ -1,4 +1,4 @@
-﻿import tempfile
+import tempfile
 import unittest
 from pathlib import Path
 from omniops.identity import IdentityStore, IdentityError
@@ -34,3 +34,32 @@ class ProfileMemoryTests(unittest.TestCase):
             self.memory.add_note({'id': self.one['id'], 'capabilities': []}, 'private')
         with self.assertRaises(IdentityError):
             self.memory.add_note(self.one, 'x' * 501)
+
+    def test_multi_session_creation_isolation_and_rename(self):
+        s1 = self.memory.create_session(self.one, "پروژه پایتون")
+        s2 = self.memory.create_session(self.one, "دیباگ داکر")
+
+        sessions = self.memory.list_sessions(self.one)
+        self.assertEqual(len(sessions), 2)
+        self.assertEqual({s["title"] for s in sessions}, {"پروژه پایتون", "دیباگ داکر"})
+
+        self.memory.remember_chat(self.one, "prompt 1", "reply 1", "ollama/test", session_id=s1["id"])
+        self.memory.remember_chat(self.one, "prompt 2", "reply 2", "ollama/test", session_id=s2["id"])
+
+        hist1 = self.memory.history(self.one, session_id=s1["id"])
+        hist2 = self.memory.history(self.one, session_id=s2["id"])
+        self.assertEqual(len(hist1), 1)
+        self.assertEqual(hist1[0]["prompt"], "prompt 1")
+        self.assertEqual(len(hist2), 1)
+        self.assertEqual(hist2[0]["prompt"], "prompt 2")
+
+        renamed = self.memory.rename_session(self.one, s1["id"], "پروژه پایتون پیشرفته")
+        self.assertEqual(renamed["title"], "پروژه پایتون پیشرفته")
+
+        self.memory.delete_session(self.one, s1["id"])
+        remaining = self.memory.list_sessions(self.one)
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0]["id"], s2["id"])
+        self.assertEqual(len(self.memory.history(self.one, session_id=s1["id"])), 0)
+        self.assertEqual(len(self.memory.history(self.one, session_id=s2["id"])), 1)
+
