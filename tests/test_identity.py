@@ -128,6 +128,36 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(login["user"]["id"], user_id)
         self.assertEqual(login["user"]["role"], "superadmin")
 
+    def test_database_backup_and_restore_cycle(self):
+        admin_principal = {"id": self.admin_id, "role": "superadmin"}
+        member_principal = {"id": "member-id", "role": "member"}
+
+        # Members cannot create backups
+        with self.assertRaises(IdentityError) as err:
+            self.store.create_backup(member_principal)
+        self.assertEqual(err.exception.status, 403)
+
+        # Superadmin can create backup
+        backup_res = self.store.create_backup(admin_principal)
+        self.assertEqual(backup_res["status"], "created")
+        self.assertTrue(backup_res["filename"].startswith("identity-"))
+        self.assertGreater(backup_res["size_bytes"], 0)
+
+        # List backups
+        backups = self.store.list_backups(admin_principal)
+        self.assertGreaterEqual(len(backups), 1)
+        self.assertEqual(backups[0]["filename"], backup_res["filename"])
+
+        # Path validation and traversal prevention
+        target_path = self.store.get_backup_path(admin_principal, backup_res["filename"])
+        self.assertTrue(target_path.is_file())
+
+        with self.assertRaises(IdentityError):
+            self.store.get_backup_path(admin_principal, "../malicious.db")
+        with self.assertRaises(IdentityError):
+            self.store.get_backup_path(admin_principal, "identity-nonexistent.db")
+
 
 if __name__ == "__main__":
     unittest.main()
+

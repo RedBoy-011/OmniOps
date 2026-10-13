@@ -113,6 +113,16 @@ def make_server(
                 fname = attached.get('name')[:120]
                 fcontent = attached.get('content')[:16000]
                 effective_prompt = f"[پیوست فایل پروژه: {fname}]\n```\n{fcontent}\n```\n\n{prompt.strip()}"
+            if payload.get('include_system_context', False) or telemetry.is_diagnostic_query(prompt):
+                try:
+                    c = current_ollama()
+                    model_names = [m.name for m in c.list_chat_models()]
+                except Exception:
+                    model_names = []
+                repo_root = Path(__file__).resolve().parent.parent
+                sys_metrics = telemetry.get_system_metrics(repo_root=repo_root)
+                sys_context = telemetry.format_system_context(sys_metrics, model_names)
+                effective_prompt = f"{sys_context}\n\n{effective_prompt}"
 
             session_id = payload.get('session_id')
             if session_id is not None and not isinstance(session_id, str):
@@ -192,6 +202,16 @@ def make_server(
                 fname = attached.get('name')[:120]
                 fcontent = attached.get('content')[:16000]
                 effective_prompt = f"[پیوست فایل پروژه: {fname}]\n```\n{fcontent}\n```\n\n{prompt.strip()}"
+            if payload.get('include_system_context', False) or telemetry.is_diagnostic_query(prompt):
+                try:
+                    c = current_ollama()
+                    model_names = [m.name for m in c.list_chat_models()]
+                except Exception:
+                    model_names = []
+                repo_root = Path(__file__).resolve().parent.parent
+                sys_metrics = telemetry.get_system_metrics(repo_root=repo_root)
+                sys_context = telemetry.format_system_context(sys_metrics, model_names)
+                effective_prompt = f"{sys_context}\n\n{effective_prompt}"
 
             session_id = payload.get('session_id')
             if session_id is not None and not isinstance(session_id, str):
@@ -480,6 +500,7 @@ def make_server(
                 "/api/web/workspace/attachments/remove", "/api/agent/workspace/attachments/remove",
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/test-socks", "/api/admin/providers/enable", "/api/admin/providers/price",
+                "/api/admin/system/backups",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
@@ -544,6 +565,10 @@ def make_server(
                     self._send(200, {"url": candidate.base_url, "status": "up", "models": [
                         {"id": f"ollama/{entry.name}", "size_bytes": entry.size_bytes} for entry in models
                     ]})
+                elif path == "/api/admin/system/backups":
+                    if principal["role"] != "superadmin":
+                        raise IdentityError("Superadmin access required", 403)
+                    self._send(201, store.create_backup(principal))
                 elif path in ('/api/chat/sessions', '/api/agent/sessions'):
                     self._send(201, {'session': memory.create_session(principal, payload.get('title'))})
                 elif path in ('/api/chat/sessions/rename', '/api/agent/sessions/rename'):
@@ -857,6 +882,37 @@ def make_server(
                 )
                 self._send(200, metrics)
                 return
+            if parsed.path in ('/api/admin/system/backups', '/api/admin/system/backups/download'):
+                principal = self._principal()
+                if principal is None:
+                    return
+                if principal["role"] != "superadmin":
+                    self._send(403, {"error": {"message": "Superadmin access required"}})
+                    return
+                if identity_store is None:
+                    self._send(503, {"error": {"message": "Identity service is not configured"}})
+                    return
+                if parsed.path == '/api/admin/system/backups':
+                    try:
+                        self._send(200, {"backups": identity_store.list_backups(principal)})
+                    except IdentityError as exc:
+                        self._send(exc.status, {"error": {"message": str(exc)}})
+                    return
+                if parsed.path == '/api/admin/system/backups/download':
+                    filename = parse_qs(parsed.query).get('filename', [''])[0]
+                    try:
+                        target = identity_store.get_backup_path(principal, filename)
+                        raw = target.read_bytes()
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'application/octet-stream')
+                        self.send_header('Content-Length', str(len(raw)))
+                        self.send_header('Content-Disposition', f'attachment; filename="{target.name}"')
+                        self.send_header('Cache-Control', 'no-store')
+                        self.end_headers()
+                        self.wfile.write(raw)
+                    except IdentityError as exc:
+                        self._send(exc.status, {"error": {"message": str(exc)}})
+                    return
             if self.path == "/api/admin/operations":
                 principal = self._principal()
                 if principal is None:

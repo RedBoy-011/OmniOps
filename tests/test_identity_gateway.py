@@ -383,6 +383,29 @@ class WorkerEndpointTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertEqual(del_res["status"], "deleted")
 
+    def test_backup_endpoints(self):
+        admin = self.store.login("root-admin", "a very strong admin password")["token"]
+
+        # Create backup via POST
+        code, create_res = self.call("POST", "/api/admin/system/backups", {}, token=admin)
+        self.assertEqual(code, 201)
+        self.assertEqual(create_res["status"], "created")
+        filename = create_res["filename"]
+
+        # List backups via GET
+        code, list_res = self.call("GET", "/api/admin/system/backups", token=admin)
+        self.assertEqual(code, 200)
+        self.assertTrue(any(b["filename"] == filename for b in list_res["backups"]))
+
+        # Download backup
+        req = Request(f"{self.root}/api/admin/system/backups/download?filename={filename}", headers={"Authorization": f"Bearer {admin}"})
+        with self.opener.open(req, timeout=3) as res:
+            self.assertEqual(res.status, 200)
+            self.assertEqual(res.headers.get("Content-Type"), "application/octet-stream")
+            data = res.read()
+            self.assertGreater(len(data), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
+

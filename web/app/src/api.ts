@@ -101,6 +101,12 @@ export type SystemMetrics = {
   };
 };
 
+export type DatabaseBackup = {
+  filename: string;
+  size_bytes: number;
+  created_at: number;
+};
+
 export type Operations = {
   master: "up";
   hardware?: SystemMetrics;
@@ -144,7 +150,8 @@ export const api = {
     allow_external = false,
     save_history = false,
     attached_file?: { name: string; content: string } | null,
-    session_id?: string | null
+    session_id?: string | null,
+    include_system_context?: boolean
   ) =>
     request<{ reply: string; model: string }>("/api/web/chat", "POST", {
       message,
@@ -153,6 +160,7 @@ export const api = {
       save_history,
       attached_file,
       session_id,
+      include_system_context,
     }),
   webChatStream: async (
     message: string,
@@ -161,6 +169,7 @@ export const api = {
     save_history: boolean,
     attached_file: { name: string; content: string } | null,
     session_id: string | null | undefined,
+    include_system_context: boolean,
     onChunk: (chunk: string, model?: string) => void,
     onDone: (fullReply: string, model?: string) => void,
     onError: (err: string) => void
@@ -180,6 +189,7 @@ export const api = {
           save_history,
           attached_file,
           session_id,
+          include_system_context,
         }),
       });
 
@@ -283,4 +293,7 @@ export const api = {
   projectFiles: () => request<{ files: ProjectFileSummary[] }>("/api/web/project/files"),
   projectFile: (path: string) => request<ProjectFileDetail>(`/api/web/project/file?path=${encodeURIComponent(path)}`),
   systemMetrics: () => request<SystemMetrics>("/api/admin/system/metrics"),
+  databaseBackups: () => request<{ backups: DatabaseBackup[] }>("/api/admin/system/backups"),
+  createDatabaseBackup: () => request<{ status: string; filename: string; size_bytes: number; created_at: number }>("/api/admin/system/backups", "POST", {}),
+  downloadBackupUrl: (filename: string) => `/api/admin/system/backups/download?filename=${encodeURIComponent(filename)}`,
 };

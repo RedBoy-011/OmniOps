@@ -87,6 +87,27 @@ class TestTelemetry(unittest.TestCase):
         self.assertEqual(metrics["runtime"]["ollama_status"], "up")
         self.assertEqual(metrics["runtime"]["ollama_model_count"], 3)
 
+    def test_is_diagnostic_query(self):
+        self.assertTrue(telemetry.is_diagnostic_query("وضعیت سرور چطوره؟"))
+        self.assertTrue(telemetry.is_diagnostic_query("میزان مصرف رم چقدره؟"))
+        self.assertTrue(telemetry.is_diagnostic_query("دمای گرافیک چنده؟"))
+        self.assertTrue(telemetry.is_diagnostic_query("@system لطفا خلاصه بگو"))
+        self.assertTrue(telemetry.is_diagnostic_query("/status"))
+        self.assertTrue(telemetry.is_diagnostic_query("how is server status?"))
+        self.assertTrue(telemetry.is_diagnostic_query("چه مدل‌هایی روی سرور نصب شده؟"))
+
+        self.assertFalse(telemetry.is_diagnostic_query("یک شعر درباره بهار بنویس"))
+        self.assertFalse(telemetry.is_diagnostic_query("سلام، روز بخیر"))
+
+    def test_format_system_context(self):
+        context = telemetry.format_system_context(model_names=["llama3:latest", "qwen2.5-coder:7b"])
+        self.assertIn("[اطلاعات وضعیت زنده و تله‌متری سرور OmniOps]", context)
+        self.assertIn("پردازنده (CPU):", context)
+        self.assertIn("حافظه موقت (RAM):", context)
+        self.assertIn("فضای ذخیره‌سازی دیسک:", context)
+        self.assertIn("llama3:latest", context)
+
 
 if __name__ == "__main__":
     unittest.main()
+

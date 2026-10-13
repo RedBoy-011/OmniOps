@@ -415,3 +415,58 @@ class IdentityStore:
         with self._db() as db:
             db.execute("UPDATE sessions SET revoked=1 WHERE jti=?", (principal["jti"],))
             self._audit(db, principal["id"], "session_revoked", principal["jti"])
+
+    def create_backup(self, principal: dict) -> dict:
+        if principal.get("role") != "superadmin":
+            raise IdentityError("Superadmin access required", 403)
+        db_path = Path(self.path).resolve()
+        backups_dir = db_path.parent / "backups"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        backup_filename = f"identity-{int(self.clock())}.db"
+        backup_target = backups_dir / backup_filename
+
+        with self._lock, self._db() as source_db:
+            target_db = sqlite3.connect(str(backup_target))
+            try:
+                source_db.backup(target_db)
+            finally:
+                target_db.close()
+
+        size_bytes = backup_target.stat().st_size
+        with self._db() as db:
+            self._audit(db, principal["id"], "backup_created", backup_filename)
+        return {
+            "status": "created",
+            "filename": backup_filename,
+            "size_bytes": size_bytes,
+            "created_at": int(self.clock()),
+        }
+
+    def list_backups(self, principal: dict) -> list[dict]:
+        if principal.get("role") != "superadmin":
+            raise IdentityError("Superadmin access required", 403)
+        db_path = Path(self.path).resolve()
+        backups_dir = db_path.parent / "backups"
+        if not backups_dir.is_dir():
+            return []
+        results = []
+        for p in sorted(backups_dir.glob("identity-*.db"), key=lambda f: f.stat().st_mtime, reverse=True):
+            if p.is_file():
+                results.append({
+                    "filename": p.name,
+                    "size_bytes": p.stat().st_size,
+                    "created_at": int(p.stat().st_mtime),
+                })
+        return results
+
+    def get_backup_path(self, principal: dict, filename: str) -> Path:
+        if principal.get("role") != "superadmin":
+            raise IdentityError("Superadmin access required", 403)
+        if not isinstance(filename, str) or not re.match(r"^identity-[a-zA-Z0-9_\-\.]+\.db$", filename):
+            raise IdentityError("Invalid backup filename", 400)
+        db_path = Path(self.path).resolve()
+        backups_dir = db_path.parent / "backups"
+        backup_target = (backups_dir / filename).resolve()
+        if not backup_target.is_file() or not backup_target.is_relative_to(backups_dir):
+            raise IdentityError("Backup file not found", 404)
+        return backup_target

@@ -324,3 +324,65 @@ def get_system_metrics(
             "ollama_model_count": ollama_model_count,
         },
     }
+
+
+DIAGNOSTIC_KEYWORDS: tuple[str, ...] = (
+    "@system", "@status", "@telemetry", "/status", "/sys",
+    "وضعیت سرور", "وضعیت سیستم", "سلامت سیستم", "وضعیت سخت‌افزار", "وضعیت سخت افزار",
+    "مصرف رم", "میزان رم", "حافظه رم", "حافظه ram", "مصرف ram",
+    "مصرف پردازنده", "مصرف cpu", "لود سرور", "لود cpu", "لود پردازنده",
+    "دمای گرافیک", "دمای gpu", "مصرف گرافیک", "مصرف vram", "کارت گرافیک", "وضعیت gpu",
+    "فضای دیسک", "حافظه دیسک", "هارد سرور", "حجم دیسک",
+    "مدل‌های نصب", "مدل های نصب", "چه مدل هایی", "چه مدل‌هایی", "لیست مدل‌ها", "لیست مدل ها",
+    "تله‌متری", "تله متری",
+    "server status", "system status", "system health", "cpu usage", "ram usage",
+    "gpu status", "disk space", "hardware telemetry",
+)
+
+
+def is_diagnostic_query(prompt: str) -> bool:
+    """Returns True if the prompt asks about server health, telemetry, models, or hardware."""
+    if not isinstance(prompt, str):
+        return False
+    lower = prompt.lower()
+    return any(kw in lower for kw in DIAGNOSTIC_KEYWORDS)
+
+
+def format_system_context(metrics: dict[str, Any] | None = None, model_names: list[str] | None = None) -> str:
+    """Formats system metrics into an informative Persian context block for LLM grounding."""
+    if metrics is None:
+        metrics = get_system_metrics()
+
+    cpu = metrics.get("cpu", {})
+    ram = metrics.get("ram", {})
+    disk = metrics.get("disk", {})
+    gpu = metrics.get("gpu", {})
+    runtime = metrics.get("runtime", {})
+
+    cpu_str = f"{cpu.get('percent', 0.0)}% (تعداد هسته‌ها: {cpu.get('cores', 1)})"
+    ram_str = f"{ram.get('used_gb', 0.0)} GB از {ram.get('total_gb', 0.0)} GB ({ram.get('percent', 0.0)}% اشغال، {ram.get('free_gb', 0.0)} GB آزاد)"
+    disk_str = f"{disk.get('used_gb', 0.0)} GB از {disk.get('total_gb', 0.0)} GB ({disk.get('percent', 0.0)}% اشغال، {disk.get('free_gb', 0.0)} GB آزاد)"
+
+    if gpu.get("available"):
+        gpu_summary = (
+            f"{gpu.get('name', 'NVIDIA GPU')} | حافظه VRAM: {gpu.get('used_vram_mb', 0)}MB/{gpu.get('total_vram_mb', 0)}MB "
+            f"({gpu.get('percent_vram', 0)}%) | دمای هسته: {gpu.get('temperature_c', 0)}°C"
+        )
+    else:
+        gpu_summary = "شناسایی نشد (پردازش روی CPU انجام می‌شود)"
+
+    models_summary = ", ".join(model_names) if model_names else "بدون مدل محلی لود شده"
+    uptime_sec = metrics.get("uptime_seconds", 0)
+    uptime_hours = round(uptime_sec / 3600, 1)
+
+    return (
+        "[اطلاعات وضعیت زنده و تله‌متری سرور OmniOps]:\n"
+        f"- پردازنده (CPU): {cpu_str}\n"
+        f"- حافظه موقت (RAM): {ram_str}\n"
+        f"- فضای ذخیره‌سازی دیسک: {disk_str}\n"
+        f"- شتاب‌دهنده گرافیکی (GPU): {gpu_summary}\n"
+        f"- مدل‌های هوش مصنوعی محلی موجود: {models_summary}\n"
+        f"- پایداری سرور (Uptime): {uptime_hours} ساعت\n"
+        f"- سیستم‌عامل سرور: {runtime.get('platform_string', platform.system())}"
+    )
+

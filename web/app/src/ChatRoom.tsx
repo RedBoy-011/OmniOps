@@ -32,6 +32,7 @@ export function ChatRoom() {
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [projectFiles, setProjectFiles] = useState<{ path: string; name: string; type: string }[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [includeSystemContext, setIncludeSystemContext] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const localModels = models.filter(model => model.startsWith("ollama/"));
@@ -182,10 +183,16 @@ export function ChatRoom() {
     setBusy(true);
     setError("");
     const fileToAttach = attachedFile;
+    const systemContextToAttach = includeSystemContext;
     setAttachedFile(null);
+    setIncludeSystemContext(false);
 
     const userTime = new Date().toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
-    const userDisplayMessage = fileToAttach ? `📎 [فایل پیوست: ${fileToAttach.name}]\n${message}` : message;
+    const badges: string[] = [];
+    if (fileToAttach) badges.push(`📎 [فایل پیوست: ${fileToAttach.name}]`);
+    if (systemContextToAttach) badges.push(`📊 [تله‌متری زنده سرور ضمیمه شد]`);
+    const prefix = badges.length ? `${badges.join(" ")}\n` : "";
+    const userDisplayMessage = `${prefix}${message}`;
 
     setEntries((before) => [
       ...before,
@@ -200,6 +207,7 @@ export function ChatRoom() {
       saveHistory,
       fileToAttach ? { name: fileToAttach.name, content: fileToAttach.content || "" } : null,
       currentSessionId,
+      systemContextToAttach,
       (chunk, model) => {
         setEntries((before) => {
           if (before.length === 0) return before;
@@ -631,6 +639,17 @@ export function ChatRoom() {
               </div>
             )}
           </div>
+
+          {/* دکمه تزریق تله‌متری و وضعیت زنده سرور */}
+          <button
+            type="button"
+            className={`chat-attach-file-btn ${includeSystemContext ? "active" : ""}`}
+            onClick={() => setIncludeSystemContext(!includeSystemContext)}
+            title="تزریق آمار زنده سخت‌افزار سرور (CPU, RAM, GPU, مدل‌ها) به این پرسش"
+          >
+            <span>📊</span>
+            <span>{includeSystemContext ? "✓ وضعیت سرور ضمیمه شد" : "تزریق وضعیت سرور"}</span>
+          </button>
 
           {/* دکمه انتخاب مدل و منوی سهمیه (تصویر ۲ و ۳) */}
           <div className="antigravity-model-picker-container">
