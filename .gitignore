@@ -24,3 +24,10 @@ agent/windows-edge/src-tauri/icons/*
 # Locally provisioned proprietary fonts; never publish without a valid redistribution license.
 web/app/public/fonts/omniops-iransharp/
 agent/windows-edge/public/fonts/omniops-iransharp/
+
+# Downloads binaries
+downloads/*.exe
+downloads/*.apk
+downloads/*.zip
+downloads/*.tar.gz
+!downloads/README.md

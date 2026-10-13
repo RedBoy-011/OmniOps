@@ -6,6 +6,7 @@ import { ProviderManager } from "./ProviderManager";
 import { ChatRoom } from "./ChatRoom";
 import { WorkspaceTasks } from "./WorkspaceTasks";
 import { CustomizationsPanel } from "./CustomizationsPanel";
+import { ClientDownloadsCard } from "./components/ClientDownloadsCard";
 
 const choices = [
   ["chat", "گفت‌وگو"], ["provider.use", "مدل API بیرونی"], ["skill.use", "مهارت‌ها"], ["tool.read", "مشاهدهٔ ابزار"],
@@ -16,7 +17,7 @@ type Props = { user: Profile; initialPending: number; onLogout: () => void };
 
 export function AdminPanel({ user, initialPending, onLogout }: Props) {
   const [pending, setPending] = useState<PendingUser[]>([]);
-  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "task" | "customizations">("chat");
+  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "task" | "customizations" | "downloads">("chat");
   const [count, setCount] = useState(initialPending);
   const [toast, setToast] = useState(initialPending > 0 && user.role === "superadmin");
   const [loading, setLoading] = useState(false);
@@ -157,7 +158,7 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
         </motion.div>
       )}</AnimatePresence>
       <div className="admin-wrap">
-        <header className="admin-header glass"><div className="flex items-center gap-3"><span className="brand-mark">✦</span><strong>OmniOps</strong><span className="text-white/45 text-xs">{user.role === "superadmin" ? "/ مدیریت سازمان" : "/ فضای کار شخصی"}</span></div><div className="flex items-center gap-4"><span className="text-sm text-white/65">{user.username}</span><button className="quiet-button" onClick={onLogout}>خروج امن</button></div></header>
+        <header className="admin-header glass"><div className="flex items-center gap-3"><span className="brand-mark">✦</span><strong>OmniOps</strong><span className="text-white/45 text-xs">{user.role === "superadmin" ? "/ مدیریت سازمان" : "/ فضای کار شخصی"}</span></div><div className="flex items-center gap-4"><button type="button" className="download-hub-pill" onClick={() => setWorkspaceMode("downloads")} title="دانلود برنامه‌های ویندوز و اندروید">📥 دریافت برنامه‌ها</button><span className="text-sm text-white/65">{user.username}</span><button className="quiet-button" onClick={onLogout}>خروج امن</button></div></header>
         <div className="admin-hero"><span className="form-eyebrow">CONTROL PLANE / ACCESS</span><h1>{user.role === "superadmin" ? "مدیریت دسترسی و ایجنت‌ها" : "فضای گفت‌وگو و ایجنت شما"}</h1><p>{user.role === "superadmin" ? "هر قابلیت بر اساس پروفایل کاربر فعال می‌شود." : "گفت‌وگو، حافظه و دستگاه‌های متصل به پروفایل شما وابسته‌اند."}</p></div>
         <div className="admin-grid">
           {user.role === "superadmin" && <section className="glass admin-card"><div className="card-title"><div><h2>درخواست‌های ثبت‌نام</h2><p>نام کاربری و موبایل پس از درخواست مدیر نمایش داده می‌شوند.</p></div><span className="count-pill">{count.toLocaleString("fa-IR")} در انتظار</span></div>
@@ -180,10 +181,39 @@ export function AdminPanel({ user, initialPending, onLogout }: Props) {
                 <p>این کد را در پنجرهٔ ایجنت وارد کنید:</p><strong dir="ltr">{pair.code}</strong><button type="button" className="quiet-button pair-copy" onClick={() => void copyPair()}>کپی کد</button><small>{seconds.toLocaleString("fa-IR")} ثانیه باقی‌مانده · پس از استفاده باطل می‌شود</small>{copyStatus && <span className="pair-copy-status" role="status" aria-live="polite">{copyStatus}</span>}
               </motion.div>}</AnimatePresence>
               <p className="safety-note">توکن اتصال فقط در حافظهٔ فرایند ایجنت می‌ماند و با خروج یا قطع heartbeat از اعتبار می‌افتد.</p>
+              <div className="agent-download-cta">
+                <span>برنامهٔ ایجنت ویندوز یا اپلیکیشن اندروید را ندارید؟</span>
+                <button type="button" onClick={() => setWorkspaceMode("downloads")}>
+                  📥 دریافت برنامه‌ها و راهنما
+                </button>
+              </div>
             </>}
           </section>
         </div>
-{user.capabilities.includes("chat") && <><div className="workspace-switch" role="tablist" aria-label="حالت فضای کاری"><button type="button" role="tab" aria-selected={workspaceMode === "chat"} className={workspaceMode === "chat" ? "active" : ""} onClick={() => setWorkspaceMode("chat")}>گفتگو</button><button type="button" role="tab" aria-selected={workspaceMode === "task"} className={workspaceMode === "task" ? "active" : ""} onClick={() => setWorkspaceMode("task")}>وظیفه</button><button type="button" role="tab" aria-selected={workspaceMode === "customizations"} className={workspaceMode === "customizations" ? "active" : ""} onClick={() => setWorkspaceMode("customizations")}>سفارشی‌سازی‌ها و مهارت‌ها 📦</button></div><div hidden={workspaceMode !== "chat"}><ChatRoom /></div><div hidden={workspaceMode !== "task"}><WorkspaceTasks canRequest={user.capabilities.includes("action.request")} /></div><div hidden={workspaceMode !== "customizations"}><CustomizationsPanel onSelectSkill={() => setWorkspaceMode("chat")} /></div></>}
+        {(user.capabilities.includes("chat") || user.capabilities.includes("agent.pair")) && <>
+          <div className="workspace-switch" role="tablist" aria-label="حالت فضای کاری">
+            {user.capabilities.includes("chat") && <>
+              <button type="button" role="tab" aria-selected={workspaceMode === "chat"} className={workspaceMode === "chat" ? "active" : ""} onClick={() => setWorkspaceMode("chat")}>گفتگو</button>
+              <button type="button" role="tab" aria-selected={workspaceMode === "task"} className={workspaceMode === "task" ? "active" : ""} onClick={() => setWorkspaceMode("task")}>وظیفه</button>
+              <button type="button" role="tab" aria-selected={workspaceMode === "customizations"} className={workspaceMode === "customizations" ? "active" : ""} onClick={() => setWorkspaceMode("customizations")}>سفارشی‌سازی‌ها و مهارت‌ها 📦</button>
+            </>}
+            <button type="button" role="tab" aria-selected={workspaceMode === "downloads"} className={workspaceMode === "downloads" ? "active" : ""} onClick={() => setWorkspaceMode("downloads")}>📥 دریافت برنامه‌ها (ویندوز / اندروید)</button>
+          </div>
+          {user.capabilities.includes("chat") && <>
+            <div hidden={workspaceMode !== "chat"}><ChatRoom /></div>
+            <div hidden={workspaceMode !== "task"}><WorkspaceTasks canRequest={user.capabilities.includes("action.request")} /></div>
+            <div hidden={workspaceMode !== "customizations"}><CustomizationsPanel onSelectSkill={() => setWorkspaceMode("chat")} /></div>
+          </>}
+          <div hidden={workspaceMode !== "downloads"}>
+            <ClientDownloadsCard
+              pair={pair}
+              seconds={seconds}
+              copyStatus={copyStatus}
+              onGeneratePair={createPair}
+              onCopyPair={() => void copyPair()}
+            />
+          </div>
+        </>}
         {user.role === "superadmin" && <section className="glass admin-card operations-card">
           <div className="card-title"><div><h2>وضعیت گره‌ها و مدل‌های محلی</h2><p>بررسی خودکار هر ۱۵ ثانیه از Master و Ollama.</p></div><button className="quiet-button" onClick={() => void refreshOperations()}>بررسی دوباره</button></div>
           {operationsError && <p className="admin-message" role="alert">{operationsError}</p>}

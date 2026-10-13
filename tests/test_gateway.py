@@ -84,6 +84,50 @@ class GatewayTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             make_server("127.0.0.1", 0, "weak", "http://127.0.0.1:11434")
 
+    def test_download_fallback_redirects_to_github(self):
+        from urllib.request import HTTPRedirectHandler, build_opener
+        class NoRedirect(HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+        no_redirect_opener = build_opener(NoRedirect)
+        try:
+            no_redirect_opener.open(f"{self.root}/downloads/nonexistent-file.apk")
+        except HTTPError as err:
+            try:
+                self.assertEqual(err.code, 302)
+                self.assertIn("github.com/RedBoy-011/OmniOps/releases", err.headers.get("Location", ""))
+            finally:
+                err.close()
+
+    def test_download_invalid_filename_returns_400(self):
+        from urllib.request import build_opener
+        opener = build_opener()
+        for bad in ("../secret.py", "sub/dir.exe", "file;cmd"):
+            try:
+                opener.open(f"{self.root}/downloads/{bad}")
+                self.fail(f"Expected 400 for {bad}")
+            except HTTPError as err:
+                try:
+                    self.assertEqual(err.code, 400)
+                finally:
+                    err.close()
+
+    def test_download_existing_file_served(self):
+        from pathlib import Path
+        repo_root = Path(__file__).resolve().parent.parent
+        downloads_dir = repo_root / "downloads"
+        downloads_dir.mkdir(exist_ok=True)
+        test_file = downloads_dir / "test-dummy-client.exe"
+        try:
+            test_file.write_bytes(b"MZ-PE-DUMMY-BINARY-TEST")
+            with self.opener.open(f"{self.root}/downloads/test-dummy-client.exe") as resp:
+                self.assertEqual(resp.status, 200)
+                self.assertEqual(resp.read(), b"MZ-PE-DUMMY-BINARY-TEST")
+                self.assertIn("attachment", resp.headers.get("Content-Disposition", ""))
+        finally:
+            if test_file.exists():
+                test_file.unlink()
+
 
 if __name__ == "__main__":
     unittest.main()

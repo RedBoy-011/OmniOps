@@ -11,6 +11,7 @@ import ipaddress
 import json
 import mimetypes
 import os
+import re
 import ssl
 import time
 import uuid
@@ -451,6 +452,33 @@ def make_server(
         def do_GET(self):
             from urllib.parse import parse_qs, urlsplit
             parsed = urlsplit(self.path)
+            if parsed.path.startswith('/downloads/'):
+                filename = parsed.path.removeprefix('/downloads/').strip('/')
+                if not filename or '/' in filename or '\\' in filename or not re.match(r'^[a-zA-Z0-9_\-\.]+$', filename):
+                    self._send(400, {'error': {'message': 'Invalid file name'}})
+                    return
+                repo_root = Path(__file__).resolve().parent.parent
+                downloads_dir = repo_root / 'downloads'
+                target_file = downloads_dir / filename
+                if target_file.is_file():
+                    raw = target_file.read_bytes()
+                    content_type = 'application/vnd.android.package-archive' if filename.endswith('.apk') else (
+                        mimetypes.guess_type(target_file.name)[0] or 'application/octet-stream'
+                    )
+                    self.send_response(200)
+                    self.send_header('Content-Type', content_type)
+                    self.send_header('Content-Length', str(len(raw)))
+                    self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+                    self.send_header('Cache-Control', 'public, max-age=3600')
+                    self.send_header('X-Content-Type-Options', 'nosniff')
+                    self.end_headers()
+                    self.wfile.write(raw)
+                    return
+                release_url = 'https://github.com/RedBoy-011/OmniOps/releases'
+                self.send_response(302)
+                self.send_header('Location', release_url)
+                self.end_headers()
+                return
             if parsed.path in ('/api/web/workspace/attachments', '/api/agent/workspace/attachments'):
                 principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
                 if principal is None:
