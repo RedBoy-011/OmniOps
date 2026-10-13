@@ -93,11 +93,11 @@ function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
       <label htmlFor={`key-${provider.kind}`}>کلید API {provider.configured && <small>· خالی بماند، کلید قبلی حفظ می‌شود</small>}</label>
       <input id={`key-${provider.kind}`} type="password" value={key} onChange={e => setKey(e.target.value)} autoComplete="off" placeholder={provider.configured ? "••••••••••••" : "کلید را وارد کنید"} required={!provider.configured} />
       <label className="provider-proxy-toggle"><input type="checkbox" checked={useProxy} onChange={e => { setUseProxy(e.target.checked); if (e.target.checked && !proxy) setProxy(defaultProxy); }} />
-        <span><strong>عبور از پراکسی SOCKS5h</strong><small>نام دامنه در سمت پراکسی حل می‌شود</small></span></label>
+        <span><strong>عبور از پراکسی SOCKS5 / SOCKS5h</strong><small>پشتیبانی از دامنه و احراز هویت کاربری (User/Pass)</small></span></label>
       <AnimatePresence initial={false}>{useProxy && <motion.div className="provider-proxy-field" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
         <label htmlFor={`proxy-${provider.kind}`}>نشانی پراکسی خروجی</label>
         <div className="provider-proxy-input">
-          <input id={`proxy-${provider.kind}`} dir="ltr" value={proxy} onChange={e => { setProxy(e.target.value); setSocksStatus(null); }} placeholder="socks5h://private-ip:port" required />
+          <input id={`proxy-${provider.kind}`} dir="ltr" value={proxy} onChange={e => { setProxy(e.target.value); setSocksStatus(null); }} placeholder="socks5://user:pass@host:port یا socks5h://..." required />
           <button type="button" className="quiet-button" onClick={() => { setProxy(defaultProxy); setSocksStatus(null); }} disabled={!defaultProxy}>نشانی مشترک</button>
           <button type="button" className="quiet-button" style={{ borderColor: "#10b981", color: "#34d399", minWidth: "90px" }} disabled={!proxy.trim() || !!busy} onClick={() => void testSocksConnection()}>{busy === "socks" ? "در حال تست…" : "⚡ تست ساکس"}</button>
         </div>
@@ -133,7 +133,7 @@ function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
         <button type="button" className="submit-button" disabled={!!busy || !canTest || (useProxy && !proxy.trim())} onClick={() => void testConnection()}>{busy === "test" ? "در حال آزمون…" : "تست و دریافت مدل‌ها"}</button>
       </div>
     </form>
-    <div className="provider-result"><span className="provider-route">{provider.network_mode === "socks" ? "مسیر ذخیره‌شده: SOCKS5h" : "مسیر ذخیره‌شده: مستقیم"}</span>
+    <div className="provider-result"><span className="provider-route">{provider.network_mode === "socks" ? "مسیر ذخیره‌شده: SOCKS" : "مسیر ذخیره‌شده: مستقیم"}</span>
       <span>{provider.models.length.toLocaleString("fa-IR")} مدل</span>
       {provider.tested_at && <small>تست موفق: {new Date(provider.tested_at * 1000).toLocaleString("fa-IR")}</small>}</div>
     <button type="button" className="quiet-button provider-enable" disabled={!provider.configured || !!busy || (!provider.tested_at && !provider.enabled)} onClick={() => void perform("toggle", () => api.enableProvider(provider.kind, !provider.enabled), provider.enabled ? "Provider غیرفعال شد." : "Provider فعال شد.")}>{provider.enabled ? "غیرفعال‌کردن" : "فعال‌کردن پس از تست"}</button>
@@ -196,7 +196,7 @@ export function ProviderManager() {
       : <><div className="provider-shared-proxy">
         <div>
           <strong>پراکسی مشترک خروجی</strong>
-          <small>نشانی پیشنهادی برای کارت‌های Provider؛ انتخاب SOCKS در هر کارت مستقل است.</small>
+          <small>پشتیبانی از socks5:// و socks5h:// با نام دامنه و احراز هویت کاربری</small>
         </div>
         <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
           <input
@@ -208,7 +208,7 @@ export function ProviderManager() {
               localStorage.setItem("omniops_shared_proxy", e.target.value);
               setSharedResult(null);
             }}
-            placeholder="socks5h://IP:PORT"
+            placeholder="socks5://user:pass@host:port یا socks5h://..."
           />
           <button
             type="button"

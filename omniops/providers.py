@@ -10,7 +10,7 @@ import socket
 import ssl
 import time
 from decimal import Decimal, InvalidOperation
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 from .identity import IdentityError
 
@@ -37,6 +37,29 @@ def _admin(principal):
         raise IdentityError('Superadmin provider permission required', 403)
 
 
+def _is_valid_hostname(host):
+    if not host or not isinstance(host, str) or len(host) > 253:
+        return False
+    try:
+        ipaddress.IPv4Address(host)
+        return True
+    except ValueError:
+        pass
+    pattern = r'^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$'
+    return bool(re.match(pattern, host))
+
+
+def _mask_proxy(url):
+    try:
+        parsed = urlsplit(url)
+        if parsed.username or parsed.password:
+            user = parsed.username or ''
+            return f"{parsed.scheme}://{user}:***@{parsed.hostname}:{parsed.port}"
+        return url
+    except Exception:
+        return 'socks5://***'
+
+
 def _proxy(value, mode):
     if mode not in ('direct', 'socks'):
         raise IdentityError('Network mode must be direct or socks')
@@ -45,19 +68,36 @@ def _proxy(value, mode):
             raise IdentityError('Direct mode cannot specify a proxy')
         return ''
     if not isinstance(value, str):
-        raise IdentityError('SOCKS5h proxy address required')
+        raise IdentityError('SOCKS proxy address required')
+    value = value.strip()
+    if not value:
+        raise IdentityError('SOCKS proxy address required')
     parsed = urlsplit(value)
-    if parsed.scheme != 'socks5h' or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
-        raise IdentityError('Use socks5h://private-ip:port without credentials or path')
+    scheme = parsed.scheme.lower()
+    if scheme not in ('socks5', 'socks5h'):
+        raise IdentityError('Use socks5:// or socks5h:// proxy address')
+    if parsed.path not in ('', '/') or parsed.query or parsed.fragment:
+        raise IdentityError('Use socks5:// or socks5h:// proxy address without path or query')
     try:
-        host = '127.0.0.1' if parsed.hostname == 'localhost' else parsed.hostname
-        address = ipaddress.IPv4Address(host)
+        hostname = parsed.hostname
         port = parsed.port
-        if not any(address in network for network in PRIVATE_PROXY_NETS) or not port or not 1 <= port <= 65535:
-            raise ValueError()
     except (ValueError, TypeError):
-        raise IdentityError('SOCKS5h proxy must have a private IPv4 address and valid port')
-    return f'socks5h://{address}:{port}'
+        raise IdentityError('SOCKS proxy must have a valid IPv4 address or domain name and port')
+    if not hostname or not _is_valid_hostname(hostname):
+        raise IdentityError('SOCKS proxy must have a valid IPv4 address or domain name and port')
+    if not port or not 1 <= port <= 65535:
+        raise IdentityError('SOCKS proxy must have a valid IPv4 address or domain name and port')
+    username = unquote(parsed.username) if parsed.username is not None else None
+    password = unquote(parsed.password) if parsed.password is not None else None
+    if username is not None or password is not None:
+        user_str = username or ''
+        pass_str = password or ''
+        if len(user_str.encode('utf-8')) > 255 or len(pass_str.encode('utf-8')) > 255:
+            raise IdentityError('Proxy username and password must each be 255 bytes or fewer')
+        user_enc = quote(user_str, safe='')
+        pass_enc = quote(pass_str, safe='')
+        return f'{scheme}://{user_enc}:{pass_enc}@{hostname}:{port}'
+    return f'{scheme}://{hostname}:{port}'
 
 
 def _read_exact(sock, count):
@@ -70,19 +110,57 @@ def _read_exact(sock, count):
     return bytes(data)
 
 
-def _connect_proxy(url, host):
+def _connect_proxy(url, host, port=443):
     parsed = urlsplit(url)
+    username = unquote(parsed.username) if parsed.username is not None else None
+    password = unquote(parsed.password) if parsed.password is not None else None
     sock = socket.create_connection((parsed.hostname, parsed.port), timeout=8)
     try:
         sock.settimeout(8)
-        sock.sendall(b'\x05\x01\x00')
-        if _read_exact(sock, 2) != b'\x05\x00':
-            raise OSError('SOCKS5 authentication negotiation failed')
+        if username is not None or password is not None:
+            sock.sendall(b'\x05\x02\x00\x02')
+        else:
+            sock.sendall(b'\x05\x01\x00')
+        greeting_reply = _read_exact(sock, 2)
+        if greeting_reply[0] != 5:
+            raise OSError('Invalid SOCKS5 greeting response')
+        selected_method = greeting_reply[1]
+        if selected_method == 0:
+            pass
+        elif selected_method == 2:
+            if username is None and password is None:
+                raise OSError('SOCKS5 proxy demanded username/password authentication, but none provided')
+            u_bytes = (username or '').encode('utf-8')
+            p_bytes = (password or '').encode('utf-8')
+            if len(u_bytes) > 255 or len(p_bytes) > 255:
+                raise OSError('SOCKS5 username or password exceeds 255 bytes')
+            auth_frame = b'\x01' + bytes([len(u_bytes)]) + u_bytes + bytes([len(p_bytes)]) + p_bytes
+            sock.sendall(auth_frame)
+            auth_reply = _read_exact(sock, 2)
+            if auth_reply[0] != 1 or auth_reply[1] != 0:
+                raise OSError('SOCKS5 authentication failed; check proxy username and password')
+        elif selected_method == 0xFF:
+            raise OSError('SOCKS5 proxy rejected authentication: no acceptable methods (0xFF)')
+        else:
+            raise OSError(f'SOCKS5 proxy selected unsupported authentication method {selected_method:#04x}')
+
         host_bytes = host.encode('ascii')
-        sock.sendall(b'\x05\x01\x00\x03' + bytes([len(host_bytes)]) + host_bytes + (443).to_bytes(2, 'big'))
+        sock.sendall(b'\x05\x01\x00\x03' + bytes([len(host_bytes)]) + host_bytes + int(port).to_bytes(2, 'big'))
         reply = _read_exact(sock, 4)
         if reply[:3] != b'\x05\x00\x00':
-            raise OSError('SOCKS5 connection rejected')
+            status_code = reply[1]
+            status_reasons = {
+                1: 'general SOCKS server failure',
+                2: 'connection not allowed by ruleset',
+                3: 'network unreachable',
+                4: 'host unreachable',
+                5: 'connection refused',
+                6: 'TTL expired',
+                7: 'command not supported',
+                8: 'address type not supported',
+            }
+            reason = status_reasons.get(status_code, f'status {status_code}')
+            raise OSError(f'SOCKS5 connection rejected ({reason})')
         length = {1: 4, 4: 16}.get(reply[3])
         if reply[3] == 3:
             length = _read_exact(sock, 1)[0]
@@ -298,22 +376,22 @@ class ProviderRegistry:
                 if row and row['network_mode'] == 'socks' and row['proxy_url']:
                     proxy_url = row['proxy_url']
         if not proxy_url:
-            raise IdentityError('نشانی پراکسی SOCKS5h مشخص نشده است')
+            raise IdentityError('نشانی پراکسی SOCKS مشخص نشده است')
 
         normalized = _proxy(proxy_url, 'socks')
-        target_host = 'api.openai.com'
+        target_host = ENDPOINTS.get(kind, ('api.openai.com',))[0] if kind else 'api.openai.com'
         start = time.time()
         try:
             sock = _connect_proxy(normalized, target_host)
             sock.close()
             latency_ms = max(1, int(round((time.time() - start) * 1000)))
             with self.identity._lock, self.identity._db() as db:
-                self.identity._audit(db, principal['id'], 'proxy_tested', normalized)
+                self.identity._audit(db, principal['id'], 'proxy_tested', _mask_proxy(normalized))
             return {
                 'status': 'ok',
                 'proxy_url': normalized,
                 'latency_ms': latency_ms,
-                'message': f'پراکسی SOCKS5h فعال است و با موفقیت پاسخ داد (تأخیر: {latency_ms} میلی‌ثانیه)'
+                'message': f'پراکسی SOCKS فعال است و با موفقیت پاسخ داد (تأخیر: {latency_ms} میلی‌ثانیه)'
             }
         except (OSError, socket.timeout, ConnectionRefusedError) as exc:
             raise IdentityError(f'خطا در برقراری ارتباط با پراکسی SOCKS: {exc}', 502) from exc

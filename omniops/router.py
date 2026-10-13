@@ -56,7 +56,7 @@ def _valid_socks_url(url: str | None) -> bool:
         return False
     parsed = urlsplit(url)
     try:
-        return parsed.scheme == "socks5h" and bool(parsed.hostname) and bool(parsed.port)
+        return parsed.scheme in ("socks5", "socks5h") and bool(parsed.hostname) and bool(parsed.port)
     except ValueError:
         return False
 

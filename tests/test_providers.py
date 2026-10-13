@@ -155,10 +155,19 @@ class ProviderTests(unittest.TestCase):
         for price in ('NaN', '-1', '1.2345678', 'Infinity'):
             with self.assertRaises(IdentityError):
                 self.providers.price(self.admin, 'openai', 'some-model', price, '0')
-        for proxy in ('socks5://127.0.0.1:1080', 'socks5h://example.com:1080',
-                      'socks5h://127.0.0.1:1080/path', 'socks5h://127.0.0.1:1080@evil.com'):
+        for invalid_proxy in ('http://127.0.0.1:1080', 'socks5h://127.0.0.1:1080/path',
+                              'socks5h://127.0.0.1:1080?q=1', 'socks5h://127.0.0.1:99999',
+                              'socks5h://invalid..host:1080', 'socks5h://'):
             with self.assertRaises(IdentityError):
-                _proxy(proxy, 'socks')
+                _proxy(invalid_proxy, 'socks')
+
+        self.assertEqual(_proxy('socks5://127.0.0.1:1080', 'socks'), 'socks5://127.0.0.1:1080')
+        self.assertEqual(_proxy('socks5h://example.com:1080', 'socks'), 'socks5h://example.com:1080')
+        self.assertEqual(_proxy('socks5://demo_user:demo_pass@example.com:1080', 'socks'),
+                         'socks5://demo_user:demo_pass@example.com:1080')
+        self.assertEqual(_proxy('socks5h://demo_user:demo_pass@127.0.0.1:1080', 'socks'),
+                         'socks5h://demo_user:demo_pass@127.0.0.1:1080')
+
         with self.assertRaises(IdentityError):
             self.providers.enable(self.admin, 'openai', True)
         with self.assertRaises(IdentityError):
@@ -188,6 +197,65 @@ class ProviderTests(unittest.TestCase):
             thread.join(timeout=2)
             self.assertEqual(captured, [b'\x05\x01\x00', b'\x05\x01\x00\x03',
                                         b'api.openai.com', b'\x01\xbb'])
+        finally:
+            listener.close()
+
+    def test_socks5_rfc1929_authentication_success(self):
+        listener = socket.socket()
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(1)
+        captured_auth = []
+        def accept():
+            conn, _ = listener.accept()
+            with conn:
+                greeting = conn.recv(4)
+                self.assertEqual(greeting, b'\x05\x02\x00\x02')
+                conn.sendall(b'\x05\x02')  # Accept Username/Password auth (method 0x02)
+                ver = conn.recv(1)
+                ulen = conn.recv(1)[0]
+                user = conn.recv(ulen)
+                plen = conn.recv(1)[0]
+                passwd = conn.recv(plen)
+                captured_auth.append((ver, user, passwd))
+                conn.sendall(b'\x01\x00')  # Auth success
+                connect_hdr = conn.recv(4)
+                count = conn.recv(1)[0]
+                target_host = conn.recv(count)
+                target_port = conn.recv(2)
+                conn.sendall(b'\x05\x00\x00\x01' + b'\x00' * 4 + b'\x01\xbb')
+        thread = threading.Thread(target=accept, daemon=True)
+        thread.start()
+        try:
+            port = listener.getsockname()[1]
+            conn = _connect_proxy(f'socks5://testuser:testpass@127.0.0.1:{port}', 'api.openai.com')
+            conn.close()
+            thread.join(timeout=2)
+            self.assertEqual(captured_auth, [(b'\x01', b'testuser', b'testpass')])
+        finally:
+            listener.close()
+
+    def test_socks5_rfc1929_authentication_failure(self):
+        listener = socket.socket()
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(1)
+        def accept():
+            conn, _ = listener.accept()
+            with conn:
+                conn.recv(4)
+                conn.sendall(b'\x05\x02')
+                conn.recv(1)  # ver
+                ulen = conn.recv(1)[0]
+                conn.recv(ulen)
+                plen = conn.recv(1)[0]
+                conn.recv(plen)
+                conn.sendall(b'\x01\x01')  # Auth failure
+        thread = threading.Thread(target=accept, daemon=True)
+        thread.start()
+        try:
+            port = listener.getsockname()[1]
+            with self.assertRaisesRegex(OSError, 'SOCKS5 authentication failed'):
+                _connect_proxy(f'socks5://baduser:badpass@127.0.0.1:{port}', 'api.openai.com')
+            thread.join(timeout=2)
         finally:
             listener.close()
 
