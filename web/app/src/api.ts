@@ -179,6 +179,14 @@ export type AuditLog = {
   created_at: number;
 };
 
+export type NodePingResult = {
+  status: string;
+  latency_ms: number;
+  version: string;
+  model_count: number;
+  base_url: string;
+};
+
 export type Operations = {
   master: "up";
   hardware?: SystemMetrics;
@@ -354,6 +362,7 @@ export const api = {
   addMemory: (content: string) => request<{ id: string }>("/api/chat/memory/add", "POST", { content }),
   removeMemory: (id: string) => request<{ status: string }>("/api/chat/memory/remove", "POST", { id }),
   managedNodes: () => request<{ nodes: ManagedNode[] }>("/api/admin/nodes"),
+  pingNode: () => request<NodePingResult>("/api/admin/nodes/ping"),
   modelPulls: () => request<{ jobs: ModelPull[] }>("/api/admin/nodes/model-pulls"),
   createModelPull: (node_id: string, model: string) => request<{ id: string; status: string }>("/api/admin/nodes/model-pulls", "POST", { node_id, model }),
   cancelModelPull: (id: string) => request<{ status: string; id: string }>("/api/admin/nodes/model-pulls/cancel", "POST", { id }),

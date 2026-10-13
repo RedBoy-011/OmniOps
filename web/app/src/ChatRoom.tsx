@@ -802,27 +802,81 @@ export function ChatRoom() {
           </div>
         )}
         {attachedFile && (
-          <div className="chat-attached-file-pill">
-            <span
-              className="attached-file-clickable"
-              onClick={() => setPreviewModalFile({ name: attachedFile.name, content: attachedFile.content || "" })}
-              title="کلیک برای مشاهده پیش‌نمایش محتوای فایل"
-            >
-              📄 <strong>{attachedFile.name}</strong>
-              {attachedFile.content && (
-                <small style={{ opacity: 0.75, margin: "0 4px" }}>
-                  ({(attachedFile.content.length / 1024).toFixed(1)} KB)
-                </small>
-              )}
-              <span className="file-preview-hint">👁️ پیش‌نمایش</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => setAttachedFile(null)}
-              title="حذف پیوست"
-            >
-              ✕
-            </button>
+          <div className="chat-attached-file-wrapper">
+            <div className="chat-attached-file-pill">
+              <span
+                className="attached-file-clickable"
+                onClick={() => setPreviewModalFile({ name: attachedFile.name, content: attachedFile.content || "" })}
+                title="کلیک برای مشاهده پیش‌نمایش محتوای فایل"
+              >
+                📄 <strong>{attachedFile.name}</strong>
+                {attachedFile.content && (
+                  <>
+                    <small className="attached-file-size">
+                      ({(attachedFile.content.length / 1024).toFixed(1)} KB)
+                    </small>
+                    <span className="attached-file-metrics" title="آمار و تخمین توکن سند">
+                      <span>📑 {attachedFile.content.split("\n").length.toLocaleString("fa-IR")} سطر</span>
+                      <span>📝 {attachedFile.content.trim().split(/\s+/).filter(Boolean).length.toLocaleString("fa-IR")} کلمه</span>
+                      <span>⚡ ~{Math.ceil(attachedFile.content.length / 3.5).toLocaleString("fa-IR")} توکن</span>
+                    </span>
+                  </>
+                )}
+                <span className="file-preview-hint">👁️ پیش‌نمایش</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setAttachedFile(null)}
+                title="حذف پیوست"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* نوار اقدامات هوشمند دستیار سند */}
+            <div className="doc-quick-actions-bar" aria-label="اقدامات هوشمند تحلیل سند">
+              <span className="quick-actions-label">✨ دستیار تحلیل:</span>
+              <button
+                type="button"
+                className="doc-quick-action-btn"
+                onClick={() => {
+                  setDraft("لطفاً این سند پیوست‌شده را به صورت ساختاریافته، عمیق و همراه با خلاصه اجرایی و دستاوردهای اصلی تحلیل و خلاصه کن.");
+                  document.getElementById("web-chat-input")?.focus();
+                }}
+              >
+                ✨ خلاصه‌سازی عمیق
+              </button>
+              <button
+                type="button"
+                className="doc-quick-action-btn"
+                onClick={() => {
+                  setDraft("تمام نکات کلیدی، الزامات فنی، تصمیمات مهم و یافته‌های اساسی این سند را استخراج و در قالب لیست تفکیک‌شده ارائه کن.");
+                  document.getElementById("web-chat-input")?.focus();
+                }}
+              >
+                📌 استخراج نکات کلیدی
+              </button>
+              <button
+                type="button"
+                className="doc-quick-action-btn"
+                onClick={() => {
+                  setDraft("براساس محتوای این سند، ۵ پرسش و پاسخ اساسی (Q&A) در رابطه با جزئیات و چالش‌های احتمالی آن تدوین و به تفصیل پاسخ بده.");
+                  document.getElementById("web-chat-input")?.focus();
+                }}
+              >
+                🔍 پرسش و پاسخ (Q&A)
+              </button>
+              <button
+                type="button"
+                className="doc-quick-action-btn"
+                onClick={() => {
+                  setDraft("سرفصل‌ها، ساختار درختی و معماری بخش‌های مختلف این سند را همراه با خلاصه کوتاه برای هر بخش مشخص کن.");
+                  document.getElementById("web-chat-input")?.focus();
+                }}
+              >
+                📑 استخراج سرفصل‌ها
+              </button>
+            </div>
           </div>
         )}
         <textarea

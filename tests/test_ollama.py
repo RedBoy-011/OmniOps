@@ -27,6 +27,8 @@ class FakeOllama(BaseHTTPRequestHandler):
             if getattr(self.server, 'include_second_chat', False):
                 models.append({"name": "backup:latest", "size": 999})
             self._reply({"models": models})
+        elif self.path == "/api/version":
+            self._reply({"version": "0.1.32"})
         else:
             self.send_error(404)
 
@@ -115,6 +117,13 @@ class OllamaAdapterTests(unittest.TestCase):
     def test_external_ollama_address_is_rejected(self):
         with self.assertRaises(ValueError):
             OllamaClient("https://example.com")
+
+    def test_ping_returns_latency_and_version(self):
+        res = self.client.ping()
+        self.assertEqual(res["status"], "up")
+        self.assertGreaterEqual(res["latency_ms"], 0)
+        self.assertEqual(res["version"], "0.1.32")
+        self.assertGreaterEqual(res["model_count"], 1)
 
 
 if __name__ == "__main__":

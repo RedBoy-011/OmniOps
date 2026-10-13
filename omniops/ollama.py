@@ -1,7 +1,8 @@
 """Ertebat-e vaghei ba Ollama-ye dakheli, bedoone bazgasht-e makhfi be cloud."""
 
-import json
 import ipaddress
+import json
+import time
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -155,3 +156,21 @@ class OllamaClient:
             raise OllamaError(f"Ollama request failed: HTTP {exc.code}") from exc
         except (URLError, TimeoutError, OSError) as exc:
             raise OllamaError(f"Ollama request failed: {exc}") from exc
+
+    def ping(self) -> dict:
+        started = time.monotonic()
+        version_info = "unknown"
+        try:
+            data = self._json_request("/api/version", timeout_seconds=4.0)
+            version_info = data.get("version", "unknown")
+        except Exception:
+            pass
+        models = self.list_models()
+        latency_ms = round((time.monotonic() - started) * 1000)
+        return {
+            "status": "up" if models else "no_models",
+            "latency_ms": latency_ms,
+            "version": version_info,
+            "model_count": len(models),
+            "base_url": self.base_url,
+        }

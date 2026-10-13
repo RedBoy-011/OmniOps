@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { api, type Operations, type PendingUser, type Profile } from "./api";
+import { api, type NodePingResult, type Operations, type PendingUser, type Profile } from "./api";
 import { NodeManager } from "./NodeManager";
 import { ProviderManager } from "./ProviderManager";
 import { SystemHealthCard } from "./components/SystemHealthCard";
@@ -51,6 +51,23 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
   const [workerUrl, setWorkerUrl] = useState("");
   const [workerBusy, setWorkerBusy] = useState(false);
   const [workerMessage, setWorkerMessage] = useState("");
+
+  const [pingResult, setPingResult] = useState<NodePingResult | null>(null);
+  const [pingLoading, setPingLoading] = useState(false);
+  const [pingError, setPingError] = useState("");
+
+  async function handlePingNode() {
+    setPingLoading(true);
+    setPingError("");
+    try {
+      const res = await api.pingNode();
+      setPingResult(res);
+    } catch (err: any) {
+      setPingError(err.message || "خطا در تست پینگ و ارتباط با گره");
+    } finally {
+      setPingLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (user.role !== "superadmin") return;
@@ -325,6 +342,62 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
         {/* ۱. تب سرورها و مدل‌ها */}
         <div hidden={adminTab !== "nodes"}>
           <NodeManager />
+
+          {/* ویجت تست پینگ و تأخیر ارتباطی زنده گره Worker */}
+          <section className="glass admin-card node-ping-card" style={{ marginTop: "16px" }}>
+            <div className="card-title">
+              <div>
+                <h2>⚡ تست پینگ و سلامت ارتباطی گره Ollama Worker</h2>
+                <p>پایش میلی‌ثانیه‌ای تأخیر شبکه (RTT)، نسخهٔ سرویس و تعداد مدل‌های فعال Worker محلی.</p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary ping-action-btn"
+                disabled={pingLoading}
+                onClick={() => void handlePingNode()}
+              >
+                {pingLoading ? "⏱️ در حال پینگ…" : "📡 ارسال پینگ و تست تأخیر"}
+              </button>
+            </div>
+
+            {pingError && (
+              <p className="admin-message ping-error-badge" role="alert">
+                ⚠️ {pingError}
+              </p>
+            )}
+
+            {pingResult && (
+              <div className="node-ping-results-grid">
+                <div className="ping-stat-item">
+                  <span className="stat-label">تأخیر رفت و برگشت (Latency):</span>
+                  <span className={`ping-latency-badge ${pingResult.latency_ms < 50 ? "good" : pingResult.latency_ms < 200 ? "moderate" : "slow"}`}>
+                    ⚡ {pingResult.latency_ms.toLocaleString("fa-IR")} ms
+                    <small>
+                      {pingResult.latency_ms < 50 ? " (فوق‌العاده سریع)" : pingResult.latency_ms < 200 ? " (مطلوب)" : " (تأخیر بالا)"}
+                    </small>
+                  </span>
+                </div>
+                <div className="ping-stat-item">
+                  <span className="stat-label">وضعیت ارتباط:</span>
+                  <span className={`node-badge node-${pingResult.status}`}>
+                    {pingResult.status === "up" ? "🟢 آنلاین و آماده" : pingResult.status === "no_models" ? "🟡 بدون مدل" : "🔴 آفلاین"}
+                  </span>
+                </div>
+                <div className="ping-stat-item">
+                  <span className="stat-label">نسخه سرویس:</span>
+                  <span className="ping-code-pill" dir="ltr">Ollama {pingResult.version}</span>
+                </div>
+                <div className="ping-stat-item">
+                  <span className="stat-label">مدل‌های مستقر:</span>
+                  <strong className="ping-count-val">{pingResult.model_count.toLocaleString("fa-IR")} مدل</strong>
+                </div>
+                <div className="ping-stat-item full-width">
+                  <span className="stat-label">آدرس اندپوینت:</span>
+                  <code className="ping-endpoint-code" dir="ltr">{pingResult.base_url}</code>
+                </div>
+              </div>
+            )}
+          </section>
 
           <section className="glass admin-card operations-card" style={{ marginTop: "16px" }}>
             <div className="card-title">

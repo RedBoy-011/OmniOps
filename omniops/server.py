@@ -998,6 +998,20 @@ def make_server(
                      "checked_at": checked_at, "latency_ms": latency_ms, "models": model_list},
                 ]})
                 return
+            if self.path == "/api/admin/nodes/ping":
+                principal = self._principal()
+                if principal is None:
+                    return
+                if principal["role"] != "superadmin":
+                    self._send(403, {"error": {"message": "Superadmin access required"}})
+                    return
+                try:
+                    c = current_ollama()
+                    res = c.ping()
+                    self._send(200, res)
+                except Exception as exc:
+                    self._send(503, {"error": {"message": f"Ping failed: {exc}"}})
+                return
             if parsed.path == "/api/admin/users":
                 principal = self._principal()
                 if principal is None:

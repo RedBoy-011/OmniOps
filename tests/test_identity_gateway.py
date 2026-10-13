@@ -457,6 +457,25 @@ class WorkerEndpointTests(unittest.TestCase):
         # Restore password back
         self.store.change_password({"id": prof_res["user"]["id"]}, "a brand new admin password 1234", "a very strong admin password")
 
+    def test_admin_node_ping_endpoint(self):
+        admin = self.store.login("root-admin", "a very strong admin password")["token"]
+        with patch("omniops.server.OllamaClient.ping", return_value={
+            "status": "up",
+            "latency_ms": 12,
+            "version": "0.1.32",
+            "model_count": 2,
+            "base_url": "http://127.0.0.1:11434",
+        }):
+            code, res = self.call("GET", "/api/admin/nodes/ping", token=admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(res["status"], "up")
+            self.assertEqual(res["latency_ms"], 12)
+            self.assertEqual(res["version"], "0.1.32")
+
+        # Unauthenticated request returns 401
+        code, _ = self.call("GET", "/api/admin/nodes/ping")
+        self.assertEqual(code, 401)
+
 
 if __name__ == "__main__":
     unittest.main()
