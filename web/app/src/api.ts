@@ -103,6 +103,8 @@ export const api = {
   saveProvider: (kind: string, api_key: string | null, network_mode: "direct" | "socks", proxy_url: string) =>
     request<{ status: string }>("/api/admin/providers/save", "POST", { kind, api_key, network_mode, proxy_url }),
   testProvider: (kind: string) => request<{ models: string[]; network_mode: string }>("/api/admin/providers/test", "POST", { kind }),
+  testSocks: (proxy_url?: string, kind?: string) =>
+    request<{ status: string; latency_ms: number; proxy_url: string; message: string }>("/api/admin/providers/test-socks", "POST", { proxy_url, kind }),
   enableProvider: (kind: string, enabled: boolean) => request<{ enabled: boolean }>("/api/admin/providers/enable", "POST", { kind, enabled }),
   priceProvider: (kind: string, model: string, input: string, output: string) =>
     request<{ model: string }>("/api/admin/providers/price", "POST", { kind, model, input, output }),

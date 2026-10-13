@@ -16,6 +16,9 @@ function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
   const [output, setOutput] = useState("");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
+  const [socksStatus, setSocksStatus] = useState<{ ok: boolean; message: string; latency_ms?: number } | null>(null);
+  const [autoTestSocks, setAutoTestSocks] = useState(true);
+
   const models = useMemo(() => {
     const filtered = provider.models.filter(model => model.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 80);
     return selected && !filtered.includes(selected) ? [selected, ...filtered] : filtered;
@@ -26,7 +29,7 @@ function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
   const canTest = Boolean(key.trim() || provider.configured);
   const catalogPrice = provider.catalog_prices[selected];
 
-  useEffect(() => { setUseProxy(provider.network_mode === "socks"); setProxy(provider.proxy_url); }, [provider.network_mode, provider.proxy_url]);
+  useEffect(() => { setUseProxy(provider.network_mode === "socks"); setProxy(provider.proxy_url); setSocksStatus(null); }, [provider.network_mode, provider.proxy_url]);
   useEffect(() => { if (!provider.models.includes(selected)) setSelected(provider.models[0] || ""); }, [provider.models, selected]);
   useEffect(() => { const price = provider.prices[selected]; setInput(price?.input || ""); setOutput(price?.output || ""); }, [provider.prices, selected]);
 
@@ -42,6 +45,26 @@ function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
     setKey("");
   }
 
+  async function testSocksConnection(isAfterSave = false) {
+    if (!proxyValue) return;
+    setBusy("socks");
+    setSocksStatus(null);
+    try {
+      if (!isAfterSave && changed) {
+        await saveSettings();
+      }
+      const res = await api.testSocks(proxyValue, provider.kind);
+      setSocksStatus({ ok: true, message: res.message, latency_ms: res.latency_ms });
+      setMessage(res.message);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : "خطا در تست ارتباط با پراکسی SOCKS";
+      setSocksStatus({ ok: false, message: errMsg });
+      setMessage(errMsg);
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function testConnection() {
     await perform("test", async () => {
       if (key.trim() || !provider.configured || changed) await saveSettings();
@@ -51,7 +74,14 @@ function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    void perform("save", saveSettings, "تنظیمات ذخیره شدند. برای دریافت مدل‌ها اتصال را آزمایش کنید.");
+    void perform("save", async () => {
+      await saveSettings();
+      if (useProxy && autoTestSocks && proxyValue) {
+        await testSocksConnection(true);
+      }
+    }, useProxy && autoTestSocks
+      ? "تنظیمات ذخیره شد و پراکسی ساکس بررسی شد."
+      : "تنظیمات ذخیره شدند. می‌توانید اتصال ساکس یا دریافت مدل‌ها را آزمایش کنید.");
   }
 
   return <motion.article className="provider-card" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .25 }}>
@@ -66,11 +96,42 @@ function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
         <span><strong>عبور از پراکسی SOCKS5h</strong><small>نام دامنه در سمت پراکسی حل می‌شود</small></span></label>
       <AnimatePresence initial={false}>{useProxy && <motion.div className="provider-proxy-field" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
         <label htmlFor={`proxy-${provider.kind}`}>نشانی پراکسی خروجی</label>
-        <div className="provider-proxy-input"><input id={`proxy-${provider.kind}`} dir="ltr" value={proxy} onChange={e => setProxy(e.target.value)} placeholder="socks5h://private-ip:port" required />
-          <button type="button" className="quiet-button" onClick={() => setProxy(defaultProxy)} disabled={!defaultProxy}>نشانی مشترک</button></div>
+        <div className="provider-proxy-input">
+          <input id={`proxy-${provider.kind}`} dir="ltr" value={proxy} onChange={e => { setProxy(e.target.value); setSocksStatus(null); }} placeholder="socks5h://private-ip:port" required />
+          <button type="button" className="quiet-button" onClick={() => { setProxy(defaultProxy); setSocksStatus(null); }} disabled={!defaultProxy}>نشانی مشترک</button>
+          <button type="button" className="quiet-button" style={{ borderColor: "#10b981", color: "#34d399", minWidth: "90px" }} disabled={!proxy.trim() || !!busy} onClick={() => void testSocksConnection()}>{busy === "socks" ? "در حال تست…" : "⚡ تست ساکس"}</button>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px", marginTop: "4px" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", color: "#baa7b3", cursor: "pointer", userSelect: "none" }}>
+            <input type="checkbox" checked={autoTestSocks} onChange={e => setAutoTestSocks(e.target.checked)} style={{ width: "14px", height: "14px", accentColor: "#10b981" }} />
+            <span>آزمون خودکار ساکس بلافاصله پس از ذخیره</span>
+          </label>
+        </div>
+        {socksStatus && (
+          <div style={{
+            marginTop: "6px",
+            padding: "8px 12px",
+            borderRadius: "10px",
+            fontSize: "12px",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            background: socksStatus.ok ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 68, 68, 0.12)",
+            border: `1px solid ${socksStatus.ok ? "rgba(16, 185, 129, 0.35)" : "rgba(239, 68, 68, 0.35)"}`,
+            color: socksStatus.ok ? "#34d399" : "#fca5a5",
+          }}>
+            <span>{socksStatus.ok ? "✅" : "❌"}</span>
+            <span>{socksStatus.message}</span>
+          </div>
+        )}
       </motion.div>}</AnimatePresence>
-      <div className="provider-actions"><button className="quiet-button" type="submit" disabled={!!busy}>ذخیرهٔ تنظیمات</button>
-        <button type="button" className="submit-button" disabled={!!busy || !canTest || (useProxy && !proxy.trim())} onClick={() => void testConnection()}>{busy === "test" ? "در حال آزمون…" : "تست و دریافت مدل‌ها"}</button></div>
+      <div className="provider-actions">
+        <button className="quiet-button" type="submit" disabled={!!busy}>{busy === "save" ? "در حال ذخیره…" : "ذخیرهٔ تنظیمات"}</button>
+        {useProxy && (
+          <button type="button" className="quiet-button" style={{ borderColor: "#10b981", color: "#34d399" }} disabled={!proxy.trim() || !!busy} onClick={() => void testSocksConnection()}>{busy === "socks" ? "در حال تست ساکس…" : "⚡ تست ساکس"}</button>
+        )}
+        <button type="button" className="submit-button" disabled={!!busy || !canTest || (useProxy && !proxy.trim())} onClick={() => void testConnection()}>{busy === "test" ? "در حال آزمون…" : "تست و دریافت مدل‌ها"}</button>
+      </div>
     </form>
     <div className="provider-result"><span className="provider-route">{provider.network_mode === "socks" ? "مسیر ذخیره‌شده: SOCKS5h" : "مسیر ذخیره‌شده: مستقیم"}</span>
       <span>{provider.models.length.toLocaleString("fa-IR")} مدل</span>
@@ -93,12 +154,27 @@ function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
 
 export function ProviderManager() {
   const [providers, setProviders] = useState<ApiProvider[]>([]);
-  const [defaultProxy, setDefaultProxy] = useState("");
+  const [defaultProxy, setDefaultProxy] = useState(() => localStorage.getItem("omniops_shared_proxy") || "");
+  const [sharedTesting, setSharedTesting] = useState(false);
+  const [sharedResult, setSharedResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [error, setError] = useState("");
   const secure = window.location.protocol === "https:";
   async function refresh() {
     try { setProviders((await api.providers()).providers); setError(""); }
     catch (reason) { const message = reason instanceof Error ? reason.message : "فهرست Provider دریافت نشد."; setError(message); throw reason; }
+  }
+  async function testSharedSocks() {
+    if (!defaultProxy.trim()) return;
+    setSharedTesting(true);
+    setSharedResult(null);
+    try {
+      const res = await api.testSocks(defaultProxy.trim());
+      setSharedResult({ ok: true, message: res.message });
+    } catch (err) {
+      setSharedResult({ ok: false, message: err instanceof Error ? err.message : "خطا در تست ساکس مشترک" });
+    } finally {
+      setSharedTesting(false);
+    }
   }
   useEffect(() => { if (secure) void refresh().catch(() => {}); }, [secure]);
   return <section className="glass admin-card operations-card provider-manager" aria-label="مدیریت Providerهای API">
@@ -117,8 +193,52 @@ export function ProviderManager() {
         </a>
       </div>
     )
-      : <><div className="provider-shared-proxy"><div><strong>پراکسی مشترک خروجی</strong><small>نشانی پیشنهادی برای کارت‌های Provider؛ انتخاب SOCKS در هر کارت مستقل است.</small></div>
-        <input dir="ltr" aria-label="نشانی پراکسی مشترک" value={defaultProxy} onChange={e => setDefaultProxy(e.target.value)} placeholder="socks5h://IP:PORT" /></div>
+      : <><div className="provider-shared-proxy">
+        <div>
+          <strong>پراکسی مشترک خروجی</strong>
+          <small>نشانی پیشنهادی برای کارت‌های Provider؛ انتخاب SOCKS در هر کارت مستقل است.</small>
+        </div>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            dir="ltr"
+            aria-label="نشانی پراکسی مشترک"
+            value={defaultProxy}
+            onChange={e => {
+              setDefaultProxy(e.target.value);
+              localStorage.setItem("omniops_shared_proxy", e.target.value);
+              setSharedResult(null);
+            }}
+            placeholder="socks5h://IP:PORT"
+          />
+          <button
+            type="button"
+            className="quiet-button"
+            style={{ borderColor: "#10b981", color: "#34d399" }}
+            disabled={!defaultProxy.trim() || sharedTesting}
+            onClick={() => void testSharedSocks()}
+          >
+            {sharedTesting ? "در حال تست…" : "⚡ تست ساکس مشترک"}
+          </button>
+        </div>
+        {sharedResult && (
+          <div style={{
+            width: "100%",
+            marginTop: "6px",
+            padding: "8px 12px",
+            borderRadius: "10px",
+            fontSize: "12px",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            background: sharedResult.ok ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 68, 68, 0.12)",
+            border: `1px solid ${sharedResult.ok ? "rgba(16, 185, 129, 0.35)" : "rgba(239, 68, 68, 0.35)"}`,
+            color: sharedResult.ok ? "#34d399" : "#fca5a5",
+          }}>
+            <span>{sharedResult.ok ? "✅" : "❌"}</span>
+            <span>{sharedResult.message}</span>
+          </div>
+        )}
+      </div>
         {error && <p className="admin-message" role="alert">{error}</p>}
         <div className="provider-grid">{providers.map(provider => <ProviderCard key={provider.kind} provider={provider} defaultProxy={defaultProxy} refresh={refresh} />)}</div></>}
   </section>;

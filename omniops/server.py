@@ -330,7 +330,7 @@ def make_server(
                 "/api/web/workspace/attachments", "/api/agent/workspace/attachments",
                 "/api/web/workspace/attachments/remove", "/api/agent/workspace/attachments/remove",
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
-                "/api/admin/providers/enable", "/api/admin/providers/price",
+                "/api/admin/providers/test-socks", "/api/admin/providers/enable", "/api/admin/providers/price",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
@@ -359,6 +359,8 @@ def make_server(
                     if path.endswith('/save'):
                         result = providers.save(principal, payload.get('kind'), payload.get('api_key'),
                                                 payload.get('network_mode'), payload.get('proxy_url'))
+                    elif path.endswith('/test-socks'):
+                        result = providers.test_socks(principal, payload.get('proxy_url'), payload.get('kind'))
                     elif path.endswith('/test'):
                         result = providers.test(principal, payload.get('kind'))
                     elif path.endswith('/enable'):

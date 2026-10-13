@@ -1,4 +1,4 @@
-﻿import json
+import json
 import socket
 import threading
 import tempfile
@@ -226,3 +226,29 @@ class ProviderTests(unittest.TestCase):
             with self.assertRaises(IdentityError):
                 fetch_models('openai', 'secret-example-key', 'socks', 'socks5h://127.0.0.1:1')
             direct.assert_not_called()
+
+    def test_test_socks_success_and_failure(self):
+        from unittest.mock import MagicMock
+        mock_sock = MagicMock()
+        with patch('omniops.providers._connect_proxy', return_value=mock_sock) as connect:
+            result = self.providers.test_socks(self.admin, 'socks5h://172.16.20.250:7890')
+            self.assertEqual(result['status'], 'ok')
+            self.assertEqual(result['proxy_url'], 'socks5h://172.16.20.250:7890')
+            self.assertGreaterEqual(result['latency_ms'], 1)
+            connect.assert_called_once_with('socks5h://172.16.20.250:7890', 'api.openai.com')
+            mock_sock.close.assert_called_once()
+
+        with patch('omniops.providers._connect_proxy', side_effect=OSError('proxy unreachable')):
+            with self.assertRaises(IdentityError) as ctx:
+                self.providers.test_socks(self.admin, 'socks5h://172.16.20.250:7890')
+            self.assertEqual(ctx.exception.status, 502)
+
+    def test_test_socks_using_saved_provider(self):
+        self.providers.save(self.admin, 'openai', 'secret-example-key', 'socks', 'socks5h://172.19.30.99:10808')
+        from unittest.mock import MagicMock
+        mock_sock = MagicMock()
+        with patch('omniops.providers._connect_proxy', return_value=mock_sock):
+            result = self.providers.test_socks(self.admin, kind='openai')
+            self.assertEqual(result['status'], 'ok')
+            self.assertEqual(result['proxy_url'], 'socks5h://172.19.30.99:10808')
+

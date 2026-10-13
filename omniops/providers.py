@@ -8,6 +8,7 @@ import json
 import re
 import socket
 import ssl
+import time
 from decimal import Decimal, InvalidOperation
 from urllib.parse import quote, urlsplit
 
@@ -49,7 +50,8 @@ def _proxy(value, mode):
     if parsed.scheme != 'socks5h' or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
         raise IdentityError('Use socks5h://private-ip:port without credentials or path')
     try:
-        address = ipaddress.IPv4Address(parsed.hostname)
+        host = '127.0.0.1' if parsed.hostname == 'localhost' else parsed.hostname
+        address = ipaddress.IPv4Address(host)
         port = parsed.port
         if not any(address in network for network in PRIVATE_PROXY_NETS) or not port or not 1 <= port <= 65535:
             raise ValueError()
@@ -287,6 +289,34 @@ class ProviderRegistry:
                 raise IdentityError('Provider changed during test; retry', 409)
             self.identity._audit(db, principal['id'], 'provider_tested', kind)
         return {'models': models, 'network_mode': row['network_mode']}
+
+    def test_socks(self, principal, proxy_url=None, kind=None):
+        _admin(principal)
+        if not proxy_url and kind:
+            with self.identity._db() as db:
+                row = db.execute('SELECT network_mode, proxy_url FROM provider_accounts WHERE kind=?', (kind,)).fetchone()
+                if row and row['network_mode'] == 'socks' and row['proxy_url']:
+                    proxy_url = row['proxy_url']
+        if not proxy_url:
+            raise IdentityError('نشانی پراکسی SOCKS5h مشخص نشده است')
+
+        normalized = _proxy(proxy_url, 'socks')
+        target_host = 'api.openai.com'
+        start = time.time()
+        try:
+            sock = _connect_proxy(normalized, target_host)
+            sock.close()
+            latency_ms = max(1, int(round((time.time() - start) * 1000)))
+            with self.identity._lock, self.identity._db() as db:
+                self.identity._audit(db, principal['id'], 'proxy_tested', normalized)
+            return {
+                'status': 'ok',
+                'proxy_url': normalized,
+                'latency_ms': latency_ms,
+                'message': f'پراکسی SOCKS5h فعال است و با موفقیت پاسخ داد (تأخیر: {latency_ms} میلی‌ثانیه)'
+            }
+        except (OSError, socket.timeout, ConnectionRefusedError) as exc:
+            raise IdentityError(f'خطا در برقراری ارتباط با پراکسی SOCKS: {exc}', 502) from exc
 
     def enable(self, principal, kind, enabled):
         _admin(principal)
