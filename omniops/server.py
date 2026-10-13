@@ -502,6 +502,7 @@ def make_server(
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/test-socks", "/api/admin/providers/enable", "/api/admin/providers/price",
                 "/api/admin/system/backups", "/api/admin/system/update",
+                "/api/admin/users/update", "/api/user/profile", "/api/user/change-password",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
@@ -575,6 +576,28 @@ def make_server(
                         raise IdentityError("Superadmin access required", 403)
                     repo_root = Path(__file__).resolve().parent.parent
                     self._send(200, updater.apply_update(repo_root=repo_root))
+                elif path == "/api/admin/users/update":
+                    if principal["role"] != "superadmin":
+                        raise IdentityError("Superadmin access required", 403)
+                    self._send(200, {"user": store.update_user_access(
+                        principal,
+                        payload.get("user_id"),
+                        role=payload.get("role"),
+                        status=payload.get("status"),
+                        capabilities=payload.get("capabilities"),
+                    )})
+                elif path == "/api/user/profile":
+                    self._send(200, {"user": store.update_profile(
+                        principal,
+                        username=payload.get("username"),
+                        mobile=payload.get("mobile"),
+                    )})
+                elif path == "/api/user/change-password":
+                    self._send(200, store.change_password(
+                        principal,
+                        payload.get("old_password"),
+                        payload.get("new_password"),
+                    ))
                 elif path in ('/api/chat/sessions', '/api/agent/sessions'):
                     self._send(201, {'session': memory.create_session(principal, payload.get('title'))})
                 elif path in ('/api/chat/sessions/rename', '/api/agent/sessions/rename'):
@@ -962,6 +985,33 @@ def make_server(
                     {"id": "ollama-worker", "kind": "worker", "status": worker_status,
                      "checked_at": checked_at, "latency_ms": latency_ms, "models": model_list},
                 ]})
+                return
+            if parsed.path == "/api/admin/users":
+                principal = self._principal()
+                if principal is None:
+                    return
+                if principal["role"] != "superadmin":
+                    self._send(403, {"error": {"message": "Superadmin access required"}})
+                    return
+                if identity_store is None:
+                    self._send(503, {"error": {"message": "Identity service is not configured"}})
+                    return
+                try:
+                    self._send(200, {"users": identity_store.list_users(principal)})
+                except IdentityError as exc:
+                    self._send(exc.status, {"error": {"message": str(exc)}})
+                return
+            if parsed.path == "/api/user/profile":
+                principal = self._principal("web")
+                if principal is None:
+                    return
+                if identity_store is None:
+                    self._send(503, {"error": {"message": "Identity service is not configured"}})
+                    return
+                try:
+                    self._send(200, identity_store.user_profile_report(principal))
+                except IdentityError as exc:
+                    self._send(exc.status, {"error": {"message": str(exc)}})
                 return
             if self.path in {"/api/auth/me", "/api/admin/pending", "/api/admin/pending/count"}:
                 principal = self._principal()

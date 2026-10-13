@@ -157,7 +157,84 @@ class IdentityTests(unittest.TestCase):
         with self.assertRaises(IdentityError):
             self.store.get_backup_path(admin_principal, "identity-nonexistent.db")
 
+    def test_list_users_and_update_user_access(self):
+        admin = self._admin()
+        # Register a member
+        uid = self.store.register("new_member", "member password 1234", "09128888888")
+        self.store.decide(admin, uid, True, ["chat"])
+
+        # List users
+        users = self.store.list_users(admin)
+        self.assertGreaterEqual(len(users), 2)
+        member_obj = next(u for u in users if u["id"] == uid)
+        self.assertEqual(member_obj["username"], "new_member")
+        self.assertEqual(member_obj["role"], "member")
+        self.assertEqual(member_obj["status"], "active")
+
+        # Promote to superadmin and change capabilities
+        updated = self.store.update_user_access(
+            admin, uid, role="superadmin", capabilities=["chat", "agent.pair", "user.approve"]
+        )
+        self.assertEqual(updated["role"], "superadmin")
+        self.assertIn("user.approve", updated["capabilities"])
+
+        # Prevent demoting the ONLY other active superadmin if admin is demoted
+        # Currently we have 2 superadmins (admin and uid), so demoting uid back to member should succeed
+        demoted = self.store.update_user_access(admin, uid, role="member", status="active")
+        self.assertEqual(demoted["role"], "member")
+
+        # Now only 1 superadmin remains (admin). Attempting to demote admin must fail!
+        with self.assertRaises(IdentityError) as err:
+            self.store.update_user_access(admin, self.admin_id, role="member")
+        self.assertEqual(err.exception.status, 400)
+
+    def test_update_profile_and_change_password(self):
+        admin = self._admin()
+        # Update admin profile username and mobile
+        updated = self.store.update_profile(admin, username="admin_renamed", mobile="09129999999")
+        self.assertEqual(updated["username"], "admin_renamed")
+        self.assertEqual(updated["mobile"], "+989129999999")
+
+        # Register another user and ensure conflict check works
+        uid = self.store.register("test_conflict", "conflict pass 1234", "09123333333")
+        self.store.decide(admin, uid, True)
+
+        with self.assertRaises(IdentityError) as err:
+            self.store.update_profile(admin, username="test_conflict")
+        self.assertEqual(err.exception.status, 409)
+
+        with self.assertRaises(IdentityError) as err:
+            self.store.update_profile(admin, mobile="09123333333")
+        self.assertEqual(err.exception.status, 409)
+
+        # Change password
+        with self.assertRaises(IdentityError) as err:
+            self.store.change_password(admin, "wrong current password", "a brand new strong password 1234")
+        self.assertEqual(err.exception.status, 400)
+
+        res = self.store.change_password(admin, "a sufficiently strong password", "a brand new strong password 1234")
+        self.assertEqual(res["status"], "ok")
+
+        # Login with new password
+        login = self.store.login("admin_renamed", "a brand new strong password 1234")
+        self.assertEqual(login["user"]["username"], "admin_renamed")
+
+        # Old password must fail
+        with self.assertRaises(IdentityError):
+            self.store.login("admin_renamed", "a sufficiently strong password")
+
+    def test_user_profile_report(self):
+        admin = self._admin()
+        report = self.store.user_profile_report(admin)
+        self.assertEqual(report["user"]["id"], self.admin_id)
+        self.assertIn("stats", report)
+        self.assertIn("total_sessions", report["stats"])
+        self.assertIn("total_messages", report["stats"])
+        self.assertIn("active_web_sessions", report["stats"])
+        self.assertGreaterEqual(report["stats"]["active_web_sessions"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

@@ -280,8 +280,20 @@ class IdentityStore:
         return f"{header}.{payload}.{signature}"
 
     def _public_user(self, row) -> dict:
-        return {"id": row["id"], "username": row["username"], "role": row["role"],
-                "status": row["status"], "capabilities": json.loads(row["capabilities"])}
+        caps = json.loads(row["capabilities"]) if isinstance(row["capabilities"], str) else row["capabilities"]
+        data = {
+            "id": row["id"],
+            "username": row["username"],
+            "role": row["role"],
+            "status": row["status"],
+            "capabilities": caps,
+        }
+        keys = row.keys() if hasattr(row, "keys") else ()
+        if "mobile" in keys:
+            data["mobile"] = row["mobile"]
+        if "created_at" in keys:
+            data["created_at"] = row["created_at"]
+        return data
 
     def login(self, username: str, password: str, remote_ip: str = "local") -> dict:
         _, key = _normalize_username(username)
@@ -318,16 +330,16 @@ class IdentityStore:
             raise IdentityError("Invalid or expired session", 401) from None
         with self._db() as db:
             row = db.execute(
-                "SELECT s.*,u.username,u.role,u.capabilities,u.status FROM sessions s "
+                "SELECT s.*,u.username,u.mobile,u.role,u.capabilities,u.status,u.created_at FROM sessions s "
                 "JOIN users u ON u.id=s.user_id WHERE s.jti=? AND s.user_id=?",
                 (payload["jti"], payload["sub"]),
             ).fetchone()
             if (row is None or row["revoked"] or row["audience"] != audience or row["expires_at"] != payload["exp"]
                 or row["status"] != "active" or (audience == "agent" and now - row["last_seen"] > AGENT_LEASE)):
                 raise IdentityError("Session is no longer active", 401)
-            return {"id": row["user_id"], "username": row["username"], "role": row["role"],
-                    "capabilities": json.loads(row["capabilities"]), "jti": row["jti"],
-                    "device_id": row["device_id"]}
+            return {"id": row["user_id"], "username": row["username"], "mobile": row["mobile"], "role": row["role"],
+                    "status": row["status"], "capabilities": json.loads(row["capabilities"]), "created_at": row["created_at"],
+                    "jti": row["jti"], "device_id": row["device_id"]}
 
     def _require_admin(self, actor: dict):
         if actor["role"] != "superadmin" or "user.approve" not in actor["capabilities"]:
@@ -358,6 +370,197 @@ class IdentityStore:
             if changed != 1:
                 raise IdentityError("Pending user not found", 404)
             self._audit(db, actor["id"], "approve_user" if approve else "reject_user", user_id)
+
+    def list_users(self, actor: dict) -> list[dict]:
+        self._require_admin(actor)
+        with self._db() as db:
+            rows = db.execute(
+                "SELECT id, username, mobile, role, status, capabilities, created_at, decided_by, decided_at "
+                "FROM users ORDER BY created_at DESC, id"
+            ).fetchall()
+            return [
+                {
+                    "id": r["id"],
+                    "username": r["username"],
+                    "mobile": r["mobile"],
+                    "role": r["role"],
+                    "status": r["status"],
+                    "capabilities": json.loads(r["capabilities"]),
+                    "created_at": r["created_at"],
+                    "decided_by": r["decided_by"],
+                    "decided_at": r["decided_at"],
+                }
+                for r in rows
+            ]
+
+    def update_user_access(
+        self,
+        actor: dict,
+        user_id: str,
+        *,
+        role: str | None = None,
+        status: str | None = None,
+        capabilities: list[str] | None = None,
+    ) -> dict:
+        self._require_admin(actor)
+        if not isinstance(user_id, str):
+            raise IdentityError("User ID is required", 400)
+        if role is not None and role not in ("superadmin", "member"):
+            raise IdentityError("Role must be 'superadmin' or 'member'", 400)
+        if status is not None and status not in ("active", "pending", "rejected"):
+            raise IdentityError("Status must be 'active', 'pending', or 'rejected'", 400)
+        if capabilities is not None:
+            if not isinstance(capabilities, list) or not all(isinstance(c, str) and c in ADMIN_CAPABILITIES for c in capabilities):
+                raise IdentityError("Invalid capability specified", 400)
+
+        with self._lock, self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            target = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+            if target is None:
+                raise IdentityError("User not found", 404)
+
+            new_role = role if role is not None else target["role"]
+            new_status = status if status is not None else target["status"]
+            new_caps = json.dumps(sorted(set(capabilities))) if capabilities is not None else target["capabilities"]
+
+            # Prevent demoting or deactivating the last active superadmin
+            if target["role"] == "superadmin" and target["status"] == "active":
+                if new_role != "superadmin" or new_status != "active":
+                    other_admins = db.execute(
+                        "SELECT COUNT(*) FROM users WHERE role='superadmin' AND status='active' AND id != ?",
+                        (user_id,),
+                    ).fetchone()[0]
+                    if other_admins == 0:
+                        raise IdentityError("حداقل یک مدیر کل فعال در سامانه باید باقی بماند.", 400)
+
+            now = int(self.clock())
+            db.execute(
+                "UPDATE users SET role=?, status=?, capabilities=?, decided_by=?, decided_at=? WHERE id=?",
+                (new_role, new_status, new_caps, actor["id"], now, user_id),
+            )
+            if new_status != "active":
+                db.execute("UPDATE sessions SET revoked=1 WHERE user_id=?", (user_id,))
+            self._audit(db, actor["id"], "user_access_updated", user_id)
+            updated = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+            return self._public_user(updated)
+
+    def update_profile(self, actor: dict, *, username: str | None = None, mobile: str | None = None) -> dict:
+        if username is None and mobile is None:
+            raise IdentityError("Username or mobile must be provided", 400)
+        new_username = None
+        new_key = None
+        new_mobile = None
+        if username is not None:
+            new_username, new_key = _normalize_username(username)
+        if mobile is not None:
+            new_mobile = _normalize_mobile(mobile)
+
+        with self._lock, self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            target = db.execute("SELECT * FROM users WHERE id=?", (actor["id"],)).fetchone()
+            if target is None:
+                raise IdentityError("User not found", 404)
+
+            if new_key is not None:
+                conflict = db.execute(
+                    "SELECT 1 FROM users WHERE username_key=? AND id != ? LIMIT 1",
+                    (new_key, actor["id"]),
+                ).fetchone()
+                if conflict:
+                    raise IdentityError("این نام کاربری قبلاً در سامانه ثبت شده است.", 409)
+
+            if new_mobile is not None:
+                conflict = db.execute(
+                    "SELECT 1 FROM users WHERE mobile=? AND id != ? LIMIT 1",
+                    (new_mobile, actor["id"]),
+                ).fetchone()
+                if conflict:
+                    raise IdentityError("این شماره موبایل قبلاً در سامانه ثبت شده است.", 409)
+
+            uname = new_username if new_username is not None else target["username"]
+            ukey = new_key if new_key is not None else target["username_key"]
+            umobile = new_mobile if new_mobile is not None else target["mobile"]
+
+            db.execute(
+                "UPDATE users SET username=?, username_key=?, mobile=? WHERE id=?",
+                (uname, ukey, umobile, actor["id"]),
+            )
+            self._audit(db, actor["id"], "profile_updated", actor["id"])
+            updated = db.execute("SELECT * FROM users WHERE id=?", (actor["id"],)).fetchone()
+            return self._public_user(updated)
+
+    def change_password(self, actor: dict, old_password: str, new_password: str) -> dict:
+        if not isinstance(old_password, str) or not old_password:
+            raise IdentityError("رمز عبور فعلی الزامی است.", 400)
+        encoded_new = _password_hash(new_password)
+
+        with self._lock, self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            target = db.execute("SELECT * FROM users WHERE id=?", (actor["id"],)).fetchone()
+            if target is None:
+                raise IdentityError("User not found", 404)
+
+            if not _verify_password(old_password, target["password_hash"]):
+                raise IdentityError("رمز عبور فعلی نادرست است.", 400)
+
+            db.execute("UPDATE users SET password_hash=? WHERE id=?", (encoded_new, actor["id"]))
+            current_jti = actor.get("jti")
+            if current_jti:
+                db.execute("UPDATE sessions SET revoked=1 WHERE user_id=? AND jti != ?", (actor["id"], current_jti))
+            else:
+                db.execute("UPDATE sessions SET revoked=1 WHERE user_id=?", (actor["id"],))
+
+            self._audit(db, actor["id"], "password_changed", actor["id"])
+            return {"status": "ok", "message": "رمز عبور شما با موفقیت تغییر کرد."}
+
+    def user_profile_report(self, actor: dict, target_user_id: str | None = None) -> dict:
+        uid = target_user_id or actor["id"]
+        if target_user_id and target_user_id != actor["id"]:
+            self._require_admin(actor)
+
+        now = int(self.clock())
+        with self._db() as db:
+            user_row = db.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+            if user_row is None:
+                raise IdentityError("User not found", 404)
+
+            has_sessions = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_sessions'"
+            ).fetchone() is not None
+            total_sessions = 0
+            if has_sessions:
+                total_sessions = db.execute(
+                    "SELECT COUNT(*) FROM chat_sessions WHERE user_id=?", (uid,)
+                ).fetchone()[0]
+
+            has_history = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_history'"
+            ).fetchone() is not None
+            total_messages = 0
+            if has_history:
+                total_messages = db.execute(
+                    "SELECT COUNT(*) FROM chat_history WHERE user_id=?", (uid,)
+                ).fetchone()[0]
+
+            active_web = db.execute(
+                "SELECT COUNT(*) FROM sessions WHERE user_id=? AND audience='web' AND revoked=0 AND expires_at>?",
+                (uid, now),
+            ).fetchone()[0]
+
+            active_agent = db.execute(
+                "SELECT COUNT(*) FROM sessions WHERE user_id=? AND audience='agent' AND revoked=0 AND expires_at>?",
+                (uid, now),
+            ).fetchone()[0]
+
+            return {
+                "user": self._public_user(user_row),
+                "stats": {
+                    "total_sessions": total_sessions,
+                    "total_messages": total_messages,
+                    "active_web_sessions": active_web,
+                    "active_agent_sessions": active_agent,
+                },
+            }
 
     def _pin_digest(self, pin: str) -> bytes:
         return hmac.digest(self.signing_key, ("pair:" + pin).encode(), "sha256")

@@ -423,6 +423,40 @@ class WorkerEndpointTests(unittest.TestCase):
             self.assertEqual(update_res["status"], "updated")
             self.assertEqual(update_res["new_commit"], "2222222")
 
+    def test_user_management_and_profile_endpoints(self):
+        admin = self.store.login("root-admin", "a very strong admin password")["token"]
+
+        # List all users
+        code, res = self.call("GET", "/api/admin/users", token=admin)
+        self.assertEqual(code, 200)
+        self.assertIn("users", res)
+        self.assertGreaterEqual(len(res["users"]), 1)
+
+        # Profile report
+        code, prof_res = self.call("GET", "/api/user/profile", token=admin)
+        self.assertEqual(code, 200)
+        self.assertIn("user", prof_res)
+        self.assertIn("stats", prof_res)
+        self.assertIn("total_sessions", prof_res["stats"])
+
+        # Update profile
+        code, edit_res = self.call("POST", "/api/user/profile", {"mobile": "09129876543"}, token=admin)
+        self.assertEqual(code, 200)
+        self.assertEqual(edit_res["user"]["mobile"], "+989129876543")
+
+        # Change password
+        code, pass_res = self.call(
+            "POST",
+            "/api/user/change-password",
+            {"old_password": "a very strong admin password", "new_password": "a brand new admin password 1234"},
+            token=admin,
+        )
+        self.assertEqual(code, 200)
+        self.assertEqual(pass_res["status"], "ok")
+
+        # Restore password back
+        self.store.change_password({"id": prof_res["user"]["id"]}, "a brand new admin password 1234", "a very strong admin password")
+
 
 if __name__ == "__main__":
     unittest.main()

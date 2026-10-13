@@ -1,9 +1,41 @@
 export type Profile = {
   id: string;
   username: string;
+  mobile?: string;
   role: "superadmin" | "member";
   status: "active" | "pending" | "rejected";
   capabilities: string[];
+  created_at?: number;
+};
+
+export type ManagedUser = {
+  id: string;
+  username: string;
+  mobile: string;
+  role: "superadmin" | "member";
+  status: "active" | "pending" | "rejected";
+  capabilities: string[];
+  created_at: number;
+  decided_by?: string | null;
+  decided_at?: number | null;
+};
+
+export type UserProfileReport = {
+  user: {
+    id: string;
+    username: string;
+    mobile: string;
+    role: "superadmin" | "member";
+    status: "active" | "pending" | "rejected";
+    capabilities: string[];
+    created_at: number;
+  };
+  stats: {
+    total_sessions: number;
+    total_messages: number;
+    active_web_sessions: number;
+    active_agent_sessions: number;
+  };
 };
 
 export type ChatSession = { id: string; title: string; created_at: number; updated_at: number; message_count: number };
@@ -319,4 +351,12 @@ export const api = {
   downloadBackupUrl: (filename: string) => `/api/admin/system/backups/download?filename=${encodeURIComponent(filename)}`,
   updateStatus: (force = false) => request<UpdateStatus>(`/api/admin/system/update-status${force ? "?force=true" : ""}`),
   applyUpdate: () => request<UpdateResult>("/api/admin/system/update", "POST", {}),
+  adminUsers: () => request<{ users: ManagedUser[] }>("/api/admin/users"),
+  updateUserAccess: (data: { user_id: string; role?: string; status?: string; capabilities?: string[] }) =>
+    request<{ user: ManagedUser }>("/api/admin/users/update", "POST", data),
+  userProfile: () => request<UserProfileReport>("/api/user/profile"),
+  updateProfile: (data: { username?: string; mobile?: string }) =>
+    request<{ user: ManagedUser }>("/api/user/profile", "POST", data),
+  changePassword: (old_password: string, new_password: string) =>
+    request<{ status: string; message: string }>("/api/user/change-password", "POST", { old_password, new_password }),
 };
