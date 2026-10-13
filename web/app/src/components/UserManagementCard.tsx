@@ -106,6 +106,34 @@ export function UserManagementCard() {
     }
   }
 
+  async function handleResetQuota(userId: string, username: string) {
+    setError("");
+    setSuccess("");
+    try {
+      await api.resetUserQuota(userId);
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === userId
+            ? {
+                ...u,
+                chat_quota: {
+                  unlimited: false,
+                  used: 0,
+                  limit: 60,
+                  remaining: 60,
+                  reset_in_seconds: 0,
+                },
+              }
+            : u
+        )
+      );
+      setSuccess(`سهمیه ساعتی کاربر ${username} با موفقیت به ۶۰ درخواست بازنشانی شد.`);
+      setTimeout(() => setSuccess(""), 4000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطا در بازنشانی سهمیه کاربر");
+    }
+  }
+
   const filteredUsers = users.filter((u) => {
     if (filter === "active" && u.status !== "active") return false;
     if (filter === "pending" && u.status !== "pending") return false;
@@ -211,6 +239,13 @@ export function UserManagementCard() {
                         <span className={`status-pill status-${draft.status}`}>
                           {draft.status === "active" ? "فعال" : draft.status === "pending" ? "در انتظار" : "معلق / رد شده"}
                         </span>
+                        {u.role === "superadmin" ? (
+                          <span className="quota-badge quota-unlimited">⚡ سهمیه: نامحدود</span>
+                        ) : (
+                          <span className={`quota-badge ${(u.chat_quota?.used ?? 0) >= 50 ? "quota-full" : ""}`}>
+                            ⚡ مصرف ساعت: {(u.chat_quota?.used ?? 0).toLocaleString("fa-IR")} / ۶۰
+                          </span>
+                        )}
                       </div>
                       <div className="user-sub-details">
                         <span dir="ltr" className="user-mobile-text">{u.mobile}</span>
@@ -223,6 +258,16 @@ export function UserManagementCard() {
                   </div>
 
                   <div className="managed-user-actions">
+                    {u.role === "member" && (
+                      <button
+                        type="button"
+                        className="quiet-button small quota-reset-action-btn"
+                        onClick={() => void handleResetQuota(u.id, u.username)}
+                        title="صفر کردن مصرف این ساعت و بازنشانی سهمیه کاربر"
+                      >
+                        🔄 بازنشانی سهمیه
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="quiet-button small"

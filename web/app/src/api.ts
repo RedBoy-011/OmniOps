@@ -8,6 +8,14 @@ export type Profile = {
   created_at?: number;
 };
 
+export type ChatQuota = {
+  unlimited: boolean;
+  used: number;
+  limit: number | null;
+  remaining: number | null;
+  reset_in_seconds?: number;
+};
+
 export type ManagedUser = {
   id: string;
   username: string;
@@ -18,6 +26,7 @@ export type ManagedUser = {
   created_at: number;
   decided_by?: string | null;
   decided_at?: number | null;
+  chat_quota?: ChatQuota;
 };
 
 export type UserProfileReport = {
@@ -36,6 +45,7 @@ export type UserProfileReport = {
     active_web_sessions: number;
     active_agent_sessions: number;
   };
+  chat_quota?: ChatQuota;
 };
 
 export type ChatSession = { id: string; title: string; created_at: number; updated_at: number; message_count: number };
@@ -379,6 +389,8 @@ export const api = {
   adminUsers: () => request<{ users: ManagedUser[] }>("/api/admin/users"),
   updateUserAccess: (data: { user_id: string; role?: string; status?: string; capabilities?: string[] }) =>
     request<{ user: ManagedUser }>("/api/admin/users/update", "POST", data),
+  resetUserQuota: (user_id: string) =>
+    request<{ status: string; user_id: string }>("/api/admin/users/reset-quota", "POST", { user_id }),
   userProfile: () => request<UserProfileReport>("/api/user/profile"),
   updateProfile: (data: { username?: string; mobile?: string }) =>
     request<{ user: ManagedUser }>("/api/user/profile", "POST", data),

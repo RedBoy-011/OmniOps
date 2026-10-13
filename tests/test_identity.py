@@ -256,6 +256,57 @@ class IdentityTests(unittest.TestCase):
         self.assertGreaterEqual(len(login_logs), 1)
         self.assertTrue(all(item["event"] == "login" for item in login_logs))
 
+    def test_chat_quota_enforcement_and_reset(self):
+        admin = self._admin()
+        # Admin has unlimited quota
+        admin_quota = self.store.check_and_increment_chat_quota(admin)
+        self.assertTrue(admin_quota["unlimited"])
+
+        # Register and approve a member
+        member_id = self.store.register("quota_tester", "strong password 1234", "09125555555")
+        self.store.decide(admin, member_id, True)
+        member_login = self.store.login("quota_tester", "strong password 1234")
+        member_principal = self.store.authenticate(member_login["token"])
+
+        # Initial quota
+        initial = self.store.get_user_chat_quota(member_id, "member")
+        self.assertEqual(initial["used"], 0)
+        self.assertEqual(initial["limit"], 60)
+        self.assertEqual(initial["remaining"], 60)
+
+        # Increment up to 60
+        for i in range(60):
+            res = self.store.check_and_increment_chat_quota(member_principal)
+            self.assertEqual(res["used"], i + 1)
+
+        # 61st request should be blocked with 429
+        with self.assertRaises(IdentityError) as err:
+            self.store.check_and_increment_chat_quota(member_principal)
+        self.assertEqual(err.exception.status, 429)
+
+        # Non-admin cannot reset quota
+        with self.assertRaises(IdentityError) as err:
+            self.store.reset_user_chat_quota(member_principal, member_id)
+        self.assertEqual(err.exception.status, 403)
+
+        # Admin resets quota
+        reset_res = self.store.reset_user_chat_quota(admin, member_id)
+        self.assertEqual(reset_res["status"], "ok")
+
+        # After reset, member can make requests again
+        res_after = self.store.check_and_increment_chat_quota(member_principal)
+        self.assertEqual(res_after["used"], 1)
+
+        # Check list_users and user_profile_report contain quota
+        users = self.store.list_users(admin)
+        tester_user = next(u for u in users if u["id"] == member_id)
+        self.assertIn("chat_quota", tester_user)
+        self.assertEqual(tester_user["chat_quota"]["used"], 1)
+
+        report = self.store.user_profile_report(member_principal)
+        self.assertIn("chat_quota", report)
+        self.assertEqual(report["chat_quota"]["used"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

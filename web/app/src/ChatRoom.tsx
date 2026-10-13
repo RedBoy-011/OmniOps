@@ -35,6 +35,18 @@ export function ChatRoom() {
   const [includeSystemContext, setIncludeSystemContext] = useState(false);
   const [sessionSearch, setSessionSearch] = useState("");
   const [copiedChat, setCopiedChat] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [previewModalFile, setPreviewModalFile] = useState<{ name: string; content: string } | null>(null);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const localFileInputRef = useRef<HTMLInputElement>(null);
+  const [customTemplates, setCustomTemplates] = useState<{ id: string; title: string; prompt: string }[]>(() => {
+    try {
+      const saved = localStorage.getItem("omniops_custom_templates");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const endRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const localModels = models.filter(model => model.startsWith("ollama/"));
@@ -211,12 +223,66 @@ export function ChatRoom() {
 
   async function handleSelectFileToAttach(file: { path: string; name: string }) {
     setShowFilePicker(false);
+    setShowAttachMenu(false);
     try {
       const res = await api.projectFile(file.path);
       setAttachedFile({ path: file.path, name: file.name, content: res.content });
     } catch {
       setAttachedFile({ path: file.path, name: file.name, content: "" });
     }
+  }
+
+  function processUploadedFile(file: File) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const rawContent = (e.target?.result as string) || "";
+      const content = rawContent.slice(0, 48000);
+      setAttachedFile({
+        path: file.name,
+        name: file.name,
+        content,
+      });
+      setShowAttachMenu(false);
+    };
+    reader.onerror = () => {
+      setError("خطا در خواندن فایل محلی.");
+    };
+    reader.readAsText(file);
+  }
+
+  function handleLocalFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    processUploadedFile(file);
+    e.target.value = "";
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processUploadedFile(file);
+    }
+  }
+
+  function saveCurrentAsTemplate() {
+    if (!draft.trim()) return;
+    const title = window.prompt("عنوان این الگوی اختصاصی را وارد کنید:", draft.trim().slice(0, 30)) || "";
+    if (!title.trim()) return;
+    const next = [...customTemplates, { id: Date.now().toString(), title: title.trim(), prompt: draft.trim() }];
+    setCustomTemplates(next);
+    try {
+      localStorage.setItem("omniops_custom_templates", JSON.stringify(next));
+    } catch {}
+  }
+
+  function deleteCustomTemplate(id: string) {
+    const next = customTemplates.filter(t => t.id !== id);
+    setCustomTemplates(next);
+    try {
+      localStorage.setItem("omniops_custom_templates", JSON.stringify(next));
+    } catch {}
   }
 
   async function executePrompt(message: string) {
@@ -578,6 +644,26 @@ export function ChatRoom() {
             >
               📊 تحلیل داده و بینش آماری
             </button>
+            {customTemplates.map((t) => (
+              <div key={t.id} className="custom-template-chip-wrap">
+                <button
+                  type="button"
+                  className="prompt-template-chip custom"
+                  onClick={() => setDraft(t.prompt)}
+                  title={t.prompt}
+                >
+                  ⭐ {t.title}
+                </button>
+                <button
+                  type="button"
+                  className="custom-template-del-btn"
+                  onClick={(e) => { e.stopPropagation(); deleteCustomTemplate(t.id); }}
+                  title="حذف این الگو"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
           </div>
 
           <div className="chat-suggestions">
@@ -697,10 +783,39 @@ export function ChatRoom() {
     {/* کادر نوشتن پیام با منوی انتخاب مدل در پایین (مشابه تصاویر ۱، ۲ و ۳) */}
     <form className="web-chat-form" ref={formRef} onSubmit={(event) => void send(event)}>
       <label className="sr-only" htmlFor="web-chat-input">پیام</label>
-      <div className="antigravity-composer">
+      <input
+        type="file"
+        ref={localFileInputRef}
+        style={{ display: "none" }}
+        onChange={handleLocalFileChange}
+        accept=".txt,.md,.markdown,.json,.csv,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.sql,.yaml,.yml,.sh,.bat,.xml,.ini,.env"
+      />
+      <div
+        className={`antigravity-composer ${isDragging ? "chat-dropzone-active" : ""}`}
+        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={handleDrop}
+      >
+        {isDragging && (
+          <div className="chat-dropzone-overlay">
+            <span>📂 فایل را اینجا رها کنید تا به چت پیوست شود</span>
+          </div>
+        )}
         {attachedFile && (
           <div className="chat-attached-file-pill">
-            <span>📄 {attachedFile.name}</span>
+            <span
+              className="attached-file-clickable"
+              onClick={() => setPreviewModalFile({ name: attachedFile.name, content: attachedFile.content || "" })}
+              title="کلیک برای مشاهده پیش‌نمایش محتوای فایل"
+            >
+              📄 <strong>{attachedFile.name}</strong>
+              {attachedFile.content && (
+                <small style={{ opacity: 0.75, margin: "0 4px" }}>
+                  ({(attachedFile.content.length / 1024).toFixed(1)} KB)
+                </small>
+              )}
+              <span className="file-preview-hint">👁️ پیش‌نمایش</span>
+            </span>
             <button
               type="button"
               onClick={() => setAttachedFile(null)}
@@ -721,22 +836,49 @@ export function ChatRoom() {
         />
 
         <div className="antigravity-composer-footer">
-          {/* دکمه پیوست فایل پروژه */}
+          {/* دکمه پیوست فایل با منوی دوگانه (محلی و پروژه) */}
           <div style={{ position: "relative" }}>
             <button
               type="button"
               className={`chat-attach-file-btn ${attachedFile ? "active" : ""}`}
-              onClick={() => void handleOpenFilePicker()}
-              title="پیوست فایل پروژه به چت"
+              onClick={() => setShowAttachMenu(!showAttachMenu)}
+              title="پیوست فایل محلی یا فایل‌های پروژه سرور"
             >
               <span>📎</span>
               <span>{attachedFile ? attachedFile.name : "پیوست فایل"}</span>
             </button>
 
+            {showAttachMenu && (
+              <div className="chat-attach-menu-dropdown">
+                <button
+                  type="button"
+                  className="chat-attach-menu-item"
+                  onClick={() => {
+                    setShowAttachMenu(false);
+                    localFileInputRef.current?.click();
+                  }}
+                >
+                  <span>📁</span>
+                  <span>بارگذاری از کامپیوتر (Local File)</span>
+                </button>
+                <button
+                  type="button"
+                  className="chat-attach-menu-item"
+                  onClick={() => {
+                    setShowAttachMenu(false);
+                    void handleOpenFilePicker();
+                  }}
+                >
+                  <span>🗂️</span>
+                  <span>فایل‌های پروژه سرور (Project Files)</span>
+                </button>
+              </div>
+            )}
+
             {showFilePicker && (
               <div className="chat-file-picker-dropdown">
                 <div className="chat-file-picker-header">
-                  <span>انتخاب فایل پروژه</span>
+                  <span>انتخاب فایل پروژه سرور</span>
                   <button type="button" onClick={() => setShowFilePicker(false)} style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer" }}>✕</button>
                 </div>
                 {loadingFiles ? (
@@ -767,6 +909,17 @@ export function ChatRoom() {
             <span>📊</span>
             <span>{includeSystemContext ? "✓ وضعیت سرور ضمیمه شد" : "تزریق وضعیت سرور"}</span>
           </button>
+
+          {draft.trim().length > 5 && (
+            <button
+              type="button"
+              className="chat-save-template-btn"
+              onClick={saveCurrentAsTemplate}
+              title="ذخیره این متن به عنوان الگوی آماده اختصاصی"
+            >
+              ⭐ ذخیره به عنوان الگو
+            </button>
+          )}
 
           {/* دکمه انتخاب مدل و منوی سهمیه (تصویر ۲ و ۳) */}
           <div className="antigravity-model-picker-container">
@@ -847,6 +1000,26 @@ export function ChatRoom() {
     </form>
     {error && <p className="admin-message" role="alert">{error}</p>}
   </section>
+
+      {previewModalFile && (
+        <div className="chat-file-preview-modal-backdrop" onClick={() => setPreviewModalFile(null)}>
+          <div className="chat-file-preview-modal" onClick={(e) => e.stopPropagation()} dir="rtl">
+            <div className="preview-modal-header">
+              <div>
+                <h3>📄 پیش‌نمایش محتوای فایل: {previewModalFile.name}</h3>
+                <small>{previewModalFile.content.length.toLocaleString("fa-IR")} کاراکتر متن آماده پردازش توسط هوش مصنوعی</small>
+              </div>
+              <button type="button" className="close-preview-btn" onClick={() => setPreviewModalFile(null)} aria-label="بستن">✕</button>
+            </div>
+            <pre className="preview-modal-body" dir="ltr">
+              <code>{previewModalFile.content || "(محتوای فایل خالی است)"}</code>
+            </pre>
+            <div className="preview-modal-footer">
+              <button type="button" className="submit-button small" onClick={() => setPreviewModalFile(null)}>بستن پیش‌نمایش</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {previewOpen && (
         <FilePreviewPanel

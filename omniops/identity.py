@@ -25,6 +25,7 @@ ADMIN_CAPABILITIES = (
     "chat", "skill.use", "tool.read", "action.request", "action.approve",
     "agent.pair", "user.approve", "profile.manage", "provider.manage", "provider.use",
 )
+DEFAULT_HOURLY_CHAT_LIMIT = 60
 
 
 class IdentityError(ValueError):
@@ -389,6 +390,7 @@ class IdentityStore:
                     "created_at": r["created_at"],
                     "decided_by": r["decided_by"],
                     "decided_at": r["decided_at"],
+                    "chat_quota": self.get_user_chat_quota(r["id"], r["role"]),
                 }
                 for r in rows
             ]
@@ -560,6 +562,7 @@ class IdentityStore:
                     "active_web_sessions": active_web,
                     "active_agent_sessions": active_agent,
                 },
+                "chat_quota": self.get_user_chat_quota(uid, user_row["role"]),
             }
 
     def _pin_digest(self, pin: str) -> bytes:
@@ -691,4 +694,61 @@ class IdentityStore:
             params.append(max(1, min(int(limit), 200)))
             rows = db.execute(query, params).fetchall()
             return [dict(r) for r in rows]
+
+    def check_and_increment_chat_quota(self, principal: dict) -> dict:
+        if principal.get("role") == "superadmin":
+            return {"allowed": True, "unlimited": True, "used": 0, "limit": None}
+
+        scope = f"chat:user:{principal['id']}"
+        limit = DEFAULT_HOURLY_CHAT_LIMIT
+        now = int(self.clock())
+        with self._lock, self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT window_at, failures FROM rate_limits WHERE scope=?", (scope,)).fetchone()
+            count = row["failures"] if row and now - row["window_at"] < 3600 else 0
+            if count >= limit:
+                raise IdentityError(
+                    f"سقف مجاز درخواست‌های چت ساعتی شما ({limit} درخواست در ساعت) تکمیل شده است. لطفاً کمی بعد مجدداً تلاش کنید.",
+                    429,
+                )
+            window_at = row["window_at"] if (row and count > 0) else now
+            db.execute(
+                "INSERT INTO rate_limits(scope, window_at, failures) VALUES (?, ?, ?) "
+                "ON CONFLICT(scope) DO UPDATE SET window_at=excluded.window_at, failures=excluded.failures",
+                (scope, window_at, count + 1),
+            )
+            return {
+                "allowed": True,
+                "unlimited": False,
+                "used": count + 1,
+                "limit": limit,
+                "remaining": max(0, limit - (count + 1)),
+            }
+
+    def get_user_chat_quota(self, user_id: str, role: str) -> dict:
+        if role == "superadmin":
+            return {"unlimited": True, "used": 0, "limit": None, "remaining": None}
+        scope = f"chat:user:{user_id}"
+        limit = DEFAULT_HOURLY_CHAT_LIMIT
+        now = int(self.clock())
+        with self._db() as db:
+            row = db.execute("SELECT window_at, failures FROM rate_limits WHERE scope=?", (scope,)).fetchone()
+            count = row["failures"] if row and now - row["window_at"] < 3600 else 0
+            return {
+                "unlimited": False,
+                "used": count,
+                "limit": limit,
+                "remaining": max(0, limit - count),
+                "reset_in_seconds": max(0, 3600 - (now - row["window_at"])) if row and count > 0 else 0,
+            }
+
+    def reset_user_chat_quota(self, actor: dict, target_user_id: str) -> dict:
+        self._require_admin(actor)
+        if not isinstance(target_user_id, str):
+            raise IdentityError("User ID is required", 400)
+        scope = f"chat:user:{target_user_id}"
+        with self._lock, self._db() as db:
+            db.execute("DELETE FROM rate_limits WHERE scope=?", (scope,))
+            self._audit(db, actor["id"], "chat_quota_reset", target_user_id)
+        return {"status": "ok", "user_id": target_user_id}
 

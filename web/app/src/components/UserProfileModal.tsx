@@ -192,6 +192,19 @@ export function UserProfileModal({ currentUser, onClose, onProfileUpdated }: Use
                       <div className="stat-val">{report.stats.active_agent_sessions.toLocaleString("fa-IR")}</div>
                       <div className="stat-label">دستگاه‌های ایجنت</div>
                     </div>
+                    {report.chat_quota && (
+                      <div className="stat-card quota-stat-card">
+                        <span className="stat-icon">⚡</span>
+                        <div className="stat-val">
+                          {report.chat_quota.unlimited
+                            ? "نامحدود"
+                            : `${report.chat_quota.used.toLocaleString("fa-IR")} / ۶۰`}
+                        </div>
+                        <div className="stat-label">
+                          {report.chat_quota.unlimited ? "سهمیه سازمانی (مدیر کل)" : "مصرف چت ساعت جاری"}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="profile-info-summary">

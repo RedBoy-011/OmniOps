@@ -112,7 +112,7 @@ def make_server(
             effective_prompt = prompt.strip()
             if isinstance(attached, dict) and isinstance(attached.get('name'), str) and isinstance(attached.get('content'), str):
                 fname = attached.get('name')[:120]
-                fcontent = attached.get('content')[:16000]
+                fcontent = attached.get('content')[:48000]
                 effective_prompt = f"[پیوست فایل پروژه: {fname}]\n```\n{fcontent}\n```\n\n{prompt.strip()}"
             if payload.get('include_system_context', False) or telemetry.is_diagnostic_query(prompt):
                 try:
@@ -128,6 +128,9 @@ def make_server(
             session_id = payload.get('session_id')
             if session_id is not None and not isinstance(session_id, str):
                 raise IdentityError('Invalid session ID')
+
+            if identity_store:
+                identity_store.check_and_increment_chat_quota(principal)
 
             with active_inferences_lock:
                 if active_inferences[0] >= max_concurrent_inferences:
@@ -201,7 +204,7 @@ def make_server(
             effective_prompt = prompt.strip()
             if isinstance(attached, dict) and isinstance(attached.get('name'), str) and isinstance(attached.get('content'), str):
                 fname = attached.get('name')[:120]
-                fcontent = attached.get('content')[:16000]
+                fcontent = attached.get('content')[:48000]
                 effective_prompt = f"[پیوست فایل پروژه: {fname}]\n```\n{fcontent}\n```\n\n{prompt.strip()}"
             if payload.get('include_system_context', False) or telemetry.is_diagnostic_query(prompt):
                 try:
@@ -217,6 +220,9 @@ def make_server(
             session_id = payload.get('session_id')
             if session_id is not None and not isinstance(session_id, str):
                 raise IdentityError('Invalid session ID')
+
+            if identity_store:
+                identity_store.check_and_increment_chat_quota(principal)
 
             with active_inferences_lock:
                 if active_inferences[0] >= max_concurrent_inferences:
@@ -504,7 +510,7 @@ def make_server(
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/test-socks", "/api/admin/providers/enable", "/api/admin/providers/price",
                 "/api/admin/system/backups", "/api/admin/system/update",
-                "/api/admin/users/update", "/api/user/profile", "/api/user/change-password",
+                "/api/admin/users/update", "/api/admin/users/reset-quota", "/api/user/profile", "/api/user/change-password",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
@@ -588,6 +594,10 @@ def make_server(
                         status=payload.get("status"),
                         capabilities=payload.get("capabilities"),
                     )})
+                elif path == "/api/admin/users/reset-quota":
+                    if principal["role"] != "superadmin":
+                        raise IdentityError("Superadmin access required", 403)
+                    self._send(200, store.reset_user_chat_quota(principal, payload.get("user_id")))
                 elif path == "/api/user/profile":
                     self._send(200, {"user": store.update_profile(
                         principal,
