@@ -622,6 +622,32 @@ class WorkerEndpointTests(unittest.TestCase):
             self.assertEqual(code, 200)
             self.assertEqual(stop_res["run"]["status"], "cancelled")
 
+            # Admin sandbox policy GET & POST
+            code, policy_res = self.call("GET", "/api/admin/workspace/sandbox/policy", None, admin)
+            self.assertEqual(code, 200)
+            self.assertIn("policy", policy_res)
+            self.assertEqual(policy_res["policy"]["max_timeout_seconds"], 30)
+
+            code, update_pol_res = self.call("POST", "/api/admin/workspace/sandbox/policy", {
+                "max_timeout_seconds": 25,
+                "strict_mode": False,
+                "allowed_prefixes": ["git", "npm", "python"],
+                "blocked_commands": ["format", "shutdown"]
+            }, admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(update_pol_res["policy"]["max_timeout_seconds"], 25)
+
+            # Start Swarm run via API
+            code, swarm_res = self.call("POST", "/api/web/workspace/task/run", {
+                "project_id": p_id,
+                "prompt": "اجرای هماهنگ گروهی برای توسعه سیستم",
+                "mode": "swarm"
+            }, admin)
+            self.assertEqual(code, 201)
+            self.assertEqual(swarm_res["run"]["mode"], "swarm")
+            self.assertIn("subagents", swarm_res["run"])
+            self.assertEqual(len(swarm_res["run"]["subagents"]), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

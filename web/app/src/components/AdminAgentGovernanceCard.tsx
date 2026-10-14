@@ -1,5 +1,11 @@
 import { useState, useEffect } from "react";
-import { api, type AgentRun, type AgentPlanStep, type AgentRunLog } from "../api";
+import {
+  api,
+  type AgentRun,
+  type AgentPlanStep,
+  type AgentRunLog,
+  type SubagentRun,
+} from "../api";
 
 export function AdminAgentGovernanceCard() {
   const [runs, setRuns] = useState<AgentRun[]>([]);
@@ -14,6 +20,14 @@ export function AdminAgentGovernanceCard() {
   const [stopReason, setStopReason] = useState("توقف اضطراری توسط مدیریت ارشد سیستم");
   const [actionBusy, setActionBusy] = useState(false);
 
+  // Sandbox policy configuration state
+  const [showSandboxConfig, setShowSandboxConfig] = useState(false);
+  const [savingPolicy, setSavingPolicy] = useState(false);
+  const [policyTimeout, setPolicyTimeout] = useState<number>(30);
+  const [policyStrict, setPolicyStrict] = useState<boolean>(false);
+  const [policyAllowed, setPolicyAllowed] = useState<string>("");
+  const [policyBlocked, setPolicyBlocked] = useState<string>("");
+
   async function loadRuns() {
     setLoading(true);
     setError("");
@@ -24,6 +38,41 @@ export function AdminAgentGovernanceCard() {
       setError(err instanceof Error ? err.message : "خطا در بارگذاری فهرست ایجنت‌های سازمان");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadSandboxPolicy() {
+    try {
+      const res = await api.getSandboxPolicy();
+      setPolicyTimeout(res.policy.max_timeout_seconds);
+      setPolicyStrict(res.policy.strict_mode);
+      setPolicyAllowed((res.policy.allowed_prefixes || []).join(", "));
+      setPolicyBlocked((res.policy.blocked_commands || []).join(", "));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطا در دریافت سیاست‌های سندباکس");
+    }
+  }
+
+  async function handleSaveSandboxPolicy(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingPolicy(true);
+    setError("");
+    setActionSuccess("");
+    try {
+      const allowedArr = policyAllowed.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+      const blockedArr = policyBlocked.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+      await api.updateSandboxPolicy({
+        max_timeout_seconds: Number(policyTimeout),
+        strict_mode: policyStrict,
+        allowed_prefixes: allowedArr,
+        blocked_commands: blockedArr,
+      });
+      setActionSuccess("سیاست‌های امنیتی و محدودیت‌های اجرایی سندباکس با موفقیت ذخیره شد.");
+      setShowSandboxConfig(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطا در بروزرسانی سیاست‌های سندباکس");
+    } finally {
+      setSavingPolicy(false);
     }
   }
 
@@ -108,14 +157,26 @@ export function AdminAgentGovernanceCard() {
             <p>مشاهده تمام چرخه‌های ایجنت در سازمان، صدور مجوز اقدام‌های حساس و توقف اضطراری (Kill-Switch)</p>
           </div>
         </div>
-        <button
-          type="button"
-          className="quiet-button"
-          onClick={() => void loadRuns()}
-          disabled={loading}
-        >
-          {loading ? "⏳ در حال بازیابی..." : "🔄 بروزرسانی زنده"}
-        </button>
+        <div className="governance-actions-top">
+          <button
+            type="button"
+            className="action-button secondary-btn"
+            onClick={() => {
+              void loadSandboxPolicy();
+              setShowSandboxConfig(true);
+            }}
+          >
+            🛡️ تنظیمات سندباکس و سقف منابع
+          </button>
+          <button
+            type="button"
+            className="quiet-button"
+            onClick={() => void loadRuns()}
+            disabled={loading}
+          >
+            {loading ? "⏳ در حال بازیابی..." : "🔄 بروزرسانی زنده"}
+          </button>
+        </div>
       </div>
 
       {error && <div className="agentic-error-banner" role="alert">⚠️ {error}</div>}
@@ -215,9 +276,16 @@ export function AdminAgentGovernanceCard() {
                       <span className="owner-badge">👤 {r.owner_username || "نامشخص"}</span>
                     </td>
                     <td>
-                      <span className={`role-badge ${roleMeta.cls}`}>
-                        {roleMeta.icon} {roleMeta.label}
-                      </span>
+                      <div className="role-and-mode">
+                        <span className={`role-badge ${roleMeta.cls}`}>
+                          {roleMeta.icon} {roleMeta.label}
+                        </span>
+                        {r.mode === "swarm" || (r.subagents && r.subagents.length > 0) ? (
+                          <span className="swarm-indicator-badge">🐝 سوارم</span>
+                        ) : (
+                          <span className="single-indicator-badge">👤 تک‌ایـجنت</span>
+                        )}
+                      </div>
                     </td>
                     <td className="col-progress">
                       <span className="step-counter">گام {r.current_step_index + 1} از {r.plan_steps.length}</span>
@@ -362,6 +430,25 @@ export function AdminAgentGovernanceCard() {
               </div>
             </div>
 
+            {/* زیرایجنت‌های سوارم */}
+            {inspectRun.subagents && inspectRun.subagents.length > 0 && (
+              <div className="inspect-subagents-section">
+                <h5>🐝 زیرایجنت‌های هماهنگ سوارم ({inspectRun.subagents.length} عامل):</h5>
+                <div className="inspect-subagents-grid">
+                  {inspectRun.subagents.map((sub: SubagentRun) => (
+                    <div key={sub.id} className={`inspect-subagent-card ${sub.status}`}>
+                      <div className="subagent-top">
+                        <strong>{sub.title}</strong>
+                        <span className={`sub-status-pill ${sub.status}`}>{statusLabels[sub.status]?.text || sub.status}</span>
+                      </div>
+                      <small className="sub-prompt"><strong>ماموریت:</strong> {sub.prompt}</small>
+                      {sub.summary && <p className="sub-summary">{sub.summary}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {inspectRun.result_summary && (
               <div className="inspect-result-summary">
                 <h5>🎯 جمع‌بندی نهایی ایجنت:</h5>
@@ -396,6 +483,101 @@ export function AdminAgentGovernanceCard() {
                 بستن
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* مدال تنظیمات سندباکس و سقف منابع */}
+      {showSandboxConfig && (
+        <div className="admin-modal-backdrop" onClick={() => setShowSandboxConfig(false)}>
+          <div className="admin-modal-card large" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header-row">
+              <div>
+                <h4>🛡️ سیاست‌های امنیتی و محدودیت‌های اجرایی سندباکس (Workspace Sandbox Policy)</h4>
+                <small>تنظیم سقف زمان اجرا، حالت سخت‌گیرانه، و الگوهای مجاز/غیرمجاز فرامین ایجنت در رایانه و سرور</small>
+              </div>
+              <button type="button" className="close-btn" onClick={() => setShowSandboxConfig(false)}>✕</button>
+            </div>
+
+            <form onSubmit={handleSaveSandboxPolicy} className="sandbox-policy-form">
+              <div className="form-row-grid">
+                <div className="modal-form-field">
+                  <label htmlFor="policy-timeout-input">
+                    ⏱️ سقف مجاز زمان اجرای هر دستور (ثانیه):
+                  </label>
+                  <input
+                    id="policy-timeout-input"
+                    type="number"
+                    min={5}
+                    max={120}
+                    value={policyTimeout}
+                    onChange={(e) => setPolicyTimeout(Number(e.target.value))}
+                    required
+                  />
+                  <small>محدوده مجاز بین ۵ تا ۱۲۰ ثانیه (پیش‌فرض: ۳۰ ثانیه)</small>
+                </div>
+
+                <div className="modal-form-field checkbox-field">
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={policyStrict}
+                      onChange={(e) => setPolicyStrict(e.target.checked)}
+                    />
+                    <strong>🔒 فعال‌سازی حالت سخت‌گیرانه (Strict Whitelist Mode)</strong>
+                  </label>
+                  <small>در این حالت، فقط دستوراتی که با پیشوندهای مجاز زیر شروع شوند اجازه اجرا خواهند داشت.</small>
+                </div>
+              </div>
+
+              <div className="modal-form-field">
+                <label htmlFor="policy-allowed-input">
+                  ✅ پیشوندهای دستورات مجاز (جداشده با کاما):
+                </label>
+                <textarea
+                  id="policy-allowed-input"
+                  dir="ltr"
+                  rows={3}
+                  value={policyAllowed}
+                  onChange={(e) => setPolicyAllowed(e.target.value)}
+                  placeholder="git, npm, yarn, python, pytest, cargo, go..."
+                />
+                <small>ابزارهایی مانند کامپایلرها، پکیج‌منیجرها و آزمون‌گرهای استاندارد</small>
+              </div>
+
+              <div className="modal-form-field">
+                <label htmlFor="policy-blocked-input">
+                  🚫 عبارات و الگوهای خطرناک ممنوعه (جداشده با کاما):
+                </label>
+                <textarea
+                  id="policy-blocked-input"
+                  dir="ltr"
+                  rows={3}
+                  value={policyBlocked}
+                  onChange={(e) => setPolicyBlocked(e.target.value)}
+                  placeholder="format, rmdir /s /q, del /f /s /q, rm -rf /..."
+                />
+                <small>هر فرمانی حاوی این کلیدواژه‌ها بلافاصله توسط موتور سندباکس مسدود می‌شود.</small>
+              </div>
+
+              <div className="modal-actions-row">
+                <button
+                  type="submit"
+                  className="action-button primary-accent"
+                  disabled={savingPolicy}
+                >
+                  {savingPolicy ? "⏳ در حال ذخیره..." : "💾 ذخیره سیاست‌های سندباکس"}
+                </button>
+                <button
+                  type="button"
+                  className="quiet-button"
+                  onClick={() => setShowSandboxConfig(false)}
+                  disabled={savingPolicy}
+                >
+                  انصراف
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

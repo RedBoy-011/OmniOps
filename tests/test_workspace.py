@@ -298,4 +298,107 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(last_log['type'], 'admin_intervention')
         self.assertIn('توقف به دلیل مصرف', last_log['content'])
 
+    def test_workspace_sandbox_policy_and_enforcement(self):
+        # Non-superadmin cannot get or update policy
+        with self.assertRaises(IdentityError) as ctx:
+            self.workspace.get_sandbox_policy(self.member)
+        self.assertEqual(ctx.exception.status, 403)
+
+        with self.assertRaises(IdentityError) as ctx:
+            self.workspace.update_sandbox_policy(self.member, {'max_timeout_seconds': 45})
+        self.assertEqual(ctx.exception.status, 403)
+
+        # Superadmin retrieves default policy
+        policy = self.workspace.get_sandbox_policy(self.owner)
+        self.assertEqual(policy['max_timeout_seconds'], 30)
+        self.assertFalse(policy['strict_mode'])
+        self.assertIn('git', policy['allowed_prefixes'])
+        self.assertIn('format ', policy['blocked_commands'])
+
+        # Superadmin updates policy to enable strict_mode
+        updated = self.workspace.update_sandbox_policy(self.owner, {
+            'max_timeout_seconds': 10,
+            'strict_mode': True,
+            'allowed_prefixes': ['git', 'python', 'npm', 'echo'],
+            'blocked_commands': ['shutdown', 'format', 'dangerous_rm']
+        })
+        self.assertEqual(updated['max_timeout_seconds'], 10)
+        self.assertTrue(updated['strict_mode'])
+        self.assertIn('echo', updated['allowed_prefixes'])
+
+        # Create a project to test command execution under policy
+        proj_dir = Path(self.temp.name) / 'sandbox_proj'
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        proj = self.workspace.create_project(self.owner, 'Sandbox Proj', str(proj_dir))
+
+        # Blocked pattern check
+        with self.assertRaises(IdentityError) as ctx:
+            self.workspace.execute_project_command(self.owner, proj['id'], 'dangerous_rm -rf /')
+        self.assertEqual(ctx.exception.status, 400)
+        self.assertIn("Prohibited dangerous command", str(ctx.exception))
+
+        # Strict mode whitelist rejection: 'curl' is not in ['git', 'python', 'npm', 'echo']
+        with self.assertRaises(IdentityError) as ctx:
+            self.workspace.execute_project_command(self.owner, proj['id'], 'curl https://example.com')
+        self.assertEqual(ctx.exception.status, 403)
+        self.assertIn("is disallowed by workspace sandbox policy", str(ctx.exception))
+
+        # Strict mode allowed command: 'echo' is allowed
+        res = self.workspace.execute_project_command(self.owner, proj['id'], 'echo 25')
+        self.assertEqual(res['exit_code'], 0)
+        self.assertIn('25', res['stdout'])
+
+    def test_workspace_multi_agent_swarm_orchestration(self):
+        proj_dir = Path(self.temp.name) / 'swarm_proj'
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        (proj_dir / 'package.json').write_text('{"name": "swarm-app", "scripts": {"test": "echo test passed"}}', encoding='utf-8')
+        (proj_dir / 'README.md').write_text('# Swarm App\nMulti-Agent Orchestration Target.', encoding='utf-8')
+
+        proj = self.workspace.create_project(self.member, 'Swarm Project', str(proj_dir))
+
+        # Start Swarm run
+        swarm_run = self.workspace.start_agent_run(
+            self.member,
+            proj['id'],
+            'بررسی چندعاملی و تست کامل پروژه',
+            role='general',
+            mode='swarm'
+        )
+        self.assertEqual(swarm_run['mode'], 'swarm')
+        self.assertIn('subagents', swarm_run)
+        self.assertEqual(len(swarm_run['subagents']), 3)
+
+        # Verify 3 subagents: architect, coder, tester
+        roles = [s['role'] for s in swarm_run['subagents']]
+        self.assertEqual(roles, ['architect', 'coder', 'tester'])
+
+        # Architect subagent should be completed with inspection
+        arch = next(s for s in swarm_run['subagents'] if s['role'] == 'architect')
+        self.assertEqual(arch['status'], 'completed')
+        self.assertIn('Node.js', arch['summary'])
+
+        # Coder subagent should be completed after inspecting package.json
+        coder = next(s for s in swarm_run['subagents'] if s['role'] == 'coder')
+        self.assertEqual(coder['status'], 'completed')
+        self.assertIn('package.json', coder['summary'])
+
+        # Tester subagent should be waiting_approval or pending
+        tester = next(s for s in swarm_run['subagents'] if s['role'] == 'tester')
+        self.assertEqual(tester['status'], 'waiting_approval')
+
+        # Admin approves the swarm step
+        approved_swarm = self.workspace.admin_approve_agent_run_step(self.owner, swarm_run['id'])
+        self.assertEqual(approved_swarm['status'], 'completed')
+
+        # Verify updated tester subagent
+        updated_tester = next(s for s in approved_swarm['subagents'] if s['role'] == 'tester')
+        self.assertEqual(updated_tester['status'], 'completed')
+
+        # Verify final multi-agent synthesis
+        self.assertIn('Multi-Agent Swarm', approved_swarm['result_summary'])
+        self.assertIn('معمار سیستم', approved_swarm['result_summary'])
+        self.assertIn('مهندس کدنویس', approved_swarm['result_summary'])
+        self.assertIn('تضمین کیفیت', approved_swarm['result_summary'])
+
+
 

@@ -481,15 +481,17 @@ async fn start_agent_run(
     project_id: String,
     prompt: String,
     role: Option<String>,
+    mode: Option<String>,
     state: State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let clean_role = role.unwrap_or_else(|| "general".to_string());
+    let clean_mode = mode.unwrap_or_else(|| "single".to_string());
     profile_call(
         state,
         "chat",
         reqwest::Method::POST,
         "/api/agent/workspace/task/run",
-        Some(serde_json::json!({"project_id": project_id, "prompt": prompt, "role": clean_role})),
+        Some(serde_json::json!({"project_id": project_id, "prompt": prompt, "role": clean_role, "mode": clean_mode})),
     )
     .await
 }

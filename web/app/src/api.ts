@@ -287,7 +287,29 @@ export type AgentRunLog = {
   exit_code?: number;
 };
 
-export type AgentRole = "general" | "coder" | "tester" | "architect";
+export type AgentRole = "general" | "coder" | "tester" | "architect" | "swarm";
+export type AgentMode = "single" | "swarm";
+
+export type SubagentRun = {
+  id: string;
+  parent_run_id: string;
+  role: string;
+  title: string;
+  status: "pending" | "in_progress" | "completed" | "failed" | "cancelled" | "waiting_approval";
+  prompt: string;
+  summary: string;
+  logs: Array<{ timestamp: number; title: string; content: string }>;
+  created_at: number;
+  updated_at: number;
+};
+
+export type SandboxPolicy = {
+  max_timeout_seconds: number;
+  strict_mode: boolean;
+  allowed_prefixes: string[];
+  blocked_commands: string[];
+  updated_at: number;
+};
 
 export type FilePatchProposal = {
   project_id: string;
@@ -310,10 +332,12 @@ export type AgentRun = {
   project_name?: string;
   prompt: string;
   role: AgentRole;
+  mode?: AgentMode;
   status: "planning" | "in_progress" | "waiting_approval" | "completed" | "failed" | "cancelled";
   current_step_index: number;
   plan_steps: AgentPlanStep[];
   logs: AgentRunLog[];
+  subagents?: SubagentRun[];
   result_summary: string;
   created_at: number;
   updated_at: number;
@@ -513,8 +537,8 @@ export const api = {
     request<{ status: string; project_id: string; path: string; bytes: number }>("/api/web/workspace/project/file", "POST", { project_id, path, content }),
   executeProjectCommand: (project_id: string, command: string, timeout = 15) =>
     request<CommandExecutionResult>("/api/web/workspace/project/command", "POST", { project_id, command, timeout }),
-  startAgentRun: (project_id: string, prompt: string, role: AgentRole = "general") =>
-    request<{ run: AgentRun }>("/api/web/workspace/task/run", "POST", { project_id, prompt, role }),
+  startAgentRun: (project_id: string, prompt: string, role: AgentRole = "general", mode: AgentMode = "single") =>
+    request<{ run: AgentRun }>("/api/web/workspace/task/run", "POST", { project_id, prompt, role, mode }),
   proposeFilePatch: (project_id: string, path: string, content: string, apply = false) =>
     request<FilePatchProposal>("/api/web/workspace/project/patch", "POST", { project_id, path, content, apply }),
   advanceAgentRun: (run_id: string) =>
@@ -533,4 +557,8 @@ export const api = {
     request<{ run: AgentRun }>("/api/admin/workspace/agent/runs/stop", "POST", { run_id, reason }),
   adminApproveAgentRun: (run_id: string) =>
     request<{ run: AgentRun }>("/api/admin/workspace/agent/runs/approve", "POST", { run_id }),
+  getSandboxPolicy: () =>
+    request<{ policy: SandboxPolicy }>("/api/admin/workspace/sandbox/policy"),
+  updateSandboxPolicy: (payload: Partial<SandboxPolicy>) =>
+    request<{ policy: SandboxPolicy }>("/api/admin/workspace/sandbox/policy", "POST", payload),
 };

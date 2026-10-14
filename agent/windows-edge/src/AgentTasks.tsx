@@ -13,13 +13,25 @@ type AgentPlanStep = {
   command?: string;
 };
 
+type SubagentRun = {
+  id: string;
+  role: string;
+  title: string;
+  status: string;
+  prompt: string;
+  summary: string;
+};
+
 type AgentRun = {
   id: string;
   project_id: string;
   prompt: string;
+  role?: string;
+  mode?: "single" | "swarm";
   status: string;
   current_step_index: number;
   plan_steps: AgentPlanStep[];
+  subagents?: SubagentRun[];
   result_summary: string;
   created_at: number;
 };
@@ -34,6 +46,7 @@ export function AgentTasks({ canRequest }: { canRequest: boolean }) {
   const [description, setDescription] = useState("");
   const [runPrompt, setRunPrompt] = useState("");
   const [role, setRole] = useState<"general" | "coder" | "tester" | "architect">("general");
+  const [mode, setMode] = useState<"single" | "swarm">("single");
   const [tab, setTab] = useState<"autonomous" | "drafts">("autonomous");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -97,6 +110,7 @@ export function AgentTasks({ canRequest }: { canRequest: boolean }) {
         projectId: selected,
         prompt: runPrompt.trim(),
         role,
+        mode,
       });
       setActiveRun(res.run);
       setRunPrompt("");
@@ -244,33 +258,74 @@ export function AgentTasks({ canRequest }: { canRequest: boolean }) {
         <div className="agent-autonomous-view">
           <form onSubmit={(e) => void startRun(e)}>
             <label htmlFor="agent-run-prompt">تعریف وظیفه یا هدف روی پروژه:</label>
-            <div style={{ display: "flex", gap: "6px", margin: "6px 0 8px 0" }}>
-              {(
-                [
-                  ["general", "🧠 عمومی"],
-                  ["coder", "🛠️ برنامه‌نویس"],
-                  ["tester", "🧪 تست"],
-                  ["architect", "🏛️ معمار"],
-                ] as const
-              ).map(([r, label]) => (
-                <button
-                  key={r}
-                  type="button"
-                  style={{
-                    flex: 1,
-                    padding: "4px",
-                    fontSize: "11px",
-                    borderRadius: "4px",
-                    background: role === r ? "rgba(99,102,241,0.3)" : "rgba(255,255,255,0.05)",
-                    borderColor: role === r ? "#6366f1" : "rgba(255,255,255,0.1)",
-                    cursor: "pointer",
-                  }}
-                  onClick={() => setRole(r)}
-                >
-                  {label}
-                </button>
-              ))}
+            {/* انتخاب مد ارکستراسیون */}
+            <div style={{ display: "flex", gap: "6px", margin: "6px 0 6px 0" }}>
+              <button
+                type="button"
+                style={{
+                  flex: 1,
+                  padding: "4px 8px",
+                  fontSize: "11px",
+                  borderRadius: "4px",
+                  background: mode === "single" ? "rgba(99,102,241,0.3)" : "rgba(255,255,255,0.05)",
+                  borderColor: mode === "single" ? "#6366f1" : "rgba(255,255,255,0.1)",
+                  cursor: "pointer",
+                }}
+                onClick={() => setMode("single")}
+              >
+                👤 تک‌ایـجنت
+              </button>
+              <button
+                type="button"
+                style={{
+                  flex: 1,
+                  padding: "4px 8px",
+                  fontSize: "11px",
+                  borderRadius: "4px",
+                  background: mode === "swarm" ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.05)",
+                  borderColor: mode === "swarm" ? "#f59e0b" : "rgba(255,255,255,0.1)",
+                  cursor: "pointer",
+                  color: mode === "swarm" ? "#fbbf24" : "inherit",
+                }}
+                onClick={() => setMode("swarm")}
+              >
+                🐝 سوارم چندعاملی (Swarm)
+              </button>
             </div>
+
+            {mode === "single" ? (
+              <div style={{ display: "flex", gap: "6px", margin: "4px 0 8px 0" }}>
+                {(
+                  [
+                    ["general", "🧠 عمومی"],
+                    ["coder", "🛠️ برنامه‌نویس"],
+                    ["tester", "🧪 تست"],
+                    ["architect", "🏛️ معمار"],
+                  ] as const
+                ).map(([r, label]) => (
+                  <button
+                    key={r}
+                    type="button"
+                    style={{
+                      flex: 1,
+                      padding: "4px",
+                      fontSize: "11px",
+                      borderRadius: "4px",
+                      background: role === r ? "rgba(99,102,241,0.3)" : "rgba(255,255,255,0.05)",
+                      borderColor: role === r ? "#6366f1" : "rgba(255,255,255,0.1)",
+                      cursor: "pointer",
+                    }}
+                    onClick={() => setRole(r)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div style={{ padding: "6px 8px", background: "rgba(245,158,11,0.1)", borderRadius: "4px", fontSize: "11px", color: "#fde68a", margin: "4px 0 8px 0" }}>
+                🐝 همکاری هماهنگ ۳ زیرایجنت: <strong>🏛️ معمار</strong> ➔ <strong>🛠️ کدنویس</strong> ➔ <strong>🧪 تستر</strong>
+              </div>
+            )}
             <textarea
               id="agent-run-prompt"
               rows={2}
@@ -305,6 +360,25 @@ export function AgentTasks({ canRequest }: { canRequest: boolean }) {
                   </div>
                 ))}
               </div>
+
+              {activeRun.subagents && activeRun.subagents.length > 0 && (
+                <div style={{ marginTop: "10px", padding: "8px", background: "rgba(245,158,11,0.05)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: "6px" }}>
+                  <small style={{ color: "#fbbf24", fontWeight: 700, display: "block", marginBottom: "6px" }}>🐝 زیرایجنت‌های هماهنگ سوارم:</small>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    {activeRun.subagents.map((sub) => (
+                      <div key={sub.id} style={{ fontSize: "11px", padding: "4px 6px", background: "rgba(0,0,0,0.3)", borderRadius: "4px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <strong style={{ color: "#f1f5f9" }}>{sub.title}</strong>
+                          <span style={{ color: sub.status === "completed" ? "#86efac" : sub.status === "in_progress" ? "#7dd3fc" : "#cbd5e1" }}>
+                            {sub.status === "completed" ? "✅ تکمیل" : sub.status === "in_progress" ? "⏳ در حال اجرا" : sub.status}
+                          </span>
+                        </div>
+                        {sub.summary && <div style={{ color: "#94a3b8", marginTop: "2px" }}>{sub.summary}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div style={{ display: "flex", gap: "8px", marginTop: "10px" }}>
                 {activeRun.status === "waiting_approval" && (

@@ -7,6 +7,7 @@ import {
   type CommandExecutionResult,
   type AgentRun,
   type AgentRole,
+  type AgentMode,
   type FilePatchProposal,
 } from "../api";
 
@@ -22,8 +23,10 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
-  // Agent Role selection state
+  // Agent Role & Swarm Mode selection state
   const [selectedRole, setSelectedRole] = useState<AgentRole>("general");
+  const [selectedMode, setSelectedMode] = useState<AgentMode>("single");
+  const [expandedSubagentId, setExpandedSubagentId] = useState<string | null>(null);
 
   // File viewing and patch proposal state
   const [isEditingFile, setIsEditingFile] = useState(false);
@@ -123,10 +126,14 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
     setError("");
     setSuccessMsg("");
     try {
-      const res = await api.startAgentRun(selectedProjectId, agentTaskPrompt.trim(), selectedRole);
+      const res = await api.startAgentRun(selectedProjectId, agentTaskPrompt.trim(), selectedRole, selectedMode);
       setActiveRun(res.run);
       setAgentTaskPrompt("");
-      setSuccessMsg("چرخه اجرای خودکار وظیفه توسط ایجنت با موفقیت آغاز شد.");
+      setSuccessMsg(
+        selectedMode === "swarm"
+          ? "🐝 چرخه همکاری چندعاملی سوارم (Multi-Agent Swarm) با موفقیت آغاز شد."
+          : "چرخه اجرای خودکار وظیفه توسط ایجنت با موفقیت آغاز شد."
+      );
       await loadAgentRuns(selectedProjectId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "آغاز چرخه ایجنت ناموفق بود.");
@@ -491,41 +498,71 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
 
             {/* فرم ورود تسک یا هدف */}
             <form onSubmit={handleStartAgentRun} className="agent-task-input-box">
-              <div className="agent-role-selector-row">
-                <span className="role-selector-label">نقش تخصصی ایجنت:</span>
+              <div className="agent-mode-selector-row">
+                <span className="mode-selector-label">حالت ارکستراسیون:</span>
                 <button
                   type="button"
-                  className={`role-pill-btn ${selectedRole === "general" ? "active" : ""}`}
-                  onClick={() => setSelectedRole("general")}
-                  title="بررسی عمومی، داکیومنت‌ها، وابستگی‌ها و تدوین نقشه راه"
+                  className={`mode-pill-btn ${selectedMode === "single" ? "active" : ""}`}
+                  onClick={() => setSelectedMode("single")}
+                  title="اجرای مستقل با تمرکز روی یک نقش تخصصی انتخابی"
                 >
-                  🧠 عمومی (Generalist)
+                  👤 تک‌ایـجنت (Single Agent)
                 </button>
                 <button
                   type="button"
-                  className={`role-pill-btn ${selectedRole === "coder" ? "active" : ""}`}
-                  onClick={() => setSelectedRole("coder")}
-                  title="تحلیل ماژول‌ها، بررسی سینتکس، کامپایلر و تولید پیشنهاد پچ (Patch)"
+                  className={`mode-pill-btn swarm ${selectedMode === "swarm" ? "active" : ""}`}
+                  onClick={() => setSelectedMode("swarm")}
+                  title="همکاری تیمی ۳ ایجنت متخصص (معمار + برنامه‌نویس + تستر)"
                 >
-                  🛠️ برنامه‌نویس (Coder)
-                </button>
-                <button
-                  type="button"
-                  className={`role-pill-btn ${selectedRole === "tester" ? "active" : ""}`}
-                  onClick={() => setSelectedRole("tester")}
-                  title="پویش پایگاه تست‌ها، اجرای آزمون‌ها و گزارش تضمین کیفیت QA"
-                >
-                  🧪 تست و ارزیابی (Tester)
-                </button>
-                <button
-                  type="button"
-                  className={`role-pill-btn ${selectedRole === "architect" ? "active" : ""}`}
-                  onClick={() => setSelectedRole("architect")}
-                  title="تحلیل کلان معماری، استانداردهای مهندسی، توپولوژی و انطباق سیستم"
-                >
-                  🏛️ معمار سیستم (Architect)
+                  🐝 همکاری گروهی سوارم (Multi-Agent Swarm)
                 </button>
               </div>
+
+              {selectedMode === "single" ? (
+                <div className="agent-role-selector-row">
+                  <span className="role-selector-label">نقش تخصصی ایجنت:</span>
+                  <button
+                    type="button"
+                    className={`role-pill-btn ${selectedRole === "general" ? "active" : ""}`}
+                    onClick={() => setSelectedRole("general")}
+                    title="بررسی عمومی، داکیومنت‌ها، وابستگی‌ها و تدوین نقشه راه"
+                  >
+                    🧠 عمومی (Generalist)
+                  </button>
+                  <button
+                    type="button"
+                    className={`role-pill-btn ${selectedRole === "coder" ? "active" : ""}`}
+                    onClick={() => setSelectedRole("coder")}
+                    title="تحلیل ماژول‌ها، بررسی سینتکس، کامپایلر و تولید پیشنهاد پچ (Patch)"
+                  >
+                    🛠️ برنامه‌نویس (Coder)
+                  </button>
+                  <button
+                    type="button"
+                    className={`role-pill-btn ${selectedRole === "tester" ? "active" : ""}`}
+                    onClick={() => setSelectedRole("tester")}
+                    title="پویش پایگاه تست‌ها، اجرای آزمون‌ها و گزارش تضمین کیفیت QA"
+                  >
+                    🧪 تست و ارزیابی (Tester)
+                  </button>
+                  <button
+                    type="button"
+                    className={`role-pill-btn ${selectedRole === "architect" ? "active" : ""}`}
+                    onClick={() => setSelectedRole("architect")}
+                    title="تحلیل کلان معماری، استانداردهای مهندسی، توپولوژی و انطباق سیستم"
+                  >
+                    🏛️ معمار سیستم (Architect)
+                  </button>
+                </div>
+              ) : (
+                <div className="swarm-mode-banner">
+                  <span className="swarm-badge-icon">🐝</span>
+                  <div className="swarm-banner-text">
+                    <strong>تیم چندعاملی هماهنگ (Multi-Agent Swarm):</strong>
+                    <span> ارکستراسیون ۳ زیرایجنت هوشمند به صورت همگام: <strong>🏛️ معمار</strong> (تحلیل ساختار کلان) ➔ <strong>🛠️ کدنویس</strong> (ممیزی و اعمال تغییرات) ➔ <strong>🧪 تستر</strong> (ارزیابی آزمون‌ها و کیفیت)</span>
+                  </div>
+                </div>
+              )}
 
               <div className="prompt-input-row">
                 <input
@@ -606,6 +643,57 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
                     </div>
                   ))}
                 </div>
+
+                {/* درخت هماهنگی و وضعیت زیرایجنت‌های سوارم */}
+                {activeRun.subagents && activeRun.subagents.length > 0 && (
+                  <div className="swarm-orchestration-section">
+                    <div className="swarm-header">
+                      <h4>🐝 ساختار تیم چندعاملی سوارم ({activeRun.subagents.length} زیرایجنت هماهنگ)</h4>
+                      <span className="swarm-tag">Multi-Agent Swarm Orchestration</span>
+                    </div>
+                    <div className="swarm-subagents-grid">
+                      {activeRun.subagents.map((sub) => (
+                        <div key={sub.id} className={`swarm-subagent-card ${sub.status}`}>
+                          <div className="subagent-card-header">
+                            <div className="subagent-role-title">
+                              <strong>{sub.title}</strong>
+                              <span className="subagent-role-pill">{sub.role}</span>
+                            </div>
+                            <span className={`subagent-status-badge ${sub.status}`}>
+                              {sub.status === "completed" ? "✅ تکمیل شده" :
+                               sub.status === "in_progress" ? "⏳ در حال اجرا" :
+                               sub.status === "waiting_approval" ? "⚠️ نیازمند تایید" :
+                               sub.status === "pending" ? "در نوبت" : sub.status}
+                            </span>
+                          </div>
+                          <p className="subagent-prompt"><strong>ماموریت:</strong> {sub.prompt}</p>
+                          {sub.summary && <p className="subagent-summary"><strong>دستاورد:</strong> {sub.summary}</p>}
+                          {sub.logs && sub.logs.length > 0 && (
+                            <div className="subagent-logs-wrapper">
+                              <button
+                                type="button"
+                                className="subagent-logs-toggle"
+                                onClick={() => setExpandedSubagentId(expandedSubagentId === sub.id ? null : sub.id)}
+                              >
+                                {expandedSubagentId === sub.id ? "▲ بستن لاگ‌ها" : `▼ لاگ‌های زیرایجنت (${sub.logs.length})`}
+                              </button>
+                              {expandedSubagentId === sub.id && (
+                                <div className="subagent-logs-list">
+                                  {sub.logs.map((log, lIdx) => (
+                                    <div key={lIdx} className="subagent-log-item">
+                                      <small>{log.title}</small>
+                                      <pre dir="ltr">{log.content}</pre>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* اقدامات هدایت گام‌ها */}
                 <div className="run-controls-row">

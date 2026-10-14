@@ -536,6 +536,7 @@ def make_server(
                 "/api/web/workspace/task/run/approve", "/api/agent/workspace/task/run/approve",
                 "/api/web/workspace/task/run/cancel", "/api/agent/workspace/task/run/cancel",
                 "/api/admin/workspace/agent/runs/stop", "/api/admin/workspace/agent/runs/approve",
+                "/api/admin/workspace/sandbox/policy",
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/test-socks", "/api/admin/providers/enable", "/api/admin/providers/price",
                 "/api/admin/system/backups", "/api/admin/system/update",
@@ -674,7 +675,7 @@ def make_server(
                 elif path in ('/api/web/workspace/tasks/cancel', '/api/agent/workspace/tasks/cancel'):
                     self._send(200, workspace.cancel_task(principal, payload.get('id')))
                 elif path in ('/api/web/workspace/task/run', '/api/agent/workspace/task/run'):
-                    self._send(201, {'run': workspace.start_agent_run(principal, payload.get('project_id'), payload.get('prompt'), role=payload.get('role', 'general'))})
+                    self._send(201, {'run': workspace.start_agent_run(principal, payload.get('project_id'), payload.get('prompt'), role=payload.get('role', 'general'), mode=payload.get('mode', 'single'))})
                 elif path in ('/api/web/workspace/task/run/advance', '/api/agent/workspace/task/run/advance'):
                     self._send(200, {'run': workspace.advance_agent_run(principal, payload.get('run_id'))})
                 elif path in ('/api/web/workspace/task/run/approve', '/api/agent/workspace/task/run/approve'):
@@ -685,6 +686,8 @@ def make_server(
                     self._send(200, {'run': workspace.admin_stop_agent_run(principal, payload.get('run_id'), payload.get('reason', 'Admin emergency stop'))})
                 elif path == '/api/admin/workspace/agent/runs/approve':
                     self._send(200, {'run': workspace.admin_approve_agent_run_step(principal, payload.get('run_id'))})
+                elif path == '/api/admin/workspace/sandbox/policy':
+                    self._send(200, {'policy': workspace.update_sandbox_policy(principal, payload)})
                 elif path in ('/api/web/workspace/attachments', '/api/agent/workspace/attachments'):
                     self._send(201, workspace.add_attachment(principal, payload.get('project_id'),
                                                               payload.get('name'), payload.get('mime'), payload.get('content_base64')))
@@ -909,6 +912,17 @@ def make_server(
                 try:
                     limit = int(parse_qs(parsed.query).get('limit', ['50'])[0])
                     self._send(200, {'runs': workspace.list_all_agent_runs(principal, limit=limit)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                except Exception as exc:
+                    self._send(400, {'error': {'message': f'Invalid request: {exc}'}})
+                return
+            if parsed.path == '/api/admin/workspace/sandbox/policy':
+                principal = self._principal('web') or self._principal('agent')
+                if principal is None:
+                    return
+                try:
+                    self._send(200, {'policy': workspace.get_sandbox_policy(principal)})
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 except Exception as exc:

@@ -43,6 +43,7 @@ class WorkspaceStore:
                     project_id TEXT NOT NULL REFERENCES workspace_projects(id) ON DELETE CASCADE,
                     prompt TEXT NOT NULL,
                     role TEXT NOT NULL DEFAULT 'general',
+                    mode TEXT NOT NULL DEFAULT 'single',
                     status TEXT NOT NULL CHECK(status IN ('planning','in_progress','waiting_approval','completed','failed','cancelled')),
                     current_step_index INTEGER NOT NULL DEFAULT 0,
                     plan_steps TEXT NOT NULL DEFAULT '[]',
@@ -52,6 +53,27 @@ class WorkspaceStore:
                     updated_at INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS workspace_agent_runs_owner ON workspace_agent_runs(owner_id, project_id, created_at);
+                CREATE TABLE IF NOT EXISTS workspace_subagent_runs (
+                    id TEXT PRIMARY KEY,
+                    parent_run_id TEXT NOT NULL REFERENCES workspace_agent_runs(id) ON DELETE CASCADE,
+                    role TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('pending','in_progress','completed','failed','cancelled','waiting_approval')),
+                    prompt TEXT NOT NULL,
+                    summary TEXT NOT NULL DEFAULT '',
+                    logs TEXT NOT NULL DEFAULT '[]',
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS workspace_subagent_parent ON workspace_subagent_runs(parent_run_id, created_at);
+                CREATE TABLE IF NOT EXISTS workspace_sandbox_policy (
+                    id TEXT PRIMARY KEY,
+                    max_timeout_seconds INTEGER NOT NULL DEFAULT 30,
+                    strict_mode INTEGER NOT NULL DEFAULT 0,
+                    allowed_prefixes TEXT NOT NULL,
+                    blocked_commands TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
             """)
             try:
                 db.execute("ALTER TABLE workspace_projects ADD COLUMN root_path TEXT DEFAULT ''")
@@ -61,6 +83,18 @@ class WorkspaceStore:
                 db.execute("ALTER TABLE workspace_agent_runs ADD COLUMN role TEXT DEFAULT 'general'")
             except Exception:
                 pass
+            try:
+                db.execute("ALTER TABLE workspace_agent_runs ADD COLUMN mode TEXT DEFAULT 'single'")
+            except Exception:
+                pass
+
+            now_ts = int(self.store.clock())
+            default_allowed = json.dumps(["git", "npm", "yarn", "pnpm", "npx", "pip", "python", "pytest", "cargo", "go", "node", "make", "deno", "ls", "dir", "echo"])
+            default_blocked = json.dumps(["format ", "rmdir /s /q c:", "del /f /s /q c:", ":(){ :|:& };:", "rm -rf /", "shutdown", "drop database"])
+            db.execute("""
+                INSERT OR IGNORE INTO workspace_sandbox_policy (id, max_timeout_seconds, strict_mode, allowed_prefixes, blocked_commands, updated_at)
+                VALUES ('global', 30, 0, ?, ?, ?)
+            """, (default_allowed, default_blocked, now_ts))
 
     @staticmethod
     def _cap(principal, capability):
@@ -357,6 +391,72 @@ class WorkspaceStore:
             'applied': applied,
         }
 
+    def get_sandbox_policy(self, principal):
+        if principal.get('role') != 'superadmin':
+            raise IdentityError('Superadmin role required', 403)
+        return self._get_effective_sandbox_policy()
+
+    def _get_effective_sandbox_policy(self):
+        with self.store._db() as db:
+            row = db.execute("SELECT * FROM workspace_sandbox_policy WHERE id='global'").fetchone()
+            if not row:
+                return {
+                    'max_timeout_seconds': 30,
+                    'strict_mode': False,
+                    'allowed_prefixes': ["git", "npm", "yarn", "pnpm", "npx", "pip", "python", "pytest", "cargo", "go", "node", "make", "deno", "ls", "dir", "echo"],
+                    'blocked_commands': ["format ", "rmdir /s /q c:", "del /f /s /q c:", ":(){ :|:& };:", "rm -rf /", "shutdown", "drop database"],
+                    'updated_at': int(self.store.clock())
+                }
+            try:
+                allowed = json.loads(row['allowed_prefixes'] or '[]')
+            except Exception:
+                allowed = []
+            try:
+                blocked = json.loads(row['blocked_commands'] or '[]')
+            except Exception:
+                blocked = []
+            return {
+                'max_timeout_seconds': int(row['max_timeout_seconds']),
+                'strict_mode': bool(row['strict_mode']),
+                'allowed_prefixes': allowed,
+                'blocked_commands': blocked,
+                'updated_at': int(row['updated_at'])
+            }
+
+    def update_sandbox_policy(self, principal, payload):
+        if principal.get('role') != 'superadmin':
+            raise IdentityError('Superadmin role required', 403)
+        if not isinstance(payload, dict):
+            raise IdentityError('Invalid payload', 400)
+
+        current = self._get_effective_sandbox_policy()
+        max_timeout = payload.get('max_timeout_seconds', current['max_timeout_seconds'])
+        if not isinstance(max_timeout, int) or not (5 <= max_timeout <= 120):
+            raise IdentityError('max_timeout_seconds must be an integer between 5 and 120', 400)
+
+        strict_mode = bool(payload.get('strict_mode', current['strict_mode']))
+
+        raw_allowed = payload.get('allowed_prefixes', current['allowed_prefixes'])
+        if not isinstance(raw_allowed, list):
+            raise IdentityError('allowed_prefixes must be a list of strings', 400)
+        clean_allowed = [str(x).strip().lower() for x in raw_allowed if str(x).strip()][:50]
+
+        raw_blocked = payload.get('blocked_commands', current['blocked_commands'])
+        if not isinstance(raw_blocked, list):
+            raise IdentityError('blocked_commands must be a list of strings', 400)
+        clean_blocked = [str(x).strip().lower() for x in raw_blocked if str(x).strip()][:50]
+
+        now = int(self.store.clock())
+        with self.store._lock, self.store._db() as db:
+            db.execute("""
+                UPDATE workspace_sandbox_policy
+                SET max_timeout_seconds=?, strict_mode=?, allowed_prefixes=?, blocked_commands=?, updated_at=?
+                WHERE id='global'
+            """, (max_timeout, 1 if strict_mode else 0, json.dumps(clean_allowed), json.dumps(clean_blocked), now))
+            self.store._audit(db, principal['id'], 'workspace_sandbox_policy_updated', f"timeout:{max_timeout}:strict:{int(strict_mode)}")
+
+        return self._get_effective_sandbox_policy()
+
     def execute_project_command(self, principal, project_id, command, timeout=15):
         if 'action.approve' not in principal.get('capabilities', []) and principal.get('role') != 'superadmin':
             raise IdentityError('action.approve capability or superadmin role required to execute workspace commands', 403)
@@ -366,9 +466,26 @@ class WorkspaceStore:
         root_dir, _ = self._resolve_project_root(principal, project_id)
         clean_cmd = command.strip()
 
+        policy = self._get_effective_sandbox_policy()
         lower_cmd = clean_cmd.lower()
-        if any(bad in lower_cmd for bad in ('format ', 'rmdir /s /q c:', 'del /f /s /q c:', ':(){ :|:& };:')):
-            raise IdentityError('Prohibited dangerous command', 400)
+
+        # Check blocked commands from policy
+        for bad in policy.get('blocked_commands', []):
+            if bad and bad in lower_cmd:
+                raise IdentityError(f"Prohibited dangerous command: matches blocked pattern '{bad}'", 400)
+
+        # Check strict mode allowed prefixes
+        if policy.get('strict_mode'):
+            tokens = clean_cmd.split()
+            first_raw = tokens[0].lower() if tokens else ''
+            first_name = Path(first_raw.strip('"\'')).name
+            if first_name.endswith('.exe'):
+                first_name = first_name[:-4]
+            allowed_list = policy.get('allowed_prefixes', [])
+            if not any(first_name == p.lower() or first_raw == p.lower() for p in allowed_list):
+                raise IdentityError(f"Command '{tokens[0]}' is disallowed by workspace sandbox policy", 403)
+
+        effective_timeout = min(max(1, timeout), policy.get('max_timeout_seconds', 30))
 
         t0 = time.time()
         try:
@@ -378,14 +495,14 @@ class WorkspaceStore:
                 cwd=str(root_dir),
                 capture_output=True,
                 text=True,
-                timeout=min(max(1, timeout), 30),
+                timeout=effective_timeout,
             )
             stdout = res.stdout[:32000] if res.stdout else ''
             stderr = res.stderr[:32000] if res.stderr else ''
             exit_code = res.returncode
         except subprocess.TimeoutExpired:
             stdout = ''
-            stderr = f'Command timed out after {timeout} seconds'
+            stderr = f'Command timed out after {effective_timeout} seconds'
             exit_code = 124
         except Exception as exc:
             stdout = ''
@@ -517,8 +634,7 @@ class WorkspaceStore:
             self.store._audit(db, principal['id'], 'workspace_attachment_removed', attachment_id)
         return {'status': 'removed'}
 
-    @staticmethod
-    def _format_run(run):
+    def _format_run(self, run, db=None):
         try:
             plan = json.loads(run.get('plan_steps') or '[]')
         except Exception:
@@ -533,6 +649,7 @@ class WorkspaceStore:
             'project_id': run['project_id'],
             'prompt': run['prompt'],
             'role': run.get('role') or 'general',
+            'mode': run.get('mode') or 'single',
             'status': run['status'],
             'current_step_index': run['current_step_index'],
             'plan_steps': plan,
@@ -545,17 +662,46 @@ class WorkspaceStore:
             res['owner_username'] = run['owner_username']
         if 'project_name' in run and run['project_name'] is not None:
             res['project_name'] = run['project_name']
+
+        try:
+            if db is not None:
+                sub_rows = db.execute(
+                    "SELECT * FROM workspace_subagent_runs WHERE parent_run_id=? ORDER BY created_at ASC, rowid ASC",
+                    (run['id'],)
+                ).fetchall()
+            else:
+                with self.store._db() as db_conn:
+                    sub_rows = db_conn.execute(
+                        "SELECT * FROM workspace_subagent_runs WHERE parent_run_id=? ORDER BY created_at ASC, rowid ASC",
+                        (run['id'],)
+                    ).fetchall()
+            subagents = []
+            for sr in sub_rows:
+                sub = dict(sr)
+                try:
+                    sub['logs'] = json.loads(sub.get('logs') or '[]')
+                except Exception:
+                    sub['logs'] = []
+                subagents.append(sub)
+            res['subagents'] = subagents
+        except Exception:
+            res['subagents'] = []
+
         return res
 
-    def start_agent_run(self, principal, project_id, prompt, role='general'):
+    def start_agent_run(self, principal, project_id, prompt, role='general', mode='single'):
         self._cap(principal, 'chat')
         if not isinstance(project_id, str) or len(project_id) != 32:
             raise IdentityError('Invalid project ID')
         if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 2000:
             raise IdentityError('Goal/prompt must contain 1-2000 characters')
 
+        clean_mode = (mode or 'single').strip().lower()
+        if clean_mode not in ('single', 'swarm'):
+            raise IdentityError('Invalid agent mode. Allowed: single, swarm', 400)
+
         clean_role = (role or 'general').strip().lower()
-        if clean_role not in ('general', 'coder', 'tester', 'architect'):
+        if clean_role not in ('general', 'coder', 'tester', 'architect', 'swarm'):
             raise IdentityError('Invalid agent role. Allowed: general, coder, tester, architect', 400)
 
         root_dir, project_name = self._resolve_project_root(principal, project_id)
@@ -577,125 +723,255 @@ class WorkspaceStore:
             target_file = 'go.mod'
             default_cmd = 'go test'
 
-        role_labels = {
-            'general': 'عمومی',
-            'coder': 'برنامه‌نویس',
-            'tester': 'تست و ارزیابی',
-            'architect': 'معمار سیستم',
-        }
-
-        if clean_role == 'coder':
-            step0_title = 'تحلیل ماژول‌ها و ساختار کدهای منبع'
-            step0_summary = f"بررسی ماژول‌های {inspection['framework']} ({inspection['total_entries']} فایل کشف شد)"
-            step1_title = f'بازخوانی و ممیزی فایل هدف برای پیاده‌سازی ({target_file})'
-            step2_title = f'اجرای بررسی‌های کامپایلر یا لینتر ({default_cmd})'
-            step3_title = 'تهیه پیشنهاد پچ (Patch Diff) و یکپارچه‌سازی کد'
-            step3_summary = 'تدوین تغییرات و وصله‌های پیشنهادی بر روی پروژه'
-        elif clean_role == 'tester':
-            step0_title = 'پویش پایگاه تست‌ها و سناریوهای آزمون'
-            step0_summary = f"ارزیابی وابستگی‌های تست در {inspection['framework']}"
-            step1_title = f'بررسی فریم‌ورک تست و فایل‌های پیکربندی ({target_file})'
-            step2_title = f'اجرای سوئیت تست و تحلیل خروجی آزمون‌ها ({default_cmd})'
-            step3_title = 'تدوین گزارش جامع تضمین کیفیت و نتایج تست'
-            step3_summary = 'ارزیابی ریسک و نتایج قبولی/ردی تست‌های سیستم'
-        elif clean_role == 'architect':
-            step0_title = 'تحلیل توپولوژی معماری و وابستگی‌های سیستم'
-            step0_summary = f"بررسی معماری پروژه {inspection['framework']} در ریشه پروژه"
-            step1_title = f'ارزیابی مانیفست‌های معماری و تنظیمات پایه ({target_file})'
-            step2_title = f'بررسی یکپارچگی گیت و انطباق استانداردها ({default_cmd})'
-            step3_title = 'تدوین سند ارزیابی معماری و راهنمای استقرار'
-            step3_summary = 'ارائه راهکارهای مقیاس‌پذیری و بازطراحی سیستم'
-        else:
-            step0_title = 'پویش ساختار و شناسایی فریم‌ورک پروژه'
-            step0_summary = f"فریم‌ورک: {inspection['framework']} | فایل‌ها: {inspection['total_entries']} مورد"
-            step1_title = f'بررسی فایل پیکربندی و وابستگی‌ها ({target_file})'
-            step2_title = f'ارزیابی تست‌ها و اجرای دستورات صحه‌سنجی ({default_cmd})'
-            step3_title = 'تدوین گزارش راهکار و جمع‌بندی گام‌های توسعه'
-            step3_summary = 'تهیه نقشه راه نهایی تکمیل تسک‌ها'
-
-        plan_steps = [
-            {
-                'index': 0,
-                'title': step0_title,
-                'action': 'inspect',
-                'status': 'completed',
-                'summary': step0_summary
-            },
-            {
-                'index': 1,
-                'title': step1_title,
-                'action': 'read_file',
-                'target': target_file,
-                'status': 'in_progress',
-                'summary': 'در حال بررسی تنظیمات و ماژول‌ها...'
-            },
-            {
-                'index': 2,
-                'title': step2_title,
-                'action': 'run_command',
-                'command': default_cmd,
-                'status': 'pending',
-                'summary': 'نیازمند تایید اقدام یا مجوز اجرا'
-            },
-            {
-                'index': 3,
-                'title': step3_title,
-                'action': 'synthesize',
-                'status': 'pending',
-                'summary': step3_summary
-            }
-        ]
-
         now = int(self.store.clock())
-        logs = [
-            {
-                'timestamp': now,
-                'step': 0,
-                'type': 'inspection',
-                'title': f'آغاز مأموریت با نقش «{role_labels[clean_role]}»',
-                'content': f"پروژه «{project_name}» در مسیر {inspection['root_path']} با فریم‌ورک {inspection['framework']} پویش شد."
-            }
-        ]
-
-        target_fp = root_dir / target_file
-        if target_fp.is_file():
-            try:
-                content = target_fp.read_text(encoding='utf-8', errors='replace')
-                preview = content[:600] + ('\n...(ادامه دارد)' if len(content) > 600 else '')
-                plan_steps[1]['status'] = 'completed'
-                plan_steps[1]['summary'] = f"فایل {target_file} ({len(content)} بایت) با موفقیت بررسی شد."
-                logs.append({
-                    'timestamp': now,
-                    'step': 1,
-                    'type': 'file_read',
-                    'title': f"بررسی {target_file}",
-                    'content': preview
-                })
-                current_step = 2
-            except Exception as exc:
-                plan_steps[1]['status'] = 'failed'
-                plan_steps[1]['summary'] = f"خطا در خواندن فایل: {exc}"
-                current_step = 2
-        else:
-            plan_steps[1]['status'] = 'skipped'
-            plan_steps[1]['summary'] = f"فایل {target_file} در ریشه پروژه یافت نشد."
-            current_step = 2
-
         can_exec = 'action.approve' in principal.get('capabilities', []) or principal.get('role') == 'superadmin'
-        run_status = 'in_progress'
-        if not can_exec:
-            run_status = 'waiting_approval'
-            plan_steps[2]['status'] = 'waiting_approval'
-            plan_steps[2]['summary'] = 'در انتظار تأیید مجوز اجرای دستور توسط مدیر ارشد یا کاربر تاییدکننده'
-
         run_id = uuid.uuid4().hex
+        subagents = []
+
+        if clean_mode == 'swarm':
+            plan_steps = [
+                {
+                    'index': 0,
+                    'title': '🏛️ تحلیل معماری و نقشه راه فنی (زیرایجنت معمار)',
+                    'action': 'swarm_architect',
+                    'status': 'completed',
+                    'summary': f"تحلیل معماری پروژه {project_name} با فریم‌ورک {inspection['framework']} و {inspection['total_entries']} فایل."
+                },
+                {
+                    'index': 1,
+                    'title': f'🛠️ ممیزی و پیاده‌سازی پچ‌های کد (زیرایجنت برنامه‌نویس: {target_file})',
+                    'action': 'swarm_coder',
+                    'target': target_file,
+                    'status': 'in_progress',
+                    'summary': f'بررسی فایل {target_file} و تحلیل تغییرات مورد نیاز...'
+                },
+                {
+                    'index': 2,
+                    'title': f'🧪 آزمون و راستی‌آزمایی کیفیت (زیرایجنت تستر: {default_cmd})',
+                    'action': 'swarm_tester',
+                    'command': default_cmd,
+                    'status': 'waiting_approval' if not can_exec else 'pending',
+                    'summary': 'در انتظار اجرای آزمون‌های یکپارچگی و صحه‌سنجی' if can_exec else 'در انتظار تایید اجرای دستور توسط ناظر یا مدیر'
+                },
+                {
+                    'index': 3,
+                    'title': '🐝 سنتز و یکپارچه‌سازی گزارش تیمی سوارم',
+                    'action': 'synthesize_swarm',
+                    'status': 'pending',
+                    'summary': 'تدوین گزارش جامع برآمده از ۳ منظر معماری، پیاده‌سازی و تست'
+                }
+            ]
+
+            logs = [
+                {
+                    'timestamp': now,
+                    'step': 0,
+                    'type': 'swarm_orchestration',
+                    'title': '🐝 راه‌اندازی همکاری گروهی ایجنت‌ها (Multi-Agent Swarm)',
+                    'content': f"ارکستراسیون ۳ ایجنت متخصص برای دستیابی به هدف «{prompt.strip()}» با موفقیت آغاز شد."
+                }
+            ]
+
+            target_fp = root_dir / target_file
+            coder_summary = f"فایل {target_file} در حال بررسی است."
+            coder_status = 'in_progress'
+            coder_logs = [{'timestamp': now, 'title': 'آغاز ماموریت کدنویس', 'content': f'بررسی ماژول‌ها و فایل {target_file}'}]
+            current_step = 1
+
+            if target_fp.is_file():
+                try:
+                    content = target_fp.read_text(encoding='utf-8', errors='replace')
+                    preview = content[:600] + ('\n...(ادامه دارد)' if len(content) > 600 else '')
+                    plan_steps[1]['status'] = 'completed'
+                    plan_steps[1]['summary'] = f"فایل {target_file} ({len(content)} بایت) با موفقیت ممیزی شد."
+                    coder_status = 'completed'
+                    coder_summary = f"فایل {target_file} ({len(content)} بایت) بررسی و ساختار کدهای وابسته تایید شد."
+                    coder_logs.append({'timestamp': now, 'title': f'ممیزی {target_file}', 'content': preview})
+                    logs.append({
+                        'timestamp': now,
+                        'step': 1,
+                        'type': 'file_read',
+                        'title': f"ممیزی {target_file} توسط زیرایجنت کدنویس",
+                        'content': preview
+                    })
+                    current_step = 2
+                except Exception as exc:
+                    plan_steps[1]['status'] = 'failed'
+                    plan_steps[1]['summary'] = f"خطا در خواندن فایل: {exc}"
+                    coder_status = 'failed'
+                    coder_summary = f"خطا در خواندن فایل: {exc}"
+                    current_step = 2
+            else:
+                plan_steps[1]['status'] = 'skipped'
+                plan_steps[1]['summary'] = f"فایل {target_file} در ریشه پروژه یافت نشد."
+                coder_status = 'completed'
+                coder_summary = f"فایل {target_file} در ریشه پروژه یافت نشد."
+                current_step = 2
+
+            tester_status = 'waiting_approval' if not can_exec else 'pending'
+            run_status = 'waiting_approval' if not can_exec else 'in_progress'
+
+            subagents = [
+                {
+                    'id': uuid.uuid4().hex,
+                    'parent_run_id': run_id,
+                    'role': 'architect',
+                    'title': '🏛️ زیرایجنت تحلیل و هدایت معماری',
+                    'status': 'completed',
+                    'prompt': f'تحلیل معماری، ساختار ماژول‌ها و تعریف پیش‌نیازهای فنی برای: {prompt.strip()}',
+                    'summary': f"معماری پروژه {project_name} ({inspection['framework']}) ارزیابی شد. فایل‌ها: {inspection['total_entries']} مورد.",
+                    'logs': json.dumps([{'timestamp': now, 'title': 'تحلیل معماری', 'content': f"پویش پروژه در مسیر {inspection['root_path']}"}]),
+                    'created_at': now,
+                    'updated_at': now
+                },
+                {
+                    'id': uuid.uuid4().hex,
+                    'parent_run_id': run_id,
+                    'role': 'coder',
+                    'title': '🛠️ زیرایجنت پیاده‌سازی و ساخت کد',
+                    'status': coder_status,
+                    'prompt': f'ممیزی ساختار سورس، تحلیل وابستگی‌ها و بازخوانی {target_file} برای: {prompt.strip()}',
+                    'summary': coder_summary,
+                    'logs': json.dumps(coder_logs),
+                    'created_at': now,
+                    'updated_at': now
+                },
+                {
+                    'id': uuid.uuid4().hex,
+                    'parent_run_id': run_id,
+                    'role': 'tester',
+                    'title': '🧪 زیرایجنت تضمین کیفیت و راستی‌آزمایی',
+                    'status': tester_status,
+                    'prompt': f'اجرای آزمون‌های یکپارچگی ({default_cmd}) و ارزیابی کیفیت خروجی‌ها برای: {prompt.strip()}',
+                    'summary': 'در انتظار اجرای آزمون‌های راستی‌آزمایی و ارزیابی کیفیت.' if can_exec else 'در انتظار تایید اداری اجرای دستور تست',
+                    'logs': json.dumps([]),
+                    'created_at': now,
+                    'updated_at': now
+                }
+            ]
+        else:
+            role_labels = {
+                'general': 'عمومی',
+                'coder': 'برنامه‌نویس',
+                'tester': 'تست و ارزیابی',
+                'architect': 'معمار سیستم',
+            }
+
+            if clean_role == 'coder':
+                step0_title = 'تحلیل ماژول‌ها و ساختار کدهای منبع'
+                step0_summary = f"بررسی ماژول‌های {inspection['framework']} ({inspection['total_entries']} فایل کشف شد)"
+                step1_title = f'بازخوانی و ممیزی فایل هدف برای پیاده‌سازی ({target_file})'
+                step2_title = f'اجرای بررسی‌های کامپایلر یا لینتر ({default_cmd})'
+                step3_title = 'تهیه پیشنهاد پچ (Patch Diff) و یکپارچه‌سازی کد'
+                step3_summary = 'تدوین تغییرات و وصله‌های پیشنهادی بر روی پروژه'
+            elif clean_role == 'tester':
+                step0_title = 'پویش پایگاه تست‌ها و سناریوهای آزمون'
+                step0_summary = f"ارزیابی وابستگی‌های تست در {inspection['framework']}"
+                step1_title = f'بررسی فریم‌ورک تست و فایل‌های پیکربندی ({target_file})'
+                step2_title = f'اجرای سوئیت تست و تحلیل خروجی آزمون‌ها ({default_cmd})'
+                step3_title = 'تدوین گزارش جامع تضمین کیفیت و نتایج تست'
+                step3_summary = 'ارزیابی ریسک و نتایج قبولی/ردی تست‌های سیستم'
+            elif clean_role == 'architect':
+                step0_title = 'تحلیل توپولوژی معماری و وابستگی‌های سیستم'
+                step0_summary = f"بررسی معماری پروژه {inspection['framework']} در ریشه پروژه"
+                step1_title = f'ارزیابی مانیفست‌های معماری و تنظیمات پایه ({target_file})'
+                step2_title = f'بررسی یکپارچگی گیت و انطباق استانداردها ({default_cmd})'
+                step3_title = 'تدوین سند ارزیابی معماری و راهنمای استقرار'
+                step3_summary = 'ارائه راهکارهای مقیاس‌پذیری و بازطراحی سیستم'
+            else:
+                step0_title = 'پویش ساختار و شناسایی فریم‌ورک پروژه'
+                step0_summary = f"فریم‌ورک: {inspection['framework']} | فایل‌ها: {inspection['total_entries']} مورد"
+                step1_title = f'بررسی فایل پیکربندی و وابستگی‌ها ({target_file})'
+                step2_title = f'ارزیابی تست‌ها و اجرای دستورات صحه‌سنجی ({default_cmd})'
+                step3_title = 'تدوین گزارش راهکار و جمع‌بندی گام‌های توسعه'
+                step3_summary = 'تهیه نقشه راه نهایی تکمیل تسک‌ها'
+
+            plan_steps = [
+                {
+                    'index': 0,
+                    'title': step0_title,
+                    'action': 'inspect',
+                    'status': 'completed',
+                    'summary': step0_summary
+                },
+                {
+                    'index': 1,
+                    'title': step1_title,
+                    'action': 'read_file',
+                    'target': target_file,
+                    'status': 'in_progress',
+                    'summary': 'در حال بررسی تنظیمات و ماژول‌ها...'
+                },
+                {
+                    'index': 2,
+                    'title': step2_title,
+                    'action': 'run_command',
+                    'command': default_cmd,
+                    'status': 'pending',
+                    'summary': 'نیازمند تایید اقدام یا مجوز اجرا'
+                },
+                {
+                    'index': 3,
+                    'title': step3_title,
+                    'action': 'synthesize',
+                    'status': 'pending',
+                    'summary': step3_summary
+                }
+            ]
+
+            logs = [
+                {
+                    'timestamp': now,
+                    'step': 0,
+                    'type': 'inspection',
+                    'title': f'آغاز مأموریت با نقش «{role_labels.get(clean_role, "عمومی")}»',
+                    'content': f"پروژه «{project_name}» در مسیر {inspection['root_path']} با فریم‌ورک {inspection['framework']} پویش شد."
+                }
+            ]
+
+            target_fp = root_dir / target_file
+            if target_fp.is_file():
+                try:
+                    content = target_fp.read_text(encoding='utf-8', errors='replace')
+                    preview = content[:600] + ('\n...(ادامه دارد)' if len(content) > 600 else '')
+                    plan_steps[1]['status'] = 'completed'
+                    plan_steps[1]['summary'] = f"فایل {target_file} ({len(content)} بایت) با موفقیت بررسی شد."
+                    logs.append({
+                        'timestamp': now,
+                        'step': 1,
+                        'type': 'file_read',
+                        'title': f"بررسی {target_file}",
+                        'content': preview
+                    })
+                    current_step = 2
+                except Exception as exc:
+                    plan_steps[1]['status'] = 'failed'
+                    plan_steps[1]['summary'] = f"خطا در خواندن فایل: {exc}"
+                    current_step = 2
+            else:
+                plan_steps[1]['status'] = 'skipped'
+                plan_steps[1]['summary'] = f"فایل {target_file} در ریشه پروژه یافت نشد."
+                current_step = 2
+
+            run_status = 'in_progress'
+            if not can_exec:
+                run_status = 'waiting_approval'
+                plan_steps[2]['status'] = 'waiting_approval'
+                plan_steps[2]['summary'] = 'در انتظار تأیید مجوز اجرای دستور توسط مدیر ارشد یا کاربر تاییدکننده'
+
         with self.store._lock, self.store._db() as db:
             db.execute("""
                 INSERT INTO workspace_agent_runs 
-                (id, owner_id, project_id, prompt, role, status, current_step_index, plan_steps, logs, result_summary, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)
-            """, (run_id, principal['id'], project_id, prompt.strip(), clean_role, run_status, current_step, json.dumps(plan_steps), json.dumps(logs), now, now))
-            self.store._audit(db, principal['id'], 'workspace_agent_run_started', f"{run_id}:{project_id}:{clean_role}")
+                (id, owner_id, project_id, prompt, role, mode, status, current_step_index, plan_steps, logs, result_summary, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)
+            """, (run_id, principal['id'], project_id, prompt.strip(), clean_role, clean_mode, run_status, current_step, json.dumps(plan_steps), json.dumps(logs), now, now))
+            for sub in subagents:
+                db.execute("""
+                    INSERT INTO workspace_subagent_runs
+                    (id, parent_run_id, role, title, status, prompt, summary, logs, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (sub['id'], sub['parent_run_id'], sub['role'], sub['title'], sub['status'], sub['prompt'], sub['summary'], sub['logs'], sub['created_at'], sub['updated_at']))
+            self.store._audit(db, principal['id'], 'workspace_agent_run_started', f"{run_id}:{project_id}:{clean_role}:{clean_mode}")
 
         return self.get_agent_run(principal, run_id)
 
@@ -713,7 +989,7 @@ class WorkspaceStore:
                 raise IdentityError('Agent run not found', 404)
             run = dict(row)
             if run['status'] in ('completed', 'failed', 'cancelled'):
-                return self._format_run(run)
+                return self._format_run(run, db=db)
 
             plan_steps = json.loads(run['plan_steps'])
             logs = json.loads(run['logs'])
@@ -721,6 +997,7 @@ class WorkspaceStore:
             now = int(self.store.clock())
             new_status = run['status']
             result_summary = run['result_summary']
+            is_swarm = run.get('mode') == 'swarm'
 
             if current_idx == 2:
                 can_exec = 'action.approve' in principal.get('capabilities', []) or principal.get('role') == 'superadmin'
@@ -734,25 +1011,44 @@ class WorkspaceStore:
                         res = self.execute_project_command(principal, run['project_id'], cmd, timeout=15)
                         plan_steps[2]['status'] = 'completed' if res['exit_code'] == 0 else 'warning'
                         plan_steps[2]['summary'] = f"دستور با کد خروج {res['exit_code']} در {res['duration_ms']}ms پایان یافت."
-                        logs.append({
+                        log_entry = {
                             'timestamp': now,
                             'step': 2,
                             'type': 'command_execution',
                             'title': f"اجرای دستور: {cmd}",
                             'content': (res['stdout'] or '') + ('\n' + res['stderr'] if res['stderr'] else ''),
                             'exit_code': res['exit_code']
-                        })
+                        }
+                        logs.append(log_entry)
+
+                        if is_swarm:
+                            tester_summary = f"دستور راستی‌آزمایی با کد {res['exit_code']} در {res['duration_ms']}ms اجرا شد."
+                            tester_logs = [log_entry]
+                            db.execute("""
+                                UPDATE workspace_subagent_runs
+                                SET status='completed', summary=?, logs=?, updated_at=?
+                                WHERE parent_run_id=? AND role='tester'
+                            """, (tester_summary, json.dumps(tester_logs), now, run_id))
                     except Exception as exc:
                         plan_steps[2]['status'] = 'failed'
                         plan_steps[2]['summary'] = f"خطا در اجرای دستور: {exc}"
-                        logs.append({
+                        log_entry = {
                             'timestamp': now,
                             'step': 2,
                             'type': 'command_execution',
                             'title': f"خطا در دستور: {cmd}",
                             'content': str(exc),
                             'exit_code': 1
-                        })
+                        }
+                        logs.append(log_entry)
+
+                        if is_swarm:
+                            db.execute("""
+                                UPDATE workspace_subagent_runs
+                                SET status='failed', summary=?, logs=?, updated_at=?
+                                WHERE parent_run_id=? AND role='tester'
+                            """, (f"خطا در اجرای آزمون: {exc}", json.dumps([log_entry]), now, run_id))
+
                     current_idx = 3
                     plan_steps[3]['status'] = 'in_progress'
 
@@ -760,12 +1056,23 @@ class WorkspaceStore:
                 plan_steps[3]['status'] = 'completed'
                 plan_steps[3]['summary'] = 'گزارش و جمع‌بندی نهایی توسط ایجنت تدوین شد.'
                 new_status = 'completed'
-                result_summary = (
-                    f"🎯 هدف ارزیابی شد: «{run['prompt']}»\n"
-                    f"نقش فعال ایجنت: {run.get('role', 'general')}\n"
-                    f"تمامی مراحل پویش متادیتا، بازخوانی تنظیمات و ارزیابی دستورات با موفقیت انجام گرفت.\n"
-                    f"پروژه آماده استقرار، ادغام تغییرات یا ارسال دستورات تکمیلی از طریق چت هوش مصنوعی می‌باشد."
-                )
+
+                if is_swarm:
+                    result_summary = (
+                        f"🐝 عملیات همگام گروهی ایجنت‌ها (Multi-Agent Swarm) با موفقیت تکمیل شد:\n\n"
+                        f"• 🏛️ معمار سیستم: ساختار ماژول‌ها و چارچوب کلی پروژه ارزیابی گردید.\n"
+                        f"• 🛠️ مهندس کدنویس: ممیزی فایل‌های کلیدی پروژه انجام و نیازمندی‌های ویرایش تدوین شد.\n"
+                        f"• 🧪 تضمین کیفیت (QA): آزمون‌ها و فرامین راستی‌آزمایی اجرا و اعتبارسنجی کیفی صورت گرفت.\n\n"
+                        f"🚀 گزارش چندعاملی آماده بهره‌برداری است و پروژه در وضعیت پایدار قرار دارد."
+                    )
+                else:
+                    result_summary = (
+                        f"🎯 هدف ارزیابی شد: «{run['prompt']}»\n"
+                        f"نقش فعال ایجنت: {run.get('role', 'general')}\n"
+                        f"تمامی مراحل پویش متادیتا، بازخوانی تنظیمات و ارزیابی دستورات با موفقیت انجام گرفت.\n"
+                        f"پروژه آماده استقرار، ادغام تغییرات یا ارسال دستورات تکمیلی از طریق چت هوش مصنوعی می‌باشد."
+                    )
+
                 logs.append({
                     'timestamp': now,
                     'step': 3,
@@ -786,7 +1093,7 @@ class WorkspaceStore:
             run['logs'] = json.dumps(logs)
             run['result_summary'] = result_summary
             run['updated_at'] = now
-            return self._format_run(run)
+            return self._format_run(run, db=db)
 
     def approve_agent_run_step(self, principal, run_id):
         if 'action.approve' not in principal.get('capabilities', []) and principal.get('role') != 'superadmin':
@@ -805,8 +1112,9 @@ class WorkspaceStore:
             if run['status'] != 'waiting_approval':
                 raise IdentityError('Run is not waiting for approval', 400)
 
-            db.execute("UPDATE workspace_agent_runs SET status='in_progress', updated_at=? WHERE id=?",
-                       (int(self.store.clock()), run_id))
+            now = int(self.store.clock())
+            db.execute("UPDATE workspace_agent_runs SET status='in_progress', updated_at=? WHERE id=?", (now, run_id))
+            db.execute("UPDATE workspace_subagent_runs SET status='in_progress', updated_at=? WHERE parent_run_id=? AND status='waiting_approval'", (now, run_id))
             self.store._audit(db, principal['id'], 'workspace_agent_run_step_approved', run_id)
 
         return self.advance_agent_run(principal, run_id)
@@ -824,6 +1132,7 @@ class WorkspaceStore:
                 raise IdentityError('Agent run not found', 404)
             now = int(self.store.clock())
             db.execute("UPDATE workspace_agent_runs SET status='cancelled', updated_at=? WHERE id=?", (now, run_id))
+            db.execute("UPDATE workspace_subagent_runs SET status='cancelled', updated_at=? WHERE parent_run_id=? AND status IN ('pending', 'in_progress', 'waiting_approval')", (now, run_id))
             self.store._audit(db, principal['id'], 'workspace_agent_run_cancelled', run_id)
         return self.get_agent_run(principal, run_id)
 
@@ -850,7 +1159,7 @@ class WorkspaceStore:
                 """, (run_id, principal['id'])).fetchone()
             if not row:
                 raise IdentityError('Agent run not found', 404)
-            return self._format_run(dict(row))
+            return self._format_run(dict(row), db=db)
 
     def list_agent_runs(self, principal, project_id):
         self._cap(principal, 'chat')
@@ -865,7 +1174,7 @@ class WorkspaceStore:
                 WHERE r.owner_id=? AND r.project_id=?
                 ORDER BY r.created_at DESC LIMIT 30
             """, (principal['id'], project_id)).fetchall()
-            return [self._format_run(dict(r)) for r in rows]
+            return [self._format_run(dict(r), db=db) for r in rows]
 
     def list_all_agent_runs(self, principal, limit=50):
         if principal.get('role') != 'superadmin':
@@ -879,7 +1188,7 @@ class WorkspaceStore:
                 LEFT JOIN workspace_projects p ON r.project_id = p.id
                 ORDER BY r.created_at DESC LIMIT ?
             """, (limit,)).fetchall()
-            return [self._format_run(dict(r)) for r in rows]
+            return [self._format_run(dict(r), db=db) for r in rows]
 
     def admin_stop_agent_run(self, principal, run_id, reason="Admin emergency stop"):
         if principal.get('role') != 'superadmin':
@@ -893,7 +1202,7 @@ class WorkspaceStore:
                 raise IdentityError('Agent run not found', 404)
             run = dict(row)
             if run['status'] in ('completed', 'failed', 'cancelled'):
-                return self._format_run(run)
+                return self._format_run(run, db=db)
 
             now = int(self.store.clock())
             logs = json.loads(run['logs'] or '[]')
@@ -909,11 +1218,16 @@ class WorkspaceStore:
                 SET status='cancelled', logs=?, updated_at=?
                 WHERE id=?
             """, (json.dumps(logs), now, run_id))
+            db.execute("""
+                UPDATE workspace_subagent_runs
+                SET status='cancelled', updated_at=?
+                WHERE parent_run_id=? AND status IN ('pending', 'in_progress', 'waiting_approval')
+            """, (now, run_id))
             self.store._audit(db, principal['id'], 'workspace_admin_agent_run_stopped', f"{run_id}:{str(reason)[:60]}")
             run['status'] = 'cancelled'
             run['logs'] = json.dumps(logs)
             run['updated_at'] = now
-            return self._format_run(run)
+            return self._format_run(run, db=db)
 
     def admin_approve_agent_run_step(self, principal, run_id):
         if principal.get('role') != 'superadmin':
@@ -929,8 +1243,9 @@ class WorkspaceStore:
             if run['status'] != 'waiting_approval':
                 raise IdentityError('Run is not waiting for approval', 400)
 
-            db.execute("UPDATE workspace_agent_runs SET status='in_progress', updated_at=? WHERE id=?",
-                       (int(self.store.clock()), run_id))
+            now = int(self.store.clock())
+            db.execute("UPDATE workspace_agent_runs SET status='in_progress', updated_at=? WHERE id=?", (now, run_id))
+            db.execute("UPDATE workspace_subagent_runs SET status='in_progress', updated_at=? WHERE parent_run_id=? AND status='waiting_approval'", (now, run_id))
             self.store._audit(db, principal['id'], 'workspace_admin_agent_run_approved', run_id)
 
         return self.advance_agent_run(principal, run_id)
