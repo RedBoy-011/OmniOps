@@ -655,15 +655,11 @@ fn set_compact(app: AppHandle, compact: bool) -> Result<(), String> {
 
         let (new_x, new_y) = if let Ok(current_pos) = window.outer_position() {
             let clamped_x = current_pos.x.clamp(mon_x, max_x);
-            let target_y = if compact && current_pos.y <= mon_y + 8 {
-                (mon_y + (24.0 * scale) as i32).min(max_y)
-            } else {
-                current_pos.y.clamp(mon_y, max_y)
-            };
-            (clamped_x, target_y)
+            let clamped_y = current_pos.y.clamp(mon_y, max_y);
+            (clamped_x, clamped_y)
         } else {
             let x = mon_x + ((mon_w - phys_width) / 2).max(0);
-            let y = mon_y + ((if compact { 24.0 } else { 16.0 } * scale) as i32).min(max_y);
+            let y = mon_y + ((mon_h - phys_height) / 2).max(0);
             (x, y)
         };
         window

@@ -357,6 +357,10 @@ export default function App() {
   }
   const handleStartDrag = async (event: React.MouseEvent) => {
     if (event.button !== 0) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("button") || target?.closest("input") || target?.closest("a") || target?.closest("select")) {
+      return;
+    }
     if (isTauri()) {
       try {
         await getCurrentWindow().startDragging();
@@ -377,7 +381,6 @@ export default function App() {
         <div
           className="compact-island"
           data-tauri-drag-region
-          onMouseDown={handleStartDrag}
           onDoubleClick={() => setCompact(false)}
           title="برای جابه‌جایی آزاد روی صفحه بکشید | دوبار کلیک برای بازگشت به پنجرهٔ اصلی"
         >
@@ -400,7 +403,7 @@ export default function App() {
             </div>
             <span className="compact-pulse" data-tauri-drag-region aria-hidden="true" />
           </div>
-          <div className="compact-actions">
+          <div className="compact-actions" onMouseDown={(e) => e.stopPropagation()}>
             <button
               className={`compact-sm-btn ${alwaysOnTop ? "pinned" : ""}`}
               type="button"
