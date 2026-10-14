@@ -7,6 +7,7 @@ Zero external dependencies.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import shutil
@@ -218,12 +219,198 @@ def apply_update(repo_root: Path | str | None = None, branch: str = "main") -> d
         },
     }
 
+    # Step 4: Sync release assets into the core downloads directory
+    sync_res = sync_release_assets(root, branch)
+
     return {
         "status": "updated",
-        "message": "سرور با موفقیت به آخرین نسخه گیت‌هاب به‌روزرسانی شد.",
+        "message": "سرور با موفقیت به آخرین نسخه گیت‌هاب به‌روزرسانی شد و فایل‌های انتشار به هسته کپی شدند.",
         "previous_commit": prev_commit[:7],
         "new_commit": new_commit[:7],
         "rebuilt_frontend": rebuilt_frontend,
+        "release_assets_synced": True,
+        "synced_files": sync_res.get("synced_files", []),
         "pull_output": pull_res.stdout.strip(),
         "restart_recommended": True,
     }
+
+
+def compute_file_sha256(path: Path | str) -> str:
+    """Computes SHA-256 checksum of a file on disk."""
+    p = Path(path)
+    if not p.is_file():
+        return ""
+    hasher = hashlib.sha256()
+    try:
+        with open(p, "rb") as f:
+            while chunk := f.read(65536):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+    except Exception as exc:
+        logger.warning("Failed to compute SHA-256 for %s: %s", p, exc)
+        return ""
+
+
+def format_size(size_bytes: int) -> str:
+    """Formats bytes into human readable string (KB, MB, GB)."""
+    if size_bytes <= 0:
+        return "0 B"
+    num = float(size_bytes)
+    for unit in ["B", "KB", "MB", "GB"]:
+        if num < 1024.0 or unit == "GB":
+            return f"{num:.1f} {unit}" if unit != "B" else f"{int(num)} B"
+        num /= 1024.0
+    return f"{num:.1f} GB"
+
+
+CORE_ARTIFACTS = [
+    {
+        "filename": "OmniOps-Edge-Setup.exe",
+        "name": "ایجنت ویندوز دسکتاپ (Windows Desktop Edge)",
+        "platform": "windows-x64",
+        "category": "desktop",
+        "description": "نصاب مستقیم ایجنت کپسولی شناور با کلید میانبر Alt+Space برای ویندوز ۱۰ و ۱۱ بدون نیاز به پایتون",
+    },
+    {
+        "filename": "OmniOps-Coucou-v1.0.apk",
+        "name": "ارکستراتور سیار اندروید (Coucou Mobile Orchestrator)",
+        "platform": "android",
+        "category": "mobile",
+        "description": "بسته استاندارد اندروید با تایید بیومتریک اثر انگشت و جزیره پویا",
+    },
+    {
+        "filename": "OmniOps-Mobile.apk",
+        "name": "نسخه کمکی همراه اندروید (OmniOps Mobile)",
+        "platform": "android",
+        "category": "mobile",
+        "description": "بسته نصبی همراه سازگار با انواع نسخه‌های اندروید",
+    },
+]
+
+
+def get_core_downloads_info(repo_root: Path | str | None = None) -> dict[str, Any]:
+    """Returns metadata, version, and SHA-256 checksums of core download artifacts."""
+    root = _get_repo_root(repo_root)
+    downloads_dir = root / "downloads"
+    current_commit = get_current_commit(root)
+    version = current_commit[:7] if current_commit else "v1.21.0"
+
+    files_info = []
+    seen_filenames = set()
+
+    # 1. Process known core artifacts
+    for item in CORE_ARTIFACTS:
+        fname = item["filename"]
+        seen_filenames.add(fname)
+        target = downloads_dir / fname
+        available = target.is_file()
+        sha256 = compute_file_sha256(target) if available else ""
+        size_bytes = target.stat().st_size if available else 0
+        updated_at = int(target.stat().st_mtime) if available else None
+
+        files_info.append({
+            "filename": fname,
+            "name": item["name"],
+            "platform": item["platform"],
+            "category": item["category"],
+            "description": item["description"],
+            "version": version,
+            "size_bytes": size_bytes,
+            "size_formatted": format_size(size_bytes),
+            "sha256": sha256,
+            "available_locally": available,
+            "direct_url": f"/downloads/{fname}",
+            "fallback_url": f"https://github.com/RedBoy-011/OmniOps/releases/latest/download/{fname}",
+            "updated_at": updated_at,
+        })
+
+    # 2. Check for any additional binary artifacts in downloads/
+    if downloads_dir.is_dir():
+        for extra in downloads_dir.iterdir():
+            if extra.is_file() and extra.name not in seen_filenames and not extra.name.endswith(".md"):
+                sha = compute_file_sha256(extra)
+                sz = extra.stat().st_size
+                files_info.append({
+                    "filename": extra.name,
+                    "name": extra.stem.replace("-", " ").title(),
+                    "platform": "windows" if extra.suffix == ".exe" else ("android" if extra.suffix == ".apk" else "generic"),
+                    "category": "package",
+                    "description": f"فایل نصبی {extra.name}",
+                    "version": version,
+                    "size_bytes": sz,
+                    "size_formatted": format_size(sz),
+                    "sha256": sha,
+                    "available_locally": True,
+                    "direct_url": f"/downloads/{extra.name}",
+                    "fallback_url": f"https://github.com/RedBoy-011/OmniOps/releases/latest/download/{extra.name}",
+                    "updated_at": int(extra.stat().st_mtime),
+                })
+
+    return {
+        "status": "ok",
+        "version": version,
+        "commit": current_commit or "unknown",
+        "downloads_dir_exists": downloads_dir.is_dir(),
+        "files": files_info,
+    }
+
+
+def sync_release_assets(repo_root: Path | str | None = None, branch: str = "main") -> dict[str, Any]:
+    """Copies/syncs newly prepared release files from GitHub or local builds into the core downloads directory."""
+    root = _get_repo_root(repo_root)
+    downloads_dir = root / "downloads"
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+    synced_files = []
+
+    # 1. Sync Windows Edge Setup if alternate name exists
+    edge_exe = downloads_dir / "OmniOps-Edge-Setup.exe"
+    agent_setup = downloads_dir / "omniops-agent-setup.exe"
+    if not edge_exe.is_file() and agent_setup.is_file():
+        shutil.copy2(agent_setup, edge_exe)
+        synced_files.append("OmniOps-Edge-Setup.exe (from agent-setup)")
+    elif edge_exe.is_file() and not agent_setup.is_file():
+        shutil.copy2(edge_exe, agent_setup)
+
+    # 2. Sync Android APKs if build script exists or if one is present
+    coucou_apk = downloads_dir / "OmniOps-Coucou-v1.0.apk"
+    mobile_apk = downloads_dir / "OmniOps-Mobile.apk"
+    if coucou_apk.is_file() and not mobile_apk.is_file():
+        shutil.copy2(coucou_apk, mobile_apk)
+        synced_files.append("OmniOps-Mobile.apk (synced from Coucou)")
+    elif mobile_apk.is_file() and not coucou_apk.is_file():
+        shutil.copy2(mobile_apk, coucou_apk)
+        synced_files.append("OmniOps-Coucou-v1.0.apk (synced from Mobile)")
+    elif not coucou_apk.is_file() and not mobile_apk.is_file():
+        # Try local generator script if available
+        build_script = root / "scripts" / "build_android_apk.py"
+        if build_script.is_file():
+            try:
+                subprocess.run(["python", str(build_script)], cwd=str(root), capture_output=True, timeout=30)
+                if coucou_apk.is_file():
+                    synced_files.append("OmniOps-Coucou-v1.0.apk (built locally)")
+            except Exception as exc:
+                logger.debug("Local APK build attempt had error: %s", exc)
+
+    # 3. Check GitHub Release assets fallback download if internet is accessible
+    for artifact in ["OmniOps-Edge-Setup.exe", "OmniOps-Coucou-v1.0.apk"]:
+        dest = downloads_dir / artifact
+        if not dest.is_file():
+            gh_url = f"https://github.com/RedBoy-011/OmniOps/releases/latest/download/{artifact}"
+            try:
+                req = urllib.request.Request(gh_url, headers={"User-Agent": "OmniOps-Core/1.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    if resp.status == 200:
+                        dest.write_bytes(resp.read())
+                        synced_files.append(f"{artifact} (downloaded from GitHub release)")
+            except Exception as exc:
+                logger.debug("GitHub release asset fetch skipped for %s: %s", artifact, exc)
+
+    current_info = get_core_downloads_info(root)
+    return {
+        "status": "ok",
+        "message": f"فایل‌های انتشار در هسته همگام‌سازی شدند ({len(synced_files)} مورد جدید)",
+        "synced_count": len(synced_files),
+        "synced_files": synced_files,
+        "files": current_info.get("files", []),
+    }
+

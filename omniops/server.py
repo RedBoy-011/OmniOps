@@ -591,7 +591,7 @@ def make_server(
                 "/api/admin/workspace/webhooks", "/api/admin/workspace/webhooks/test", "/api/admin/workspace/webhooks/delete",
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/test-socks", "/api/admin/providers/socks-health", "/api/admin/providers/enable", "/api/admin/providers/price",
-                "/api/admin/system/backups", "/api/admin/system/update",
+                "/api/admin/system/backups", "/api/admin/system/update", "/api/admin/system/sync-release-assets",
                 "/api/admin/users/update", "/api/admin/users/reset-quota", "/api/user/profile", "/api/user/change-password",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
                 self._send(404, {"error": {"message": "Route not found"}})
@@ -668,6 +668,11 @@ def make_server(
                         raise IdentityError("Superadmin access required", 403)
                     repo_root = Path(__file__).resolve().parent.parent
                     self._send(200, updater.apply_update(repo_root=repo_root))
+                elif path == "/api/admin/system/sync-release-assets":
+                    if principal["role"] != "superadmin":
+                        raise IdentityError("Superadmin access required", 403)
+                    repo_root = Path(__file__).resolve().parent.parent
+                    self._send(200, updater.sync_release_assets(repo_root=repo_root))
                 elif path == "/api/admin/users/update":
                     if principal["role"] != "superadmin":
                         raise IdentityError("Superadmin access required", 403)
@@ -878,19 +883,28 @@ def make_server(
                     content_type = 'application/vnd.android.package-archive' if filename.endswith('.apk') else (
                         mimetypes.guess_type(target_file.name)[0] or 'application/octet-stream'
                     )
+                    sha256_hash = updater.compute_file_sha256(target_file)
+                    current_commit = updater.get_current_commit(repo_root) or 'v1.21.0'
                     self.send_response(200)
                     self.send_header('Content-Type', content_type)
                     self.send_header('Content-Length', str(len(raw)))
                     self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+                    self.send_header('X-Checksum-SHA256', sha256_hash)
+                    self.send_header('X-OmniOps-Version', current_commit[:7])
                     self.send_header('Cache-Control', 'public, max-age=3600')
                     self.send_header('X-Content-Type-Options', 'nosniff')
                     self.end_headers()
                     self.wfile.write(raw)
                     return
-                release_url = 'https://github.com/RedBoy-011/OmniOps/releases'
+                # Fallback: Redirect to GitHub Release download
+                release_url = f'https://github.com/RedBoy-011/OmniOps/releases/latest/download/{filename}'
                 self.send_response(302)
                 self.send_header('Location', release_url)
                 self.end_headers()
+                return
+            if parsed.path == '/api/downloads/info':
+                repo_root = Path(__file__).resolve().parent.parent
+                self._send(200, updater.get_core_downloads_info(repo_root=repo_root))
                 return
             if parsed.path in ('/api/web/workspace/attachments', '/api/agent/workspace/attachments'):
                 principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')

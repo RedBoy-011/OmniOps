@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { MobileOrchestratorCard } from './MobileOrchestratorCard';
 import { QrCodeSvg } from './qrcode';
+import { api, type CoreDownloadFile, type DownloadsInfoResponse } from '../api';
 
 export interface ClientDownloadsProps {
   pair?: { code: string; expires_at: number } | null;
@@ -27,6 +28,44 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
   const [isStandalone, setIsStandalone] = useState(false);
   const [showPwaGuide, setShowPwaGuide] = useState(false);
   const [guideBrowser, setGuideBrowser] = useState<'chrome' | 'samsung' | 'safari'>('chrome');
+  const [downloadsInfo, setDownloadsInfo] = useState<DownloadsInfoResponse | null>(null);
+  const [copiedChecksum, setCopiedChecksum] = useState<string | null>(null);
+  const [syncingAssets, setSyncingAssets] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    void api.downloadsInfo().then(setDownloadsInfo).catch(() => {});
+  }, []);
+
+  const handleCopyChecksum = async (sha256: string, id: string) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(sha256);
+        setCopiedChecksum(id);
+        setTimeout(() => setCopiedChecksum(null), 2500);
+      }
+    } catch {}
+  };
+
+  const handleSyncAssets = async () => {
+    setSyncingAssets(true);
+    setSyncMessage(null);
+    try {
+      const res = await api.syncReleaseAssets();
+      setSyncMessage(res.message);
+      const updated = await api.downloadsInfo();
+      setDownloadsInfo(updated);
+      setTimeout(() => setSyncMessage(null), 5000);
+    } catch (err) {
+      setSyncMessage(err instanceof Error ? err.message : 'خطا در همگام‌سازی فایل‌های انتشار');
+    } finally {
+      setSyncingAssets(false);
+    }
+  };
+
+  const getFile = (filename: string): CoreDownloadFile | undefined => {
+    return downloadsInfo?.files.find(f => f.filename.toLowerCase() === filename.toLowerCase());
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -115,13 +154,30 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
             <span className="font-mono font-bold">CI/CD: GitHub Actions (Pass)</span>
           </a>
           <span className="text-[11px] bg-cyan-950/80 text-cyan-300 border border-cyan-800 px-3 py-1 rounded-full font-mono font-bold">
-            نسخه v1.21.0
+            نسخه هسته: {downloadsInfo?.version || 'v1.21.0'}
           </span>
-          <span className="text-[11px] bg-emerald-950/80 text-emerald-300 border border-emerald-800 px-3 py-1 rounded-full">
-            سازگار با ۱۰۰٪ موبایل‌ها
-          </span>
+          <button
+            type="button"
+            onClick={handleSyncAssets}
+            disabled={syncingAssets}
+            className="flex items-center gap-1.5 text-[11px] bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-800 px-3 py-1 rounded-full transition cursor-pointer disabled:opacity-50"
+            title="کپی و همگام‌سازی فایل‌های انتشار از گیت‌هاب و بیلدها به داخل هسته سرور"
+          >
+            <span>{syncingAssets ? '⏳' : '🔄'}</span>
+            <span>{syncingAssets ? 'در حال کپی به هسته…' : 'کپی فایل‌ها به هسته'}</span>
+          </button>
         </div>
       </div>
+
+      {syncMessage && (
+        <div className="bg-emerald-950/70 border border-emerald-500/50 rounded-xl p-3 text-xs text-emerald-200 flex items-center justify-between animate-fade-in">
+          <div className="flex items-center gap-2">
+            <span>✅</span>
+            <span>{syncMessage}</span>
+          </div>
+          <button type="button" onClick={() => setSyncMessage(null)} className="text-emerald-400 hover:text-white text-xs px-2">✕</button>
+        </div>
+      )}
 
       {/* ۲. بخش پین‌کد اختصاصی اتصال و جفت‌سازی */}
       <div className="bg-[#0b0e14] border border-[#222936] rounded-xl p-4 flex flex-wrap justify-between items-center gap-4">
@@ -223,35 +279,72 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
           </div>
 
           <div className="space-y-2 pt-2">
-            <a
-              href="/downloads/OmniOps-Edge-Setup.exe"
-              download="OmniOps-Edge-Setup.exe"
-              className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 rounded-xl text-xs text-center transition flex items-center justify-center gap-2 shadow-lg shadow-cyan-950"
-            >
-              <span>⬇️</span>
-              <span>دانلود نصاب مستقیم ویندوز (.exe)</span>
-            </a>
+            {(() => {
+              const edgeFile = getFile('OmniOps-Edge-Setup.exe') || getFile('omniops-agent-setup.exe');
+              return (
+                <>
+                  <div className="flex items-center justify-between text-[11px] pb-1">
+                    <span className="text-cyan-400 font-bold flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${edgeFile?.available_locally ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+                      {edgeFile?.available_locally ? '🟢 موجود در هسته سرور (دانلود مستقیم)' : '🟡 هدایت به گیت‌هاب (Fallback)'}
+                    </span>
+                    <span className="text-gray-400 font-mono text-[10px]">
+                      نسخه: {edgeFile?.version || downloadsInfo?.version || 'v1.21.0'} {edgeFile?.size_formatted ? `· ${edgeFile.size_formatted}` : ''}
+                    </span>
+                  </div>
 
-            <div className="flex gap-2">
-              <a
-                href="https://github.com/RedBoy-011/OmniOps/releases"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 bg-[#1a202c] hover:bg-[#252d3d] text-gray-300 border border-[#30363d] py-2 rounded-xl text-[11px] text-center transition flex items-center justify-center gap-1.5"
-              >
-                <span>🔗</span>
-                <span>نسخه‌های رسمی گیت‌هاب</span>
-              </a>
-              <a
-                href="https://github.com/RedBoy-011/OmniOps/actions"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 bg-[#1a202c] hover:bg-[#252d3d] text-gray-300 border border-[#30363d] py-2 rounded-xl text-[11px] text-center transition flex items-center justify-center gap-1.5"
-              >
-                <span>📦</span>
-                <span>آخرین Artifacts بیلد</span>
-              </a>
-            </div>
+                  {edgeFile?.sha256 && (
+                    <div className="bg-[#12161f] border border-[#2b3547] rounded-xl p-2.5 text-[11px] space-y-1">
+                      <div className="flex items-center justify-between text-gray-400">
+                        <span className="font-mono text-cyan-400 font-bold">SHA-256 Checksum:</span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyChecksum(edgeFile.sha256, 'edge')}
+                          className="text-cyan-300 hover:text-cyan-200 transition text-[10px] flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>{copiedChecksum === 'edge' ? '✅ کپی شد' : '📋 کپی Checksum'}</span>
+                        </button>
+                      </div>
+                      <div className="font-mono text-[10px] text-cyan-200/90 truncate bg-black/50 p-1.5 rounded select-all" dir="ltr">
+                        {edgeFile.sha256}
+                      </div>
+                    </div>
+                  )}
+
+                  <a
+                    href="/downloads/OmniOps-Edge-Setup.exe"
+                    download="OmniOps-Edge-Setup.exe"
+                    className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 rounded-xl text-xs text-center transition flex items-center justify-center gap-2 shadow-lg shadow-cyan-950"
+                  >
+                    <span>⬇️</span>
+                    <span>دانلود مستقیم نصاب ویندوز از هسته (.exe)</span>
+                  </a>
+
+                  <div className="flex gap-2">
+                    <a
+                      href="https://github.com/RedBoy-011/OmniOps/releases/latest/download/OmniOps-Edge-Setup.exe"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 bg-[#1a202c] hover:bg-[#252d3d] text-gray-300 border border-[#30363d] py-2 rounded-xl text-[11px] text-center transition flex items-center justify-center gap-1.5"
+                      title="دانلود پشتیبان از مخزن گیت‌هاب در صورت در دسترس نبودن فایل محلی"
+                    >
+                      <span>🔗</span>
+                      <span>دانلود پشتیبان از گیت‌هاب (Fallback)</span>
+                    </a>
+                    <a
+                      href="https://github.com/RedBoy-011/OmniOps/releases"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="bg-[#1a202c] hover:bg-[#252d3d] text-gray-400 border border-[#30363d] px-3 py-2 rounded-xl text-[11px] text-center transition flex items-center justify-center gap-1"
+                      title="مشاهده تمام نسخه‌های منتشر شده"
+                    >
+                      <span>📦</span>
+                      <span>Releases</span>
+                    </a>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
 
@@ -414,33 +507,73 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
               </div>
             ) : (
               <div className="space-y-2">
-                <a
-                  href="/downloads/OmniOps-Coucou-v1.0.apk"
-                  download="OmniOps-Coucou-v1.0.apk"
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs text-center transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950"
-                >
-                  <span>⬇️</span>
-                  <span>دانلود فایل خام OmniOps-Coucou-v1.0.apk</span>
-                </a>
-                <div className="flex gap-2">
-                  <a
-                    href="/downloads/OmniOps-Mobile.apk"
-                    download="OmniOps-Mobile.apk"
-                    className="flex-1 bg-[#1a202c] hover:bg-[#252d3d] text-gray-300 border border-[#30363d] py-2 rounded-xl text-[11px] text-center transition flex items-center justify-center gap-1.5"
-                  >
-                    <span>📦</span>
-                    <span>نسخه کمکی Mobile.apk</span>
-                  </a>
-                  <a
-                    href="https://github.com/RedBoy-011/OmniOps/releases"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 bg-[#1a202c] hover:bg-[#252d3d] text-gray-300 border border-[#30363d] py-2 rounded-xl text-[11px] text-center transition flex items-center justify-center gap-1.5"
-                  >
-                    <span>🔗</span>
-                    <span>نسخه‌های گیت‌هاب</span>
-                  </a>
-                </div>
+                {(() => {
+                  const coucouFile = getFile('OmniOps-Coucou-v1.0.apk');
+                  const mobileFile = getFile('OmniOps-Mobile.apk');
+                  const activeFile = coucouFile || mobileFile;
+                  return (
+                    <>
+                      <div className="flex items-center justify-between text-[11px] pb-1">
+                        <span className="text-emerald-400 font-bold flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full ${activeFile?.available_locally ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+                          {activeFile?.available_locally ? '🟢 موجود در هسته سرور (دانلود مستقیم)' : '🟡 هدایت به گیت‌هاب (Fallback)'}
+                        </span>
+                        <span className="text-gray-400 font-mono text-[10px]">
+                          نسخه: {activeFile?.version || downloadsInfo?.version || 'v1.21.0'} {activeFile?.size_formatted ? `· ${activeFile.size_formatted}` : ''}
+                        </span>
+                      </div>
+
+                      {activeFile?.sha256 && (
+                        <div className="bg-[#12161f] border border-[#2b3547] rounded-xl p-2.5 text-[11px] space-y-1">
+                          <div className="flex items-center justify-between text-gray-400">
+                            <span className="font-mono text-emerald-400 font-bold">SHA-256 Checksum:</span>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyChecksum(activeFile.sha256, 'apk')}
+                              className="text-emerald-300 hover:text-emerald-200 transition text-[10px] flex items-center gap-1 cursor-pointer"
+                            >
+                              <span>{copiedChecksum === 'apk' ? '✅ کپی شد' : '📋 کپی Checksum'}</span>
+                            </button>
+                          </div>
+                          <div className="font-mono text-[10px] text-emerald-200/90 truncate bg-black/50 p-1.5 rounded select-all" dir="ltr">
+                            {activeFile.sha256}
+                          </div>
+                        </div>
+                      )}
+
+                      <a
+                        href="/downloads/OmniOps-Coucou-v1.0.apk"
+                        download="OmniOps-Coucou-v1.0.apk"
+                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs text-center transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950"
+                      >
+                        <span>⬇️</span>
+                        <span>دانلود مستقیم فایل OmniOps-Coucou-v1.0.apk از هسته</span>
+                      </a>
+
+                      <div className="flex gap-2">
+                        <a
+                          href="/downloads/OmniOps-Mobile.apk"
+                          download="OmniOps-Mobile.apk"
+                          className="flex-1 bg-[#1a202c] hover:bg-[#252d3d] text-gray-300 border border-[#30363d] py-2 rounded-xl text-[11px] text-center transition flex items-center justify-center gap-1.5"
+                          title="دانلود مستقیم بسته کمکی Mobile.apk از هسته"
+                        >
+                          <span>📦</span>
+                          <span>دانلود Mobile.apk از هسته</span>
+                        </a>
+                        <a
+                          href="https://github.com/RedBoy-011/OmniOps/releases/latest/download/OmniOps-Coucou-v1.0.apk"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 bg-[#1a202c] hover:bg-[#252d3d] text-gray-300 border border-[#30363d] py-2 rounded-xl text-[11px] text-center transition flex items-center justify-center gap-1.5"
+                          title="دانلود پشتیبان از مخزن رسمی گیت‌هاب در صورت بروز مشکل"
+                        >
+                          <span>🔗</span>
+                          <span>دانلود پشتیبان از گیت‌هاب (Fallback)</span>
+                        </a>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             )}
           </div>

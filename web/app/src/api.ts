@@ -153,6 +153,28 @@ export type SocksHealthResult = {
   message: string;
   error?: string;
 };
+export type CoreDownloadFile = {
+  filename: string;
+  name: string;
+  platform: string;
+  category: string;
+  description: string;
+  version: string;
+  size_bytes: number;
+  size_formatted: string;
+  sha256: string;
+  available_locally: boolean;
+  direct_url: string;
+  fallback_url: string;
+  updated_at?: number | null;
+};
+export type DownloadsInfoResponse = {
+  status: string;
+  version: string;
+  commit: string;
+  downloads_dir_exists: boolean;
+  files: CoreDownloadFile[];
+};
 export type NodeGrant = { id: string; role: "worker" | "edge"; grant: string; expires_at: number };
 export type NodeTokenResponse = {
   id: string;
@@ -940,4 +962,8 @@ export const api = {
     request<{ spec: WorkspaceSpec }>(`/api/web/workspace/spec?spec_id=${encodeURIComponent(spec_id)}`),
   listSpecs: (project_id: string, limit = 50) =>
     request<{ specs: WorkspaceSpec[] }>(`/api/web/workspace/specs?project_id=${encodeURIComponent(project_id)}&limit=${limit}`),
+  downloadsInfo: () =>
+    request<DownloadsInfoResponse>("/api/downloads/info"),
+  syncReleaseAssets: () =>
+    request<{ status: string; message: string; synced_count: number; synced_files: string[]; files: CoreDownloadFile[] }>("/api/admin/system/sync-release-assets", "POST", {}),
 };

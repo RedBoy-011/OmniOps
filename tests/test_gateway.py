@@ -124,9 +124,24 @@ class GatewayTests(unittest.TestCase):
                 self.assertEqual(resp.status, 200)
                 self.assertEqual(resp.read(), b"MZ-PE-DUMMY-BINARY-TEST")
                 self.assertIn("attachment", resp.headers.get("Content-Disposition", ""))
+                self.assertIsNotNone(resp.headers.get("X-Checksum-SHA256"))
+                import hashlib
+                self.assertEqual(resp.headers.get("X-Checksum-SHA256"), hashlib.sha256(b"MZ-PE-DUMMY-BINARY-TEST").hexdigest())
         finally:
             if test_file.exists():
                 test_file.unlink()
+
+    def test_downloads_info_endpoint(self):
+        import json
+        with self.opener.open(f"{self.root}/api/downloads/info") as resp:
+            self.assertEqual(resp.status, 200)
+            data = json.loads(resp.read().decode("utf-8"))
+            self.assertEqual(data["status"], "ok")
+            self.assertIn("version", data)
+            self.assertIn("files", data)
+            filenames = [f["filename"] for f in data["files"]]
+            self.assertIn("OmniOps-Edge-Setup.exe", filenames)
+            self.assertIn("OmniOps-Coucou-v1.0.apk", filenames)
 
 
 if __name__ == "__main__":
