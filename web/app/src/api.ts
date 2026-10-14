@@ -411,6 +411,31 @@ export type ProjectArtifact = {
   updated_at: number;
 };
 
+export type SpecTaskStep = {
+  step: number;
+  title: string;
+  description: string;
+  action?: string;
+  status: string;
+};
+
+export type WorkspaceSpec = {
+  id: string;
+  project_id: string;
+  owner_id: string;
+  title: string;
+  requirements: string;
+  design_approach: string;
+  task_breakdown: SpecTaskStep[];
+  status: "draft" | "approved" | "rejected" | "executed";
+  run_id?: string | null;
+  approved_by?: string | null;
+  approved_at?: number | null;
+  rejection_reason?: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
 export type TaskPreset = {
   id: string;
   title: string;
@@ -803,4 +828,16 @@ export const api = {
     request<{ artifact: ProjectArtifact }>("/api/web/workspace/project/artifacts", "POST", payload),
   deleteProjectArtifact: (project_id: string, artifact_id: string) =>
     request<{ status: string; artifact_id: string }>("/api/web/workspace/project/artifacts/delete", "POST", { project_id, artifact_id }),
+  createSpec: (payload: { project_id: string; prompt: string; title?: string; requirements?: string; design_approach?: string; task_breakdown?: SpecTaskStep[]; auto_generate?: boolean }) =>
+    request<{ spec: WorkspaceSpec }>("/api/web/workspace/spec/create", "POST", payload),
+  updateSpec: (payload: { spec_id: string; title?: string; requirements?: string; design_approach?: string; task_breakdown?: SpecTaskStep[] }) =>
+    request<{ spec: WorkspaceSpec }>("/api/web/workspace/spec/update", "POST", payload),
+  approveSpec: (payload: { spec_id: string; role?: AgentRole; mode?: AgentMode; debug_mode?: boolean }) =>
+    request<{ status: string; spec: WorkspaceSpec; run: AgentRun }>("/api/web/workspace/spec/approve", "POST", payload),
+  rejectSpec: (payload: { spec_id: string; reason?: string }) =>
+    request<{ status: string; spec: WorkspaceSpec }>("/api/web/workspace/spec/reject", "POST", payload),
+  getSpec: (spec_id: string) =>
+    request<{ spec: WorkspaceSpec }>(`/api/web/workspace/spec?spec_id=${encodeURIComponent(spec_id)}`),
+  listSpecs: (project_id: string, limit = 50) =>
+    request<{ specs: WorkspaceSpec[] }>(`/api/web/workspace/specs?project_id=${encodeURIComponent(project_id)}&limit=${limit}`),
 };

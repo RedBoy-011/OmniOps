@@ -135,6 +135,25 @@ class WorkspaceStore:
                     updated_at INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_workspace_artifacts_proj ON workspace_project_artifacts(project_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS workspace_specs (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    project_id TEXT NOT NULL REFERENCES workspace_projects(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL,
+                    prompt TEXT NOT NULL,
+                    requirements TEXT NOT NULL,
+                    design_approach TEXT NOT NULL,
+                    task_breakdown TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'approved', 'rejected', 'executed')),
+                    run_id TEXT REFERENCES workspace_agent_runs(id) ON DELETE SET NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    approved_at INTEGER,
+                    approved_by TEXT,
+                    rejection_reason TEXT DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_workspace_specs_proj ON workspace_specs(project_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_workspace_specs_owner ON workspace_specs(owner_id, status);
             """)
             try:
                 db.execute("ALTER TABLE workspace_projects ADD COLUMN root_path TEXT DEFAULT ''")
@@ -1280,7 +1299,7 @@ class WorkspaceStore:
 
         return res
 
-    def start_agent_run(self, principal, project_id, prompt, role='general', mode='single', debug_mode=False):
+    def start_agent_run(self, principal, project_id, prompt, role='general', mode='single', debug_mode=False, custom_plan_steps=None):
         self._cap(principal, 'chat')
         if not isinstance(project_id, str) or len(project_id) != 32:
             raise IdentityError('Invalid project ID')
@@ -1492,38 +1511,51 @@ class WorkspaceStore:
                 step3_title = 'تدوین گزارش راهکار و جمع‌بندی گام‌های توسعه'
                 step3_summary = 'تهیه نقشه راه نهایی تکمیل تسک‌ها'
 
-            plan_steps = [
-                {
-                    'index': 0,
-                    'title': step0_title,
-                    'action': 'inspect',
-                    'status': 'completed',
-                    'summary': step0_summary
-                },
-                {
-                    'index': 1,
-                    'title': step1_title,
-                    'action': 'read_file',
-                    'target': target_file,
-                    'status': 'in_progress' if not clean_debug else 'paused_debug',
-                    'summary': 'در حال بررسی تنظیمات و ماژول‌ها...' if not clean_debug else f'توقف دیباگ در گام ۱ برای وارسی {target_file}. برای ادامه، Step Next را بزنید.'
-                },
-                {
-                    'index': 2,
-                    'title': step2_title,
-                    'action': 'run_command',
-                    'command': default_cmd,
-                    'status': 'pending',
-                    'summary': 'نیازمند تایید اقدام یا مجوز اجرا'
-                },
-                {
-                    'index': 3,
-                    'title': step3_title,
-                    'action': 'synthesize',
-                    'status': 'pending',
-                    'summary': step3_summary
-                }
-            ]
+            if custom_plan_steps and isinstance(custom_plan_steps, list) and len(custom_plan_steps) > 0:
+                plan_steps = []
+                for i, st in enumerate(custom_plan_steps):
+                    plan_steps.append({
+                        'index': i,
+                        'title': st.get('title', f'گام {i+1}'),
+                        'action': st.get('action', 'inspect' if i == 0 else ('read_file' if i == 1 else ('run_command' if i == 2 else 'review'))),
+                        'target': st.get('target', target_file if i == 1 else ''),
+                        'command': st.get('command', default_cmd if i == 2 else ''),
+                        'status': 'completed' if i == 0 else ('in_progress' if i == 1 and not clean_debug else ('paused_debug' if i == 1 and clean_debug else 'pending')),
+                        'summary': st.get('description', st.get('summary', f'گام اجرایی: {st.get("title", "")}'))
+                    })
+            else:
+                plan_steps = [
+                    {
+                        'index': 0,
+                        'title': step0_title,
+                        'action': 'inspect',
+                        'status': 'completed',
+                        'summary': step0_summary
+                    },
+                    {
+                        'index': 1,
+                        'title': step1_title,
+                        'action': 'read_file',
+                        'target': target_file,
+                        'status': 'in_progress' if not clean_debug else 'paused_debug',
+                        'summary': 'در حال بررسی تنظیمات و ماژول‌ها...' if not clean_debug else f'توقف دیباگ در گام ۱ برای وارسی {target_file}. برای ادامه، Step Next را بزنید.'
+                    },
+                    {
+                        'index': 2,
+                        'title': step2_title,
+                        'action': 'run_command',
+                        'command': default_cmd,
+                        'status': 'pending',
+                        'summary': 'نیازمند تایید اقدام یا مجوز اجرا'
+                    },
+                    {
+                        'index': 3,
+                        'title': step3_title,
+                        'action': 'synthesize',
+                        'status': 'pending',
+                        'summary': step3_summary
+                    }
+                ]
 
             logs = [
                 {
@@ -2406,5 +2438,263 @@ class WorkspaceStore:
             db.execute("DELETE FROM workspace_project_artifacts WHERE id=?", (artifact_id,))
             self.store._audit(db, principal['id'], 'workspace_artifact_deleted', f"{project_id}:{artifact_id}")
             return {'status': 'deleted', 'artifact_id': artifact_id}
+
+    def is_complex_task(self, prompt: str) -> bool:
+        """Determines if a user prompt is complex and should trigger Spec-Driven Development validation."""
+        if not prompt or not isinstance(prompt, str):
+            return False
+        clean = prompt.lower().strip()
+        simple_indicators = (
+            'گزارش cpu', 'وضعیت رم', 'وضعیت دیسک', 'اطلاعات سیستم', 'گزارش سیستم',
+            'پینگ', 'ping', 'cpu report', 'ram status', 'system metrics',
+            'ls', 'dir', 'pwd', 'whoami', 'git status', 'echo', 'version'
+        )
+        if any(clean.startswith(ind) or clean == ind for ind in simple_indicators) and len(clean) < 60:
+            return False
+
+        complex_keywords = (
+            'معماری', 'طراحی', 'بازطراحی', 'ریفکتور', 'ریفرکتور', 'سند', 'مشخصات',
+            'نیازمندی', 'مهاجرت', 'پیاده‌سازی', 'پایپ‌لاین', 'دیتابیس', 'ماژول',
+            'سوارم', 'امنیت', 'لایه‌بندی', 'پچ', 'spec', 'design', 'architecture',
+            'refactor', 'implement', 'migration', 'database', 'pipeline', 'audit'
+        )
+        return len(clean) >= 70 or any(kw in clean for kw in complex_keywords)
+
+    def create_or_generate_spec(self, principal, project_id, prompt, title='', requirements='', design_approach='', task_breakdown=None, auto_generate=True):
+        self._cap(principal, 'chat')
+        if not isinstance(project_id, str) or len(project_id) != 32:
+            raise IdentityError('Invalid project ID')
+        if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 4000:
+            raise IdentityError('Prompt must contain 1-4000 characters')
+
+        project = self.get_project(principal, project_id)
+        project_name = project.get('name', 'Project')
+        fw = 'General Project'
+        total_files = 0
+        try:
+            inspection = self.inspect_project(principal, project_id)
+            fw = inspection.get('framework', 'General Project')
+            total_files = inspection.get('total_entries', 0)
+        except Exception:
+            pass
+
+        spec_id = uuid.uuid4().hex
+        now = int(self.store.clock())
+
+        clean_title = title.strip() if title else f"سند مشخصات (Spec): {prompt.strip()[:60]}..."
+        
+        req_text = requirements.strip() if requirements else ''
+        design_text = design_approach.strip() if design_approach else ''
+        breakdown_list = task_breakdown if (task_breakdown and isinstance(task_breakdown, list)) else []
+
+        if auto_generate:
+            if not req_text:
+                req_text = (
+                    f"### ۱. نیازمندی‌های عملکردی (Functional Requirements)\n"
+                    f"- هدف اصلی: اجرای دقیق وظیفه «{prompt.strip()}» در پروژه {project_name}.\n"
+                    f"- سازگاری با بستر: انطباق کامل با فناوری {fw} و استانداردهای تعیین‌شده در مخزن.\n"
+                    f"- کنترل مرزها: اعمال تغییرات صرفاً در محدوده پروژه، بدون ایجاد وابستگی‌های ناامن.\n\n"
+                    f"### ۲. معیارهای پذیرش (Acceptance Criteria)\n"
+                    f"- [ ] تمام مراحل اجرایی بدون خطای کامپایل یا اجرا خاتمه یابند.\n"
+                    f"- [ ] تست‌های صحت‌سنجی سیستم (Verification Suite) با خروجی صفر (Exit code 0) تایید شوند.\n"
+                    f"- [ ] گزارش عملکرد و پچ نهایی در سیستم ممیزی (Audit Trail) ثبت گردد.\n\n"
+                    f"### ۳. الزامات غیرعملکردی و امنیتی\n"
+                    f"- مهار دسترسی: جلوگیری از تخریب فایل‌های حیاتی یا اجرای دستورات با خطر بالا.\n"
+                    f"- بازخورد آنی: ثبت وقایع و امکان توقف اضطراری (Emergency Stop) توسط ناظر انسانی."
+                )
+            if not design_text:
+                design_text = (
+                    f"### رویکرد و معماری پیشنهادی (Architecture & Approach)\n"
+                    f"- **تحلیل محیط:** بازرسی ساختار پروژه با تکیه بر {fw} و کشف وابستگی‌های موجود ({total_files} فایل).\n"
+                    f"- **الگوی پیاده‌سازی:** اجرای گام‌به‌گام با نظارت انسانی (Human-in-the-Loop) و رعایت مرزبندی سندباکس و سیاست دسترسی.\n"
+                    f"- **مدیریت شکست و رول‌بک:** در صورت بروز خطای پیش‌بینی‌نشده، پچ‌های اعمال‌شده از طریق Patch Engine قابل برگشت خواهند بود.\n"
+                    f"- **شفافیت لاگ‌ها:** تمامی تعاملات ابزارها به عنوان آرتیفکت‌های مستقل در دیتابیس ثبت خواهند شد."
+                )
+            if not breakdown_list:
+                breakdown_list = [
+                    {
+                        "step": 1,
+                        "title": "ممیزی ساختار و بازرسی وابستگی‌های پروژه",
+                        "description": f"تحلیل فایل‌های پیکربندی و ساختار کدهای {fw} قبل از شروع پیاده‌سازی.",
+                        "action": "inspect_workspace",
+                        "status": "pending"
+                    },
+                    {
+                        "step": 2,
+                        "title": "پیاده‌سازی تغییرات و پیکربندی الزامات",
+                        "description": f"اعمال تغییرات مورد نیاز برای «{prompt.strip()[:80]}» با استانداردهای تعریف‌شده.",
+                        "action": "implement_changes",
+                        "status": "pending"
+                    },
+                    {
+                        "step": 3,
+                        "title": "آزمون صحت‌سنجی و ارزیابی کیفیت خروجی",
+                        "description": "اجرای آزمون‌های راستی‌آزمایی برای اطمینان از عملکرد صحیح و عدم بروز رگرسیون.",
+                        "action": "run_verification",
+                        "status": "pending"
+                    },
+                    {
+                        "step": 4,
+                        "title": "یکپارچه‌سازی نهایی و ثبت در ممیزی سازمانی",
+                        "description": "تهیه گزارش جامع انجام وظیفه و به‌روزرسانی مستندات و ثبت ردپا در Audit Trail.",
+                        "action": "finalize_task",
+                        "status": "pending"
+                    }
+                ]
+
+        with self.store._lock, self.store._db() as db:
+            db.execute("""
+                INSERT INTO workspace_specs (
+                    id, owner_id, project_id, title, prompt, requirements, design_approach,
+                    task_breakdown, status, run_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', NULL, ?, ?)
+            """, (
+                spec_id, principal['id'], project_id, clean_title[:200], prompt.strip(),
+                req_text, design_text, json.dumps(breakdown_list, ensure_ascii=False),
+                now, now
+            ))
+            self.store._audit(db, principal['id'], 'workspace_spec_created', f"{project_id}:{spec_id}:{clean_title[:30]}")
+
+        self.dispatch_governance_webhook('spec_created', {
+            'spec_id': spec_id,
+            'project_id': project_id,
+            'title': clean_title,
+            'created_by': principal['username']
+        })
+
+        return self.get_spec(principal, spec_id)
+
+    def get_spec(self, principal, spec_id):
+        if not isinstance(spec_id, str) or len(spec_id) != 32:
+            raise IdentityError('Invalid spec ID')
+        with self.store._lock, self.store._db() as db:
+            row = db.execute("SELECT * FROM workspace_specs WHERE id=?", (spec_id,)).fetchone()
+            if not row:
+                raise IdentityError('Spec not found', 404)
+            data = dict(row)
+            self.get_project(principal, data['project_id'])
+            try:
+                data['task_breakdown'] = json.loads(data['task_breakdown'])
+            except Exception:
+                data['task_breakdown'] = []
+            return data
+
+    def list_specs(self, principal, project_id, status=None):
+        if not isinstance(project_id, str) or len(project_id) != 32:
+            raise IdentityError('Invalid project ID')
+        self.get_project(principal, project_id)
+        with self.store._lock, self.store._db() as db:
+            if status and status in ('draft', 'approved', 'rejected', 'executed'):
+                rows = db.execute("""
+                    SELECT * FROM workspace_specs 
+                    WHERE project_id=? AND status=? 
+                    ORDER BY created_at DESC LIMIT 50
+                """, (project_id, status)).fetchall()
+            else:
+                rows = db.execute("""
+                    SELECT * FROM workspace_specs 
+                    WHERE project_id=? 
+                    ORDER BY created_at DESC LIMIT 50
+                """, (project_id,)).fetchall()
+            
+            res = []
+            for r in rows:
+                item = dict(r)
+                try:
+                    item['task_breakdown'] = json.loads(item['task_breakdown'])
+                except Exception:
+                    item['task_breakdown'] = []
+                res.append(item)
+            return res
+
+    def update_spec(self, principal, spec_id, title=None, requirements=None, design_approach=None, task_breakdown=None):
+        spec = self.get_spec(principal, spec_id)
+        if spec['status'] not in ('draft', 'rejected'):
+            raise IdentityError(f'Cannot edit spec in status {spec["status"]}', 400)
+        
+        now = int(self.store.clock())
+        new_title = title.strip()[:200] if title is not None else spec['title']
+        new_req = requirements.strip() if requirements is not None else spec['requirements']
+        new_design = design_approach.strip() if design_approach is not None else spec['design_approach']
+        if task_breakdown is not None and isinstance(task_breakdown, list):
+            new_tb = json.dumps(task_breakdown, ensure_ascii=False)
+        else:
+            new_tb = json.dumps(spec['task_breakdown'], ensure_ascii=False)
+
+        with self.store._lock, self.store._db() as db:
+            db.execute("""
+                UPDATE workspace_specs 
+                SET title=?, requirements=?, design_approach=?, task_breakdown=?, updated_at=?
+                WHERE id=?
+            """, (new_title, new_req, new_design, new_tb, now, spec_id))
+            self.store._audit(db, principal['id'], 'workspace_spec_updated', f"{spec['project_id']}:{spec_id}")
+
+        return self.get_spec(principal, spec_id)
+
+    def approve_spec_and_execute(self, principal, spec_id, role='general', mode='single', debug_mode=False):
+        spec = self.get_spec(principal, spec_id)
+        if spec['status'] == 'executed' and spec.get('run_id'):
+            raise IdentityError('Spec has already been approved and executed', 400)
+
+        now = int(self.store.clock())
+        custom_steps = spec.get('task_breakdown', [])
+
+        agent_run = self.start_agent_run(
+            principal,
+            spec['project_id'],
+            prompt=spec['prompt'],
+            role=role,
+            mode=mode,
+            debug_mode=debug_mode,
+            custom_plan_steps=custom_steps
+        )
+
+        with self.store._lock, self.store._db() as db:
+            db.execute("""
+                UPDATE workspace_specs 
+                SET status='executed', run_id=?, approved_at=?, approved_by=?, updated_at=?
+                WHERE id=?
+            """, (agent_run['id'], now, principal['username'], now, spec_id))
+            self.store._audit(db, principal['id'], 'workspace_spec_approved', f"{spec['project_id']}:{spec_id}:{agent_run['id']}")
+
+        self.dispatch_governance_webhook('spec_executed', {
+            'spec_id': spec_id,
+            'project_id': spec['project_id'],
+            'run_id': agent_run['id'],
+            'approved_by': principal['username']
+        })
+
+        updated_spec = self.get_spec(principal, spec_id)
+        return {
+            'spec': updated_spec,
+            'run': agent_run,
+            'status': 'executed'
+        }
+
+    def reject_spec(self, principal, spec_id, reason=''):
+        spec = self.get_spec(principal, spec_id)
+        if spec['status'] == 'executed':
+            raise IdentityError('Cannot reject an already executed spec', 400)
+
+        now = int(self.store.clock())
+        clean_reason = (reason or 'Rejected by user').strip()[:300]
+
+        with self.store._lock, self.store._db() as db:
+            db.execute("""
+                UPDATE workspace_specs 
+                SET status='rejected', rejection_reason=?, updated_at=?
+                WHERE id=?
+            """, (clean_reason, now, spec_id))
+            self.store._audit(db, principal['id'], 'workspace_spec_rejected', f"{spec['project_id']}:{spec_id}:{clean_reason[:30]}")
+
+        self.dispatch_governance_webhook('spec_rejected', {
+            'spec_id': spec_id,
+            'project_id': spec['project_id'],
+            'reason': clean_reason,
+            'rejected_by': principal['username']
+        })
+
+        return self.get_spec(principal, spec_id)
+
 
 

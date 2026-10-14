@@ -15,8 +15,10 @@ import {
   type GitStatusResult,
   type ProjectArtifact,
   type TaskPreset,
+  type WorkspaceSpec,
   TASK_PRESETS,
 } from "../api";
+import { SpecReviewModal } from "./SpecReviewModal";
 
 interface AgenticWorkspaceCardProps {
   onLoadContextToChat?: (contextPrompt: string) => void;
@@ -77,6 +79,13 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
   const [viewingArtifact, setViewingArtifact] = useState<ProjectArtifact | null>(null);
   const [deletingArtifactId, setDeletingArtifactId] = useState<string | null>(null);
   const [copiedArtifactId, setCopiedArtifactId] = useState<string | null>(null);
+
+  // Spec-Driven Development state
+  const [specs, setSpecs] = useState<WorkspaceSpec[]>([]);
+  const [selectedSpec, setSelectedSpec] = useState<WorkspaceSpec | null>(null);
+  const [showSpecModal, setShowSpecModal] = useState(false);
+  const [showSpecsListModal, setShowSpecsListModal] = useState(false);
+  const [generatingSpec, setGeneratingSpec] = useState(false);
 
   // Create / Bind state
   const [showNewModal, setShowNewModal] = useState(false);
@@ -168,6 +177,7 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
     void loadCommandHistory(selectedProjectId);
     void loadGitStatus(selectedProjectId);
     void loadArtifacts(selectedProjectId);
+    void loadSpecs(selectedProjectId);
   }, [selectedProjectId, projects]);
 
   async function loadGitStatus(projectId: string) {
@@ -237,6 +247,37 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  async function loadSpecs(projectId: string) {
+    if (!projectId) return;
+    try {
+      const res = await api.listSpecs(projectId);
+      setSpecs(res.specs || []);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleCreateSpec(promptText?: string) {
+    const targetPrompt = (promptText || agentTaskPrompt).trim();
+    if (!selectedProjectId || !targetPrompt) return;
+    setGeneratingSpec(true);
+    setError("");
+    try {
+      const res = await api.createSpec({
+        project_id: selectedProjectId,
+        prompt: targetPrompt,
+        auto_generate: true,
+      });
+      setSelectedSpec(res.spec);
+      setShowSpecModal(true);
+      await loadSpecs(selectedProjectId);
+    } catch (err: any) {
+      setError(err?.message || "خطا در تولید سند مشخصات.");
+    } finally {
+      setGeneratingSpec(false);
+    }
   }
 
   async function loadCommandHistory(projectId: string) {
@@ -764,6 +805,14 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
             >
               📑 اسناد و طرح‌ها: <strong>{artifacts.length} سند</strong>
             </button>
+            <button
+              type="button"
+              className="meta-badge specs-badge clickable"
+              onClick={() => setShowSpecsListModal(true)}
+              title="مشاهده اسناد مشخصات و مراحل اجرایی (Spec-Driven)"
+            >
+              📋 مشخصات (Spec): <strong>{specs.length} سند</strong>
+            </button>
           </div>
 
           {/* اکشن بار هوشمند برای بارگذاری در چت و دسترسی سریع */}
@@ -790,6 +839,14 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
               onClick={() => setShowArtifactsModal(true)}
             >
               📑 گالری اسناد پروژه ({artifacts.length})
+            </button>
+            <button
+              type="button"
+              className="action-button spec-action-btn"
+              onClick={() => setShowSpecsListModal(true)}
+              title="مشاهده، بازبینی و مدیریت اسناد مشخصات و مراحل اجرایی (Spec-Driven)"
+            >
+              📋 اسناد مشخصات ({specs.length})
             </button>
             <button
               type="button"
@@ -950,6 +1007,15 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
                   onChange={(e) => setAgentTaskPrompt(e.target.value)}
                   disabled={startingRun}
                 />
+                <button
+                  type="button"
+                  className="action-button spec-gate-btn"
+                  onClick={() => handleCreateSpec()}
+                  disabled={startingRun || generatingSpec || !agentTaskPrompt.trim()}
+                  title="تولید خودکار سند مشخصات (Spec) با ۳ بخش نیازمندی‌ها، معماری و مراحل اجرایی قبل از شروع مأموریت"
+                >
+                  {generatingSpec ? "⏳ تولید سند..." : "📋 بازبینی مشخصات (Spec Gate)"}
+                </button>
                 <button
                   type="submit"
                   className="action-button primary-accent"
@@ -2095,6 +2161,82 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
                   >
                     بستن
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* مدال بازبینی و تأیید سند مشخصات (Spec-Driven Gate) */}
+          {selectedSpec && showSpecModal && (
+            <SpecReviewModal
+              spec={selectedSpec}
+              isOpen={showSpecModal}
+              onClose={() => setShowSpecModal(false)}
+              onExecuted={(run) => {
+                setActiveRun(run);
+                void loadAgentRuns(selectedProjectId);
+                void loadSpecs(selectedProjectId);
+                setSuccessMsg("سند مشخصات تأیید شد و مأموریت ایجنت با موفقیت آغاز گردید.");
+              }}
+              onSpecUpdated={(updatedSpec) => {
+                setSelectedSpec(updatedSpec);
+                void loadSpecs(selectedProjectId);
+              }}
+            />
+          )}
+
+          {/* مدال فهرست اسناد مشخصات پروژه */}
+          {showSpecsListModal && (
+            <div className="agent-modal-overlay" onClick={() => setShowSpecsListModal(false)}>
+              <div className="agent-modal-content max-w-3xl" onClick={(e) => e.stopPropagation()} dir="rtl">
+                <div className="modal-header">
+                  <div className="modal-title-with-icon">
+                    <span className="modal-icon">📋</span>
+                    <div>
+                      <h3 className="modal-title">اسناد مشخصات و تحلیل وظایف (Spec-Driven Gates)</h3>
+                      <span className="modal-subtitle">تاریخچه اسناد تولیدشده، پیش‌نویس‌ها و وظایف نیازمند تأیید در این پروژه</span>
+                    </div>
+                  </div>
+                  <button type="button" className="close-btn" onClick={() => setShowSpecsListModal(false)}>✕</button>
+                </div>
+                <div className="modal-body space-y-3">
+                  {specs.length === 0 ? (
+                    <div className="text-center py-8 text-gray-400 text-xs">
+                      هیچ سند مشخصاتی برای این پروژه ثبت نشده است. از دکمه «📋 بازبینی مشخصات» برای تولید سند استفاده کنید.
+                    </div>
+                  ) : (
+                    specs.map((sp) => (
+                      <div key={sp.id} className="p-3.5 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between gap-3 hover:border-emerald-500/40 transition">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <strong className="text-xs text-slate-200">{sp.title}</strong>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
+                              sp.status === 'executed' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
+                              sp.status === 'rejected' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' :
+                              'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                            }`}>
+                              {sp.status === 'executed' ? '✓ اجرا شده' : sp.status === 'rejected' ? '✕ رد شده' : '⏳ در انتظار تأیید'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-400 line-clamp-1">{sp.requirements?.slice(0, 100)}...</p>
+                        </div>
+                        <button
+                          type="button"
+                          className="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30 transition shrink-0"
+                          onClick={() => {
+                            setSelectedSpec(sp);
+                            setShowSpecModal(true);
+                            setShowSpecsListModal(false);
+                          }}
+                        >
+                          مشاهده و مدیریت
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="quiet-button" onClick={() => setShowSpecsListModal(false)}>بستن</button>
                 </div>
               </div>
             </div>

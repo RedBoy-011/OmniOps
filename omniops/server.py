@@ -340,21 +340,55 @@ def make_server(
                     active_inferences[0] = max(0, active_inferences[0] - 1)
 
         def _static(self) -> bool:
-            if web_dist is None or (self.path != "/" and not self.path.startswith("/assets/") and self.path != "/fonts/Vazirmatn-OFL.txt"):
+            if web_dist is None:
+                return False
+            from urllib.parse import urlsplit
+            req_path = urlsplit(self.path).path
+            if req_path.startswith('/api/') or req_path.startswith('/downloads/'):
                 return False
             base = web_dist.resolve()
-            target = base / ("index.html" if self.path == "/" else self.path.lstrip("/"))
-            target = target.resolve()
+            rel = "index.html" if req_path in ("/", "") else req_path.lstrip("/")
+            target = (base / rel).resolve()
+            if not (target.is_relative_to(base) and target.is_file()):
+                # Fallback to index.html for SPA navigation if path does not have a file extension
+                last_segment = req_path.split('/')[-1]
+                if '.' not in last_segment:
+                    target = (base / "index.html").resolve()
+                else:
+                    self._send(404, {"error": {"message": "Asset not found"}})
+                    return True
             if not target.is_relative_to(base) or not target.is_file():
                 self._send(404, {"error": {"message": "Asset not found"}})
                 return True
             raw = target.read_bytes()
+            suffix = target.suffix.lower()
+            if suffix == '.webmanifest':
+                ct = 'application/manifest+json; charset=utf-8'
+            elif suffix == '.svg':
+                ct = 'image/svg+xml'
+            elif suffix == '.png':
+                ct = 'image/png'
+            elif suffix == '.json':
+                ct = 'application/json; charset=utf-8'
+            elif suffix in ('.js', '.mjs'):
+                ct = 'application/javascript; charset=utf-8'
+            elif suffix == '.css':
+                ct = 'text/css; charset=utf-8'
+            elif suffix in ('.html', '.htm'):
+                ct = 'text/html; charset=utf-8'
+            else:
+                ct = mimetypes.guess_type(target.name)[0] or 'application/octet-stream'
             self.send_response(200)
-            self.send_header("Content-Type", mimetypes.guess_type(target.name)[0] or "application/octet-stream")
+            self.send_header("Content-Type", ct)
             self.send_header("Content-Length", str(len(raw)))
-            self.send_header("Cache-Control", "no-store")
+            if target.name == 'sw.js':
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            elif req_path.startswith('/assets/'):
+                self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+            else:
+                self.send_header("Cache-Control", "no-cache")
             self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'")
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; object-src 'none'; manifest-src 'self'")
             self.end_headers()
             self.wfile.write(raw)
             return True
@@ -545,6 +579,10 @@ def make_server(
                 "/api/web/workspace/task/run/feedback", "/api/agent/workspace/task/run/feedback",
                 "/api/web/workspace/project/artifacts", "/api/agent/workspace/project/artifacts",
                 "/api/web/workspace/project/artifacts/delete", "/api/agent/workspace/project/artifacts/delete",
+                "/api/web/workspace/spec/create", "/api/agent/workspace/spec/create",
+                "/api/web/workspace/spec/update", "/api/agent/workspace/spec/update",
+                "/api/web/workspace/spec/approve", "/api/agent/workspace/spec/approve",
+                "/api/web/workspace/spec/reject", "/api/agent/workspace/spec/reject",
                 "/api/admin/workspace/webhooks", "/api/admin/workspace/webhooks/test", "/api/admin/workspace/webhooks/delete",
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/test-socks", "/api/admin/providers/enable", "/api/admin/providers/price",
@@ -741,6 +779,40 @@ def make_server(
                         payload.get('project_id'),
                         payload.get('artifact_id')
                     ))
+                elif path in ('/api/web/workspace/spec/create', '/api/agent/workspace/spec/create'):
+                    self._send(201, {'spec': workspace.create_or_generate_spec(
+                        principal,
+                        payload.get('project_id'),
+                        payload.get('prompt'),
+                        title=payload.get('title', ''),
+                        requirements=payload.get('requirements', ''),
+                        design_approach=payload.get('design_approach', ''),
+                        task_breakdown=payload.get('task_breakdown'),
+                        auto_generate=bool(payload.get('auto_generate', True))
+                    )})
+                elif path in ('/api/web/workspace/spec/update', '/api/agent/workspace/spec/update'):
+                    self._send(200, {'spec': workspace.update_spec(
+                        principal,
+                        payload.get('spec_id'),
+                        title=payload.get('title'),
+                        requirements=payload.get('requirements'),
+                        design_approach=payload.get('design_approach'),
+                        task_breakdown=payload.get('task_breakdown')
+                    )})
+                elif path in ('/api/web/workspace/spec/approve', '/api/agent/workspace/spec/approve'):
+                    self._send(200, workspace.approve_spec_and_execute(
+                        principal,
+                        payload.get('spec_id'),
+                        role=payload.get('role', 'general'),
+                        mode=payload.get('mode', 'single'),
+                        debug_mode=bool(payload.get('debug_mode', False))
+                    ))
+                elif path in ('/api/web/workspace/spec/reject', '/api/agent/workspace/spec/reject'):
+                    self._send(200, {'spec': workspace.reject_spec(
+                        principal,
+                        payload.get('spec_id'),
+                        reason=payload.get('reason', '')
+                    )})
                 elif path in ('/api/web/workspace/attachments', '/api/agent/workspace/attachments'):
                     self._send(201, workspace.add_attachment(principal, payload.get('project_id'),
                                                               payload.get('name'), payload.get('mime'), payload.get('content_base64')))
@@ -1036,6 +1108,29 @@ def make_server(
                     p_id = q.get('project_id', [None])[0]
                     art_id = q.get('artifact_id', [None])[0]
                     self._send(200, {'artifact': workspace.get_project_artifact(principal, p_id, art_id)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                return
+            if parsed.path in ('/api/web/workspace/specs', '/api/agent/workspace/specs'):
+                principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
+                if principal is None:
+                    return
+                try:
+                    q = parse_qs(parsed.query)
+                    p_id = q.get('project_id', [None])[0]
+                    stat = q.get('status', [None])[0]
+                    self._send(200, {'specs': workspace.list_specs(principal, p_id, status=stat)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                return
+            if parsed.path in ('/api/web/workspace/spec', '/api/agent/workspace/spec'):
+                principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
+                if principal is None:
+                    return
+                try:
+                    q = parse_qs(parsed.query)
+                    s_id = q.get('spec_id', [None])[0]
+                    self._send(200, {'spec': workspace.get_spec(principal, s_id)})
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 return

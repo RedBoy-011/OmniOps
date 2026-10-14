@@ -1,0 +1,53 @@
+{
+  "id": "com.omniops.app",
+  "name": "OmniOps Mobile Orchestrator",
+  "short_name": "OmniOps",
+  "description": "ارکستراتور سیار OmniOps جهت مانیتورینگ هوشمند، تایید بیومتریک و چت با ایجنت‌های سازمانی",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "background_color": "#0b0e14",
+  "theme_color": "#10b981",
+  "lang": "fa",
+  "dir": "rtl",
+  "categories": ["utilities", "productivity", "business"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "چت با ایجنت هوش مصنوعی",
+      "short_name": "چت ایجنت",
+      "description": "ارسال سریع درخواست و گفتگو با ایجنت فعال",
+      "url": "/?shortcut=chat",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "تأیید بیومتریک و امنیت",
+      "short_name": "تأییدیه",
+      "description": "مشاهده و تایید دستورات حساس با دروازه اثر انگشت",
+      "url": "/?shortcut=biometric",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "prefer_related_applications": false
+}
