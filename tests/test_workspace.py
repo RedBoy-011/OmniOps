@@ -1,5 +1,6 @@
 import base64
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -668,6 +669,91 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(auto_art['run_id'], run['id'])
         self.assertIn("گزارش مأموریت", auto_art['title'])
         self.assertIn("پروژه آماده استقرار", auto_art['content'])
+
+    def test_workspace_command_streaming(self):
+        stream_dir = Path(self.temp.name) / 'stream_proj'
+        stream_dir.mkdir(parents=True, exist_ok=True)
+        proj = self.workspace.create_project(self.owner, 'Stream Proj', str(stream_dir))
+
+        # Start streaming command
+        stream = self.workspace.start_streaming_command(self.owner, proj['id'], 'echo hello streaming world')
+        self.assertIn('id', stream)
+        self.assertIn(stream['status'], ('running', 'streaming'))
+        cmd_id = stream['id']
+
+        # Validate command stream exists and belongs to project
+        self.assertTrue(self.workspace.validate_command_stream(self.owner, cmd_id))
+
+        # Consume SSE stream events
+        events = list(self.workspace.get_command_stream_events(self.owner, cmd_id))
+        self.assertGreater(len(events), 0)
+        types = [e['type'] for e in events]
+        self.assertIn('stdout', types)
+        self.assertIn('done', types)
+
+        stdout_events = [e for e in events if e['type'] == 'stdout']
+        combined_text = "".join(e.get('text', '') for e in stdout_events)
+        self.assertIn('hello streaming world', combined_text)
+
+        done_event = [e for e in events if e['type'] == 'done'][0]
+        self.assertEqual(done_event['exit_code'], 0)
+
+        # Non-permitted user should be rejected
+        other_user = {'id': 'x' * 32, 'role': 'member', 'username': 'unauth', 'capabilities': ['chat']}
+        with self.assertRaises(IdentityError):
+            self.workspace.validate_command_stream(other_user, cmd_id)
+
+    def test_workspace_agent_interactive_debugger(self):
+        debug_dir = Path(self.temp.name) / 'debug_proj'
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        (debug_dir / 'index.js').write_text('console.log("debug");\n', encoding='utf-8')
+        proj = self.workspace.create_project(self.member, 'Debug Proj', str(debug_dir))
+
+        # 1. Start agent run with debug_mode=True
+        run = self.workspace.start_agent_run(
+            self.member,
+            proj['id'],
+            'بررسی و اجرای دیباگ پروژه تستی',
+            role='coder',
+            mode='single',
+            debug_mode=True
+        )
+        self.assertEqual(run['status'], 'paused_debug')
+        self.assertEqual(run['debug_mode'], 1)
+        self.assertEqual(run['current_step_index'], 1)
+
+        # 2. Modify action before running step
+        modified = self.workspace.step_agent_run(
+            self.member,
+            run['id'],
+            action='modify',
+            modified_command='echo modified_debug_cmd',
+            modified_prompt='تغییر یافته توسط تستر'
+        )
+        self.assertEqual(modified['status'], 'paused_debug')
+        self.assertEqual(modified['current_step_index'], 1)
+
+        # 3. Step action (Step Over)
+        stepped = self.workspace.step_agent_run(self.member, run['id'], action='step')
+        self.assertEqual(stepped['status'], 'paused_debug')
+        self.assertEqual(stepped['current_step_index'], 2)
+
+        # 4. Toggle debug mode
+        toggled = self.workspace.toggle_agent_run_debug(self.member, run['id'], False)
+        self.assertFalse(toggled['debug_mode'])
+
+        # 5. Skip action (Skip Step)
+        skipped = self.workspace.step_agent_run(self.member, run['id'], action='skip')
+        self.assertEqual(skipped['current_step_index'], 3)
+        self.assertEqual(skipped['status'], 'completed')
+        # Verify skip was logged
+        skip_logs = [l for l in skipped['logs'] if 'پرش' in l.get('title', '') or 'رد شد' in l.get('content', '')]
+        self.assertGreaterEqual(len(skip_logs), 1)
+
+        # 6. Attempting to step or continue an already finalized run raises IdentityError
+        with self.assertRaises(IdentityError):
+            self.workspace.step_agent_run(self.member, run['id'], action='continue')
+
 
 
 

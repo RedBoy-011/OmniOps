@@ -272,7 +272,7 @@ export type AgentPlanStep = {
   index: number;
   title: string;
   action: string;
-  status: "completed" | "in_progress" | "pending" | "waiting_approval" | "failed" | "skipped" | "warning";
+  status: "completed" | "in_progress" | "pending" | "waiting_approval" | "failed" | "skipped" | "warning" | "paused_debug";
   summary: string;
   command?: string;
   target?: string;
@@ -469,6 +469,15 @@ export const TASK_PRESETS: TaskPreset[] = [
   }
 ];
 
+export type CommandStreamEvent = {
+  type: "stdout" | "stderr" | "done" | "error";
+  text?: string;
+  exit_code?: number;
+  duration_ms?: number;
+  error?: string;
+  timestamp?: number;
+};
+
 export type AgentRun = {
   id: string;
   owner_id?: string;
@@ -478,12 +487,13 @@ export type AgentRun = {
   prompt: string;
   role: AgentRole;
   mode?: AgentMode;
-  status: "planning" | "in_progress" | "waiting_approval" | "completed" | "failed" | "cancelled";
+  status: "planning" | "in_progress" | "waiting_approval" | "completed" | "failed" | "cancelled" | "paused_debug";
   current_step_index: number;
   plan_steps: AgentPlanStep[];
   logs: AgentRunLog[];
   subagents?: SubagentRun[];
   result_summary: string;
+  debug_mode?: boolean;
   created_at: number;
   updated_at: number;
 };
@@ -682,8 +692,69 @@ export const api = {
     request<{ status: string; project_id: string; path: string; bytes: number }>("/api/web/workspace/project/file", "POST", { project_id, path, content }),
   executeProjectCommand: (project_id: string, command: string, timeout = 15) =>
     request<CommandExecutionResult>("/api/web/workspace/project/command", "POST", { project_id, command, timeout }),
-  startAgentRun: (project_id: string, prompt: string, role: AgentRole = "general", mode: AgentMode = "single") =>
-    request<{ run: AgentRun }>("/api/web/workspace/task/run", "POST", { project_id, prompt, role, mode }),
+  startStreamingCommand: (project_id: string, command: string, timeout = 30) =>
+    request<{ id: string; project_id: string; command: string; status: string }>("/api/web/workspace/project/command/stream", "POST", { project_id, command, timeout }),
+  listenCommandStream: async (
+    commandId: string,
+    onEvent: (event: CommandStreamEvent) => void,
+    onError: (err: string) => void,
+    onDone: (exitCode: number, durationMs: number) => void
+  ) => {
+    const token = localStorage.getItem("omniops_token") || volatileWebToken || "";
+    try {
+      const response = await fetch(`/api/web/workspace/project/command/stream?command_id=${encodeURIComponent(commandId)}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        const errorJson = await response.json().catch(() => ({}));
+        throw new Error(errorJson.error?.message || `HTTP ${response.status}`);
+      }
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("مرورگر از دریافت پاسخ جریانی (Stream) پشتیبانی نمی‌کند.");
+      }
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("data:")) {
+            try {
+              const event: CommandStreamEvent = JSON.parse(trimmed.slice(5).trim());
+              onEvent(event);
+              if (event.type === "done") {
+                onDone(event.exit_code ?? 0, event.duration_ms ?? 0);
+                return;
+              }
+              if (event.type === "error") {
+                onError(event.error || "خطای ناشناخته در استریم ترمینال");
+                return;
+              }
+            } catch {
+              // ignore json parse error
+            }
+          }
+        }
+      }
+      onDone(0, 0);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "خطا در برقراری ارتباط استریم با سرور");
+    }
+  },
+  startAgentRun: (project_id: string, prompt: string, role: AgentRole = "general", mode: AgentMode = "single", debug_mode = false) =>
+    request<{ run: AgentRun }>("/api/web/workspace/task/run", "POST", { project_id, prompt, role, mode, debug_mode }),
+  stepAgentRun: (run_id: string, action = "step", modified_command?: string, modified_prompt?: string) =>
+    request<{ run: AgentRun }>("/api/web/workspace/task/run/debug/step", "POST", { run_id, action, modified_command, modified_prompt }),
+  toggleAgentRunDebug: (run_id: string, debug_mode?: boolean) =>
+    request<{ run: AgentRun }>("/api/web/workspace/task/run/debug/toggle", "POST", { run_id, debug_mode }),
   proposeFilePatch: (project_id: string, path: string, content: string, apply = false) =>
     request<FilePatchProposal>("/api/web/workspace/project/patch", "POST", { project_id, path, content, apply }),
   advanceAgentRun: (run_id: string) =>

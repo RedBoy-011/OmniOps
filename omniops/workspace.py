@@ -17,6 +17,9 @@ import uuid
 
 from .identity import IdentityError
 
+_command_streams = {}
+_command_streams_lock = threading.Lock()
+
 
 class WorkspaceStore:
     def __init__(self, store):
@@ -50,11 +53,12 @@ class WorkspaceStore:
                     prompt TEXT NOT NULL,
                     role TEXT NOT NULL DEFAULT 'general',
                     mode TEXT NOT NULL DEFAULT 'single',
-                    status TEXT NOT NULL CHECK(status IN ('planning','in_progress','waiting_approval','completed','failed','cancelled')),
+                    status TEXT NOT NULL CHECK(status IN ('planning','in_progress','waiting_approval','completed','failed','cancelled','paused_debug')),
                     current_step_index INTEGER NOT NULL DEFAULT 0,
                     plan_steps TEXT NOT NULL DEFAULT '[]',
                     logs TEXT NOT NULL DEFAULT '[]',
                     result_summary TEXT NOT NULL DEFAULT '',
+                    debug_mode INTEGER NOT NULL DEFAULT 0,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL
                 );
@@ -142,6 +146,10 @@ class WorkspaceStore:
                 pass
             try:
                 db.execute("ALTER TABLE workspace_agent_runs ADD COLUMN mode TEXT DEFAULT 'single'")
+            except Exception:
+                pass
+            try:
+                db.execute("ALTER TABLE workspace_agent_runs ADD COLUMN debug_mode INTEGER DEFAULT 0")
             except Exception:
                 pass
 
@@ -852,6 +860,185 @@ class WorkspaceStore:
             """, (project_id, effective_limit)).fetchall()
             return [dict(r) for r in rows]
 
+    def start_streaming_command(self, principal, project_id, command, timeout=30):
+        if 'action.approve' not in principal.get('capabilities', []) and principal.get('role') != 'superadmin':
+            raise IdentityError('action.approve capability or superadmin role required to execute workspace commands', 403)
+        if not isinstance(command, str) or not 1 <= len(command.strip()) <= 1000:
+            raise IdentityError('Command must contain 1-1000 characters')
+
+        root_dir, _ = self._resolve_project_root(principal, project_id)
+        clean_cmd = command.strip()
+
+        policy = self._get_effective_sandbox_policy()
+        lower_cmd = clean_cmd.lower()
+
+        for bad in policy.get('blocked_commands', []):
+            if bad and bad in lower_cmd:
+                self.dispatch_governance_webhook('sandbox_violation', {
+                    'project_id': project_id,
+                    'actor': principal.get('username', principal.get('id')),
+                    'command': clean_cmd[:100],
+                    'reason': f"Blocked pattern '{bad}'"
+                })
+                raise IdentityError(f"Prohibited dangerous command: matches blocked pattern '{bad}'", 400)
+
+        if policy.get('strict_mode'):
+            tokens = clean_cmd.split()
+            first_raw = tokens[0].lower() if tokens else ''
+            first_name = Path(first_raw.strip('"\'')).name
+            if first_name.endswith('.exe'):
+                first_name = first_name[:-4]
+            allowed_list = policy.get('allowed_prefixes', [])
+            if not any(first_name == p.lower() or first_raw == p.lower() for p in allowed_list):
+                self.dispatch_governance_webhook('sandbox_violation', {
+                    'project_id': project_id,
+                    'actor': principal.get('username', principal.get('id')),
+                    'command': clean_cmd[:100],
+                    'reason': "Disallowed command prefix in strict mode"
+                })
+                raise IdentityError(f"Command '{tokens[0]}' is disallowed by workspace sandbox policy", 403)
+
+        effective_timeout = min(max(1, timeout), policy.get('max_timeout_seconds', 60))
+        cmd_id = uuid.uuid4().hex
+        now_ts = int(self.store.clock())
+
+        entry = {
+            'id': cmd_id,
+            'project_id': project_id,
+            'command': clean_cmd,
+            'status': 'running',
+            'lines': [],
+            'exit_code': None,
+            'duration_ms': 0,
+            'created_at': now_ts,
+            'event': threading.Event(),
+            'completed': False,
+            'lock': threading.Lock()
+        }
+
+        with _command_streams_lock:
+            _command_streams[cmd_id] = entry
+
+        def _runner():
+            t0 = time.time()
+            exit_code = 0
+            try:
+                proc = subprocess.Popen(
+                    clean_cmd,
+                    shell=True,
+                    cwd=str(root_dir),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    errors='replace'
+                )
+                while True:
+                    line = proc.stdout.readline()
+                    if not line:
+                        if proc.poll() is not None:
+                            break
+                        time.sleep(0.04)
+                        continue
+                    clean_line = line.rstrip('\r\n')
+                    with entry['lock']:
+                        entry['lines'].append(clean_line)
+                    entry['event'].set()
+
+                exit_code = proc.wait(timeout=effective_timeout)
+            except subprocess.TimeoutExpired:
+                with entry['lock']:
+                    entry['lines'].append(f"Command timed out after {effective_timeout} seconds")
+                exit_code = 124
+            except Exception as exc:
+                with entry['lock']:
+                    entry['lines'].append(f"Execution error: {exc}")
+                exit_code = 1
+            finally:
+                if 'proc' in locals() and proc and proc.stdout:
+                    try:
+                        proc.stdout.close()
+                    except Exception:
+                        pass
+
+            duration_ms = int((time.time() - t0) * 1000)
+            full_stdout = "\n".join(entry['lines'][:2000])[:32000]
+            try:
+                with self.store._lock, self.store._db() as db:
+                    db.execute("""
+                        INSERT INTO workspace_command_history
+                        (id, project_id, command, exit_code, stdout, stderr, duration_ms, executed_by, created_at)
+                        VALUES (?, ?, ?, ?, ?, '', ?, ?, ?)
+                    """, (cmd_id, project_id, clean_cmd, exit_code, full_stdout, duration_ms, principal['id'], now_ts))
+                    self.store._audit(db, principal['id'], 'workspace_command_executed', f"{project_id}:{clean_cmd[:80]}")
+            except Exception:
+                pass
+
+            with entry['lock']:
+                entry['exit_code'] = exit_code
+                entry['duration_ms'] = duration_ms
+                entry['completed'] = True
+                entry['status'] = 'completed' if exit_code == 0 else 'failed'
+            entry['event'].set()
+
+        t = threading.Thread(target=_runner, daemon=True)
+        entry['thread'] = t
+        t.start()
+
+        return {
+            'id': cmd_id,
+            'project_id': project_id,
+            'command': clean_cmd,
+            'status': 'running'
+        }
+
+    def validate_command_stream(self, principal, command_id):
+        self._cap(principal, 'chat')
+        if not isinstance(command_id, str) or len(command_id) != 32:
+            raise IdentityError('Invalid command stream ID', 400)
+        with _command_streams_lock:
+            entry = _command_streams.get(command_id)
+        if not entry:
+            raise IdentityError('Command stream not found or expired', 404)
+        self._resolve_project_root(principal, entry['project_id'])
+        return entry
+
+    def get_command_stream_events(self, principal, command_id):
+        self._cap(principal, 'chat')
+        if not isinstance(command_id, str) or len(command_id) != 32:
+            raise IdentityError('Invalid command stream ID', 400)
+
+        with _command_streams_lock:
+            entry = _command_streams.get(command_id)
+        if not entry:
+            raise IdentityError('Command stream not found or expired', 404)
+
+        self._resolve_project_root(principal, entry['project_id'])
+
+        last_idx = 0
+        t_start = time.time()
+        while True:
+            with entry['lock']:
+                new_lines = list(entry['lines'][last_idx:])
+                completed = entry['completed']
+                exit_code = entry['exit_code']
+                duration_ms = entry['duration_ms']
+
+            for l in new_lines:
+                yield {'type': 'stdout', 'text': l, 'line': l, 'done': False}
+                last_idx += 1
+
+            if completed and last_idx >= len(entry['lines']):
+                yield {'type': 'done', 'text': '', 'line': '', 'done': True, 'exit_code': exit_code, 'duration_ms': duration_ms}
+                break
+
+            entry['event'].wait(timeout=0.25)
+            entry['event'].clear()
+
+            if time.time() - t_start > 180:
+                yield {'line': 'Stream timed out', 'done': True, 'exit_code': 124, 'duration_ms': 180000}
+                break
+
     def search_project(self, principal, project_id, query, case_sensitive=False, max_results=50, file_extensions=None):
         self._cap(principal, 'chat')
         root_dir, _ = self._resolve_project_root(principal, project_id)
@@ -1058,6 +1245,7 @@ class WorkspaceStore:
             'plan_steps': plan,
             'logs': logs,
             'result_summary': run.get('result_summary') or '',
+            'debug_mode': bool(run.get('debug_mode', 0)),
             'created_at': run['created_at'],
             'updated_at': run['updated_at']
         }
@@ -1092,7 +1280,7 @@ class WorkspaceStore:
 
         return res
 
-    def start_agent_run(self, principal, project_id, prompt, role='general', mode='single'):
+    def start_agent_run(self, principal, project_id, prompt, role='general', mode='single', debug_mode=False):
         self._cap(principal, 'chat')
         if not isinstance(project_id, str) or len(project_id) != 32:
             raise IdentityError('Invalid project ID')
@@ -1107,6 +1295,7 @@ class WorkspaceStore:
         if clean_role not in ('general', 'coder', 'tester', 'architect', 'swarm'):
             raise IdentityError('Invalid agent role. Allowed: general, coder, tester, architect', 400)
 
+        clean_debug = bool(debug_mode)
         root_dir, project_name = self._resolve_project_root(principal, project_id)
         inspection = self.inspect_project(principal, project_id)
 
@@ -1145,8 +1334,8 @@ class WorkspaceStore:
                     'title': f'🛠️ ممیزی و پیاده‌سازی پچ‌های کد (زیرایجنت برنامه‌نویس: {target_file})',
                     'action': 'swarm_coder',
                     'target': target_file,
-                    'status': 'in_progress',
-                    'summary': f'بررسی فایل {target_file} و تحلیل تغییرات مورد نیاز...'
+                    'status': 'in_progress' if not clean_debug else 'paused_debug',
+                    'summary': f'بررسی فایل {target_file} و تحلیل تغییرات مورد نیاز...' if not clean_debug else f'توقف دیباگ برای بازرسی {target_file}. برای ادامه، Step Next را بزنید.'
                 },
                 {
                     'index': 2,
@@ -1176,43 +1365,57 @@ class WorkspaceStore:
             ]
 
             target_fp = root_dir / target_file
-            coder_summary = f"فایل {target_file} در حال بررسی است."
-            coder_status = 'in_progress'
-            coder_logs = [{'timestamp': now, 'title': 'آغاز ماموریت کدنویس', 'content': f'بررسی ماژول‌ها و فایل {target_file}'}]
-            current_step = 1
-
-            if target_fp.is_file():
-                try:
-                    content = target_fp.read_text(encoding='utf-8', errors='replace')
-                    preview = content[:600] + ('\n...(ادامه دارد)' if len(content) > 600 else '')
-                    plan_steps[1]['status'] = 'completed'
-                    plan_steps[1]['summary'] = f"فایل {target_file} ({len(content)} بایت) با موفقیت ممیزی شد."
-                    coder_status = 'completed'
-                    coder_summary = f"فایل {target_file} ({len(content)} بایت) بررسی و ساختار کدهای وابسته تایید شد."
-                    coder_logs.append({'timestamp': now, 'title': f'ممیزی {target_file}', 'content': preview})
-                    logs.append({
-                        'timestamp': now,
-                        'step': 1,
-                        'type': 'file_read',
-                        'title': f"ممیزی {target_file} توسط زیرایجنت کدنویس",
-                        'content': preview
-                    })
-                    current_step = 2
-                except Exception as exc:
-                    plan_steps[1]['status'] = 'failed'
-                    plan_steps[1]['summary'] = f"خطا در خواندن فایل: {exc}"
-                    coder_status = 'failed'
-                    coder_summary = f"خطا در خواندن فایل: {exc}"
-                    current_step = 2
+            if clean_debug:
+                coder_status = 'paused_debug'
+                coder_summary = f"توقف دیباگ در گام ۱ برای بازرسی {target_file}."
+                current_step = 1
+                run_status = 'paused_debug'
+                logs.append({
+                    'timestamp': now,
+                    'step': 1,
+                    'type': 'debug_pause',
+                    'title': f'🐞 توقف دیباگ در گام ۱ (کدنویس: {target_file})',
+                    'content': 'زیرایجنت کدنویس در نقطه وارسی متوقف شد. برای آغاز ممیزی، Step Next را بزنید.'
+                })
+                tester_status = 'pending'
             else:
-                plan_steps[1]['status'] = 'skipped'
-                plan_steps[1]['summary'] = f"فایل {target_file} در ریشه پروژه یافت نشد."
-                coder_status = 'completed'
-                coder_summary = f"فایل {target_file} در ریشه پروژه یافت نشد."
-                current_step = 2
+                coder_summary = f"فایل {target_file} در حال بررسی است."
+                coder_status = 'in_progress'
+                coder_logs = [{'timestamp': now, 'title': 'آغاز ماموریت کدنویس', 'content': f'بررسی ماژول‌ها و فایل {target_file}'}]
+                current_step = 1
 
-            tester_status = 'waiting_approval' if not can_exec else 'pending'
-            run_status = 'waiting_approval' if not can_exec else 'in_progress'
+                if target_fp.is_file():
+                    try:
+                        content = target_fp.read_text(encoding='utf-8', errors='replace')
+                        preview = content[:600] + ('\n...(ادامه دارد)' if len(content) > 600 else '')
+                        plan_steps[1]['status'] = 'completed'
+                        plan_steps[1]['summary'] = f"فایل {target_file} ({len(content)} بایت) با موفقیت ممیزی شد."
+                        coder_status = 'completed'
+                        coder_summary = f"فایل {target_file} ({len(content)} بایت) بررسی و ساختار کدهای وابسته تایید شد."
+                        coder_logs.append({'timestamp': now, 'title': f'ممیزی {target_file}', 'content': preview})
+                        logs.append({
+                            'timestamp': now,
+                            'step': 1,
+                            'type': 'file_read',
+                            'title': f"ممیزی {target_file} توسط زیرایجنت کدنویس",
+                            'content': preview
+                        })
+                        current_step = 2
+                    except Exception as exc:
+                        plan_steps[1]['status'] = 'failed'
+                        plan_steps[1]['summary'] = f"خطا در خواندن فایل: {exc}"
+                        coder_status = 'failed'
+                        coder_summary = f"خطا در خواندن فایل: {exc}"
+                        current_step = 2
+                else:
+                    plan_steps[1]['status'] = 'skipped'
+                    plan_steps[1]['summary'] = f"فایل {target_file} در ریشه پروژه یافت نشد."
+                    coder_status = 'completed'
+                    coder_summary = f"فایل {target_file} در ریشه پروژه یافت نشد."
+                    current_step = 2
+
+                tester_status = 'waiting_approval' if not can_exec else 'pending'
+                run_status = 'waiting_approval' if not can_exec else 'in_progress'
 
             subagents = [
                 {
@@ -1235,7 +1438,7 @@ class WorkspaceStore:
                     'status': coder_status,
                     'prompt': f'ممیزی ساختار سورس، تحلیل وابستگی‌ها و بازخوانی {target_file} برای: {prompt.strip()}',
                     'summary': coder_summary,
-                    'logs': json.dumps(coder_logs),
+                    'logs': json.dumps([]),
                     'created_at': now,
                     'updated_at': now
                 },
@@ -1302,8 +1505,8 @@ class WorkspaceStore:
                     'title': step1_title,
                     'action': 'read_file',
                     'target': target_file,
-                    'status': 'in_progress',
-                    'summary': 'در حال بررسی تنظیمات و ماژول‌ها...'
+                    'status': 'in_progress' if not clean_debug else 'paused_debug',
+                    'summary': 'در حال بررسی تنظیمات و ماژول‌ها...' if not clean_debug else f'توقف دیباگ در گام ۱ برای وارسی {target_file}. برای ادامه، Step Next را بزنید.'
                 },
                 {
                     'index': 2,
@@ -1333,41 +1536,52 @@ class WorkspaceStore:
             ]
 
             target_fp = root_dir / target_file
-            if target_fp.is_file():
-                try:
-                    content = target_fp.read_text(encoding='utf-8', errors='replace')
-                    preview = content[:600] + ('\n...(ادامه دارد)' if len(content) > 600 else '')
-                    plan_steps[1]['status'] = 'completed'
-                    plan_steps[1]['summary'] = f"فایل {target_file} ({len(content)} بایت) با موفقیت بررسی شد."
-                    logs.append({
-                        'timestamp': now,
-                        'step': 1,
-                        'type': 'file_read',
-                        'title': f"بررسی {target_file}",
-                        'content': preview
-                    })
-                    current_step = 2
-                except Exception as exc:
-                    plan_steps[1]['status'] = 'failed'
-                    plan_steps[1]['summary'] = f"خطا در خواندن فایل: {exc}"
-                    current_step = 2
+            if clean_debug:
+                current_step = 1
+                run_status = 'paused_debug'
+                logs.append({
+                    'timestamp': now,
+                    'step': 1,
+                    'type': 'debug_pause',
+                    'title': f'🐞 توقف دیباگ در گام ۱ ({target_file})',
+                    'content': f"ایجنت در نقطه وارسی گام ۱ متوقف شد. برای بررسی {target_file}، Step Next را بزنید."
+                })
             else:
-                plan_steps[1]['status'] = 'skipped'
-                plan_steps[1]['summary'] = f"فایل {target_file} در ریشه پروژه یافت نشد."
-                current_step = 2
+                if target_fp.is_file():
+                    try:
+                        content = target_fp.read_text(encoding='utf-8', errors='replace')
+                        preview = content[:600] + ('\n...(ادامه دارد)' if len(content) > 600 else '')
+                        plan_steps[1]['status'] = 'completed'
+                        plan_steps[1]['summary'] = f"فایل {target_file} ({len(content)} بایت) با موفقیت بررسی شد."
+                        logs.append({
+                            'timestamp': now,
+                            'step': 1,
+                            'type': 'file_read',
+                            'title': f"بررسی {target_file}",
+                            'content': preview
+                        })
+                        current_step = 2
+                    except Exception as exc:
+                        plan_steps[1]['status'] = 'failed'
+                        plan_steps[1]['summary'] = f"خطا در خواندن فایل: {exc}"
+                        current_step = 2
+                else:
+                    plan_steps[1]['status'] = 'skipped'
+                    plan_steps[1]['summary'] = f"فایل {target_file} در ریشه پروژه یافت نشد."
+                    current_step = 2
 
-            run_status = 'in_progress'
-            if not can_exec:
-                run_status = 'waiting_approval'
-                plan_steps[2]['status'] = 'waiting_approval'
-                plan_steps[2]['summary'] = 'در انتظار تأیید مجوز اجرای دستور توسط مدیر ارشد یا کاربر تاییدکننده'
+                run_status = 'in_progress'
+                if not can_exec:
+                    run_status = 'waiting_approval'
+                    plan_steps[2]['status'] = 'waiting_approval'
+                    plan_steps[2]['summary'] = 'در انتظار تأیید مجوز اجرای دستور توسط مدیر ارشد یا کاربر تاییدکننده'
 
         with self.store._lock, self.store._db() as db:
             db.execute("""
                 INSERT INTO workspace_agent_runs 
-                (id, owner_id, project_id, prompt, role, mode, status, current_step_index, plan_steps, logs, result_summary, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)
-            """, (run_id, principal['id'], project_id, prompt.strip(), clean_role, clean_mode, run_status, current_step, json.dumps(plan_steps), json.dumps(logs), now, now))
+                (id, owner_id, project_id, prompt, role, mode, status, current_step_index, plan_steps, logs, result_summary, debug_mode, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
+            """, (run_id, principal['id'], project_id, prompt.strip(), clean_role, clean_mode, run_status, current_step, json.dumps(plan_steps), json.dumps(logs), 1 if clean_debug else 0, now, now))
             for sub in subagents:
                 db.execute("""
                     INSERT INTO workspace_subagent_runs
@@ -1539,12 +1753,12 @@ class WorkspaceStore:
             if not row:
                 raise IdentityError('Agent run not found', 404)
             run = dict(row)
-            if run['status'] != 'waiting_approval':
+            if run['status'] not in ('waiting_approval', 'paused_debug'):
                 raise IdentityError('Run is not waiting for approval', 400)
 
             now = int(self.store.clock())
             db.execute("UPDATE workspace_agent_runs SET status='in_progress', updated_at=? WHERE id=?", (now, run_id))
-            db.execute("UPDATE workspace_subagent_runs SET status='in_progress', updated_at=? WHERE parent_run_id=? AND status='waiting_approval'", (now, run_id))
+            db.execute("UPDATE workspace_subagent_runs SET status='in_progress', updated_at=? WHERE parent_run_id=? AND status IN ('waiting_approval', 'paused_debug')", (now, run_id))
             self.store._audit(db, principal['id'], 'workspace_agent_run_step_approved', run_id)
 
         return self.advance_agent_run(principal, run_id)
@@ -1562,8 +1776,309 @@ class WorkspaceStore:
                 raise IdentityError('Agent run not found', 404)
             now = int(self.store.clock())
             db.execute("UPDATE workspace_agent_runs SET status='cancelled', updated_at=? WHERE id=?", (now, run_id))
-            db.execute("UPDATE workspace_subagent_runs SET status='cancelled', updated_at=? WHERE parent_run_id=? AND status IN ('pending', 'in_progress', 'waiting_approval')", (now, run_id))
+            db.execute("UPDATE workspace_subagent_runs SET status='cancelled', updated_at=? WHERE parent_run_id=? AND status IN ('pending', 'in_progress', 'waiting_approval', 'paused_debug')", (now, run_id))
             self.store._audit(db, principal['id'], 'workspace_agent_run_cancelled', run_id)
+        return self.get_agent_run(principal, run_id)
+
+    def _create_auto_run_artifact(self, db, run, result_summary, now):
+        existing_art = db.execute("SELECT id FROM workspace_project_artifacts WHERE run_id=?", (run['id'],)).fetchone()
+        if not existing_art:
+            art_id = uuid.uuid4().hex
+            art_title = f"گزارش مأموریت: {run['prompt'][:45]}"
+            art_type = 'report' if run.get('mode') == 'swarm' else 'plan'
+            db.execute("""
+                INSERT INTO workspace_project_artifacts (id, project_id, run_id, title, artifact_type, content, created_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (art_id, run['project_id'], run['id'], art_title, art_type, result_summary, run['owner_id'], now, now))
+
+    def step_agent_run(self, principal, run_id, action='step', modified_command=None, modified_prompt=None):
+        self._cap(principal, 'chat')
+        if not isinstance(run_id, str) or len(run_id) != 32:
+            raise IdentityError('Invalid run ID')
+
+        clean_action = str(action or 'step').strip().lower()
+        if clean_action not in ('step', 'skip', 'modify', 'continue'):
+            raise IdentityError('Invalid action. Allowed: step, skip, modify, continue', 400)
+
+        if clean_action == 'continue':
+            with self.store._lock, self.store._db() as db:
+                if principal.get('role') == 'superadmin':
+                    row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=?", (run_id,)).fetchone()
+                else:
+                    row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
+                if not row:
+                    raise IdentityError('Agent run not found', 404)
+                run = dict(row)
+                if run['status'] in ('completed', 'failed', 'cancelled'):
+                    raise IdentityError('Agent run is already finalized', 400)
+                logs = json.loads(run['logs'])
+                now = int(self.store.clock())
+                logs.append({
+                    'timestamp': now,
+                    'step': run['current_step_index'],
+                    'type': 'debug_continue',
+                    'title': '▶️ ادامه خودکار بدون توقف (Continue)',
+                    'content': 'حالت دیباگ غیرفعال شد و مأموریت به صورت پیوسته ادامه می‌یابد.'
+                })
+                new_st = 'in_progress' if run['status'] == 'paused_debug' else run['status']
+                db.execute("UPDATE workspace_agent_runs SET debug_mode=0, status=?, logs=?, updated_at=? WHERE id=?", (new_st, json.dumps(logs), now, run_id))
+            return self.advance_agent_run(principal, run_id)
+
+        with self.store._lock, self.store._db() as db:
+            if principal.get('role') == 'superadmin':
+                row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=?", (run_id,)).fetchone()
+            else:
+                row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
+            if not row:
+                raise IdentityError('Agent run not found', 404)
+            run = dict(row)
+            if run['status'] in ('completed', 'failed', 'cancelled'):
+                raise IdentityError('Agent run is already finalized', 400)
+
+            plan_steps = json.loads(run['plan_steps'])
+            logs = json.loads(run['logs'])
+            current_idx = run['current_step_index']
+            now = int(self.store.clock())
+            debug_active = bool(run.get('debug_mode', 0))
+            is_swarm = run.get('mode') == 'swarm'
+            root_dir, project_name = self._resolve_project_root(principal, run['project_id'])
+            can_exec = 'action.approve' in principal.get('capabilities', []) or principal.get('role') == 'superadmin'
+
+            if clean_action == 'modify':
+                if modified_command and current_idx < len(plan_steps):
+                    plan_steps[current_idx]['command'] = str(modified_command).strip()
+                    logs.append({
+                        'timestamp': now,
+                        'step': current_idx,
+                        'type': 'debug_modify',
+                        'title': '✏️ اصلاح دستور آزمون توسط کاربر',
+                        'content': f"دستور این گام به «{modified_command.strip()}» تغییر یافت."
+                    })
+                if modified_prompt:
+                    run['prompt'] = str(modified_prompt).strip()
+                    db.execute("UPDATE workspace_agent_runs SET prompt=? WHERE id=?", (run['prompt'], run_id))
+                db.execute("UPDATE workspace_agent_runs SET plan_steps=?, logs=?, updated_at=? WHERE id=?", (json.dumps(plan_steps), json.dumps(logs), now, run_id))
+                return self.get_agent_run(principal, run_id)
+
+            if clean_action == 'skip':
+                if current_idx < len(plan_steps):
+                    plan_steps[current_idx]['status'] = 'skipped'
+                    plan_steps[current_idx]['summary'] = 'این گام در حالت دیباگ توسط ناظر رد شد.'
+                logs.append({
+                    'timestamp': now,
+                    'step': current_idx,
+                    'type': 'debug_skip',
+                    'title': f'⏩ پرش از گام {current_idx}',
+                    'content': 'این گام بدون اجرا رد شد.'
+                })
+                current_idx += 1
+                if current_idx >= 3:
+                    new_status = 'completed'
+                    plan_steps[min(3, len(plan_steps)-1)]['status'] = 'completed'
+                    result_summary = f"چرخه مأموریت «{run['prompt']}» با اعمال پرش‌های دیباگ به پایان رسید."
+                    db.execute("""
+                        UPDATE workspace_agent_runs
+                        SET status=?, current_step_index=?, plan_steps=?, logs=?, result_summary=?, updated_at=?
+                        WHERE id=?
+                    """, (new_status, current_idx, json.dumps(plan_steps), json.dumps(logs), result_summary, now, run_id))
+                    try:
+                        self._create_auto_run_artifact(db, run, result_summary, now)
+                    except Exception:
+                        pass
+                else:
+                    new_status = 'paused_debug' if debug_active else 'in_progress'
+                    plan_steps[current_idx]['status'] = 'paused_debug' if debug_active else 'in_progress'
+                    db.execute("""
+                        UPDATE workspace_agent_runs
+                        SET status=?, current_step_index=?, plan_steps=?, logs=?, updated_at=?
+                        WHERE id=?
+                    """, (new_status, current_idx, json.dumps(plan_steps), json.dumps(logs), now, run_id))
+                run['status'] = new_status
+                run['current_step_index'] = current_idx
+                run['plan_steps'] = json.dumps(plan_steps)
+                run['logs'] = json.dumps(logs)
+                run['updated_at'] = now
+                return self._format_run(run, db=db)
+
+            if clean_action == 'step':
+                if current_idx == 1:
+                    target_file = plan_steps[1].get('target', 'README.md')
+                    target_fp = root_dir / target_file
+                    if target_fp.is_file():
+                        try:
+                            content = target_fp.read_text(encoding='utf-8', errors='replace')
+                            preview = content[:600] + ('\n...(ادامه دارد)' if len(content) > 600 else '')
+                            plan_steps[1]['status'] = 'completed'
+                            plan_steps[1]['summary'] = f"فایل {target_file} ({len(content)} بایت) در گام دیباگ ممیزی شد."
+                            logs.append({
+                                'timestamp': now,
+                                'step': 1,
+                                'type': 'file_read',
+                                'title': f"ممیزی {target_file} در گام دیباگ",
+                                'content': preview
+                            })
+                            if is_swarm:
+                                db.execute("""
+                                    UPDATE workspace_subagent_runs
+                                    SET status='completed', summary=?, logs=?, updated_at=?
+                                    WHERE parent_run_id=? AND role='coder'
+                                """, (plan_steps[1]['summary'], json.dumps([{'timestamp': now, 'title': f'ممیزی {target_file}', 'content': preview}]), now, run_id))
+                        except Exception as exc:
+                            plan_steps[1]['status'] = 'failed'
+                            plan_steps[1]['summary'] = f"خطا در خواندن فایل: {exc}"
+                    else:
+                        plan_steps[1]['status'] = 'skipped'
+                        plan_steps[1]['summary'] = f"فایل {target_file} در ریشه پروژه یافت نشد."
+
+                    current_idx = 2
+                    cmd = plan_steps[2].get('command', 'git status')
+                    if debug_active:
+                        new_status = 'paused_debug'
+                        plan_steps[2]['status'] = 'paused_debug'
+                        plan_steps[2]['summary'] = f"توقف دیباگ در گام ۲: آماده اجرای «{cmd}». برای اجرا، Step Next را بزنید."
+                        logs.append({
+                            'timestamp': now,
+                            'step': 2,
+                            'type': 'debug_pause',
+                            'title': '🐞 توقف دیباگ در گام ۲ (اجرای دستور)',
+                            'content': f"دستور آماده اجرا: {cmd}"
+                        })
+                    else:
+                        new_status = 'waiting_approval' if not can_exec else 'in_progress'
+                        plan_steps[2]['status'] = 'waiting_approval' if not can_exec else 'in_progress'
+
+                    db.execute("""
+                        UPDATE workspace_agent_runs
+                        SET status=?, current_step_index=?, plan_steps=?, logs=?, updated_at=?
+                        WHERE id=?
+                    """, (new_status, current_idx, json.dumps(plan_steps), json.dumps(logs), now, run_id))
+                    run['status'] = new_status
+                    run['current_step_index'] = current_idx
+                    run['plan_steps'] = json.dumps(plan_steps)
+                    run['logs'] = json.dumps(logs)
+                    run['updated_at'] = now
+                    return self._format_run(run, db=db)
+
+                elif current_idx == 2:
+                    if not can_exec:
+                        raise IdentityError('Approval or superadmin role required to execute step command', 403)
+                    cmd = (modified_command or plan_steps[2].get('command') or 'git status').strip()
+                    plan_steps[2]['command'] = cmd
+                    try:
+                        res = self.execute_project_command(principal, run['project_id'], cmd, timeout=15)
+                        plan_steps[2]['status'] = 'completed' if res['exit_code'] == 0 else 'warning'
+                        plan_steps[2]['summary'] = f"دستور با کد {res['exit_code']} در {res['duration_ms']}ms در گام دیباگ اجرا شد."
+                        log_entry = {
+                            'timestamp': now,
+                            'step': 2,
+                            'type': 'command_execution',
+                            'title': f"اجرای دستور گام دیباگ: {cmd}",
+                            'content': (res['stdout'] or '') + ('\n' + res['stderr'] if res['stderr'] else ''),
+                            'exit_code': res['exit_code']
+                        }
+                        logs.append(log_entry)
+                        if is_swarm:
+                            db.execute("""
+                                UPDATE workspace_subagent_runs
+                                SET status='completed', summary=?, logs=?, updated_at=?
+                                WHERE parent_run_id=? AND role='tester'
+                            """, (plan_steps[2]['summary'], json.dumps([log_entry]), now, run_id))
+                    except Exception as exc:
+                        plan_steps[2]['status'] = 'failed'
+                        plan_steps[2]['summary'] = f"خطا در دستور: {exc}"
+                        logs.append({
+                            'timestamp': now,
+                            'step': 2,
+                            'type': 'command_execution',
+                            'title': f"خطا در دستور: {cmd}",
+                            'content': str(exc),
+                            'exit_code': 1
+                        })
+
+                    current_idx = 3
+                    if debug_active:
+                        new_status = 'paused_debug'
+                        plan_steps[3]['status'] = 'paused_debug'
+                        plan_steps[3]['summary'] = 'توقف دیباگ در گام ۳: آماده تدوین گزارش جمع‌بندی و ثبت سند فرآورده.'
+                        logs.append({
+                            'timestamp': now,
+                            'step': 3,
+                            'type': 'debug_pause',
+                            'title': '🐞 توقف دیباگ در گام ۳ (گزارش پایانی)',
+                            'content': 'آماده تدوین گزارش جامع مأموریت و ثبت سند فرآورده.'
+                        })
+                    else:
+                        new_status = 'completed'
+                        plan_steps[3]['status'] = 'completed'
+
+                    db.execute("""
+                        UPDATE workspace_agent_runs
+                        SET status=?, current_step_index=?, plan_steps=?, logs=?, updated_at=?
+                        WHERE id=?
+                    """, (new_status, current_idx, json.dumps(plan_steps), json.dumps(logs), now, run_id))
+
+                    if new_status == 'completed':
+                        result_summary = f"چرخه مأموریت «{run['prompt']}» با موفقیت پایان یافت."
+                        db.execute("UPDATE workspace_agent_runs SET result_summary=? WHERE id=?", (result_summary, run_id))
+                        try:
+                            self._create_auto_run_artifact(db, run, result_summary, now)
+                        except Exception:
+                            pass
+                    run['status'] = new_status
+                    run['current_step_index'] = current_idx
+                    run['plan_steps'] = json.dumps(plan_steps)
+                    run['logs'] = json.dumps(logs)
+                    run['updated_at'] = now
+                    return self._format_run(run, db=db)
+
+                elif current_idx == 3:
+                    plan_steps[3]['status'] = 'completed'
+                    plan_steps[3]['summary'] = 'گزارش و سند فرآورده مأموریت در گام نهایی دیباگ تایید و ثبت شد.'
+                    new_status = 'completed'
+                    result_summary = f"چرخه مأموریت «{run['prompt']}» با موفقیت در حالت دیباگ پایان یافت."
+                    logs.append({
+                        'timestamp': now,
+                        'step': 3,
+                        'type': 'synthesis',
+                        'title': 'گزارش نهایی دیباگ',
+                        'content': result_summary
+                    })
+                    db.execute("""
+                        UPDATE workspace_agent_runs
+                        SET status=?, current_step_index=3, plan_steps=?, logs=?, result_summary=?, updated_at=?
+                        WHERE id=?
+                    """, (new_status, json.dumps(plan_steps), json.dumps(logs), result_summary, now, run_id))
+                    try:
+                        self._create_auto_run_artifact(db, run, result_summary, now)
+                    except Exception:
+                        pass
+                    run['status'] = new_status
+                    run['current_step_index'] = 3
+                    run['plan_steps'] = json.dumps(plan_steps)
+                    run['logs'] = json.dumps(logs)
+                    run['result_summary'] = result_summary
+                    run['updated_at'] = now
+                    return self._format_run(run, db=db)
+                else:
+                    return self.advance_agent_run(principal, run_id)
+
+    def toggle_agent_run_debug(self, principal, run_id, debug_mode=None):
+        self._cap(principal, 'chat')
+        if not isinstance(run_id, str) or len(run_id) != 32:
+            raise IdentityError('Invalid run ID')
+        with self.store._lock, self.store._db() as db:
+            if principal.get('role') == 'superadmin':
+                row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=?", (run_id,)).fetchone()
+            else:
+                row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
+            if not row:
+                raise IdentityError('Agent run not found', 404)
+            run = dict(row)
+            current = bool(run.get('debug_mode', 0))
+            target_mode = (not current) if debug_mode is None else bool(debug_mode)
+            now = int(self.store.clock())
+            db.execute("UPDATE workspace_agent_runs SET debug_mode=?, updated_at=? WHERE id=?", (1 if target_mode else 0, now, run_id))
+            self.store._audit(db, principal['id'], 'workspace_agent_run_debug_toggled', f"{run_id}:{int(target_mode)}")
         return self.get_agent_run(principal, run_id)
 
     def send_agent_run_feedback(self, principal, run_id, message):

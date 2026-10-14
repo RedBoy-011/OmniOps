@@ -2,6 +2,37 @@
 
 تمامی تغییرات، تفاوت‌های فرآیند آپدیت و انتشارات رسمی پلتفرم OmniOps بر اساس استاندارد [Keep a Changelog](https://keepachangelog.com/) در این فایل آرشیو می‌شوند.
 
+## [v1.21.0] - 2026-10-14
+### ⚡ استریم لحظه‌ای خط‌به‌خط ترمینال (Terminal Live SSE Streaming)، دیباگر گام‌به‌گام ایجنت (Step Debugger)، تم شیشه‌ای Mica/Acrylic و مرکز دانلود هوشمند CI/CD:
+* **استریم بلادرنگ خط‌به‌خط خروجی فرامین ترمینال بر بستر SSE (Real-Time Terminal SSE Streaming):**
+  - متدهای هسته `start_streaming_command`، `validate_command_stream` و `get_command_stream_events` با مانیتورینگ بلادرنگ `subprocess.Popen` و خروج ایمن استریم.
+  - اندپوینت‌های وب و ایجنت `POST /api/web/workspace/project/command/stream` و `GET /api/web/workspace/project/command/stream?command_id=...` با فرمت استاندارد `text/event-stream`.
+  - مدال تعاملی استریم زنده در وب پرتال با پنجره ترمینال مشکی شیشه‌ای، اسکرول خودکار هوشمند، نشانگر مکان‌نما و دکمه‌های متوقف‌سازی.
+* **دیباگر تعاملی گام‌به‌گام مأموریت‌های هوش مصنوعی (Interactive Step-by-Step Agent Debugger):**
+  - افزودن ستون `debug_mode` به جدول `workspace_agent_runs` و پشتیبانی از وضعیت اجرایی تعلیق دیباگ (`paused_debug`).
+  - متدهای هسته `step_agent_run` و `toggle_agent_run_debug` جهت کنترل دقیق نقطه توقف و مداخله ناظر در گام‌های مأموریت.
+  - ۴ عمل کنترلی استاندارد در دیباگر:
+    - گام بعدی (`step` / Step Over): اجرای تک‌گام و توقف در گام بعدی.
+    - پرش از گام (`skip` / Skip Step): رد کردن گام حساس بدون اجرا و ثبت دلیل در لاگ.
+    - اصلاح دستور یا پرامپت (`modify`): بازنویسی فرمان ترمینال یا هدف مأموریت قبل از اجرا توسط ناظر.
+    - ادامه خودکار بدون توقف (`continue`): غیرفعال‌سازی حالت دیباگ و ادامه چرخه تا اتمام خودکار.
+  - اندپوینت‌های امن API: `POST /api/web/workspace/task/run/debug/step` و `POST /api/web/workspace/task/run/debug/toggle`.
+  - پنل بصری دیباگر در کارت تسک ایجنت با نمایش گام جاری، فیلد ویرایش دستور، دکمه‌های کنترلی چهارگانه و بج رنگی وضعیت.
+* **موتور طراحی تم دوگانه شیشه‌ای مدرن کلاینت ویندوز (Ultra-Modern Glassmorphic Dual-Theme Engine):**
+  - پیاده‌سازی تم‌های شیشه‌ای تاریک نئونی (`Dark Acrylic`) و روشن شیشه‌ای کریستالی (`Light Mica`) در کلاینت دسکتاپ Windows Edge.
+  - متغیرهای CSS شیشه‌ای، فیلترهای بلور عمیق (`backdrop-filter: blur(28px) saturate(180%)`) و دکمه سوئیچ آنی تم در هدر پنجره.
+  - ذخیره‌سازی و پایداری وضعیت تم در `localStorage` و سازگاری کامل با تم تاریک/روشن ویندوز.
+* **مهندسی مجدد خط تولید CI/CD و مرکز دانلود هوشمند برنامه‌ها (Universal Smart In-App Download Center):**
+  - نوسازی کامل کارت مرکز دانلود کلاینت‌ها (`ClientDownloadsCard.tsx`) بر پایه آخرین نسخه پایدار `v1.21.0`.
+  - اتصال مستقیم به پایپ‌لاین بیلد خودکار GitHub Actions با نشانگر وضعیت زنده بیلد.
+  - الصاق مشخصات امنیتی، بررسی هش‌های اعتبارسنجی SHA-256 و دانلود مستقیم کلاینت‌های نصاب ویندوز (`.exe`) و اندروید (`.apk`).
+* **پوشش تست‌های خودکار:**
+  - افزودن آزمون‌های جامع استریم ترمینال و دیباگر تعاملی به `tests/test_workspace.py` (۲۲ تست).
+  - آزمون کامل اندپوینت‌های استریم SSE و دیباگر گام‌به‌گام در `tests/test_identity_gateway.py` (۱۹ تست).
+  - سبز بودن ۱۰۰٪ تست‌های کل پروژه با ۱۴۶ آزمون موفق بدون هیچ‌گونه خطا (`Ran 146 tests - OK`).
+
+---
+
 ## [v1.20.0] - 2026-10-14
 ### 🌿 بازرسی وضعیت گیت محلی پروژه (Project Git Status Inspection)، گالری اسناد هوشمند فرآورده‌ها (Smart Artifacts Gallery) و الگوهای مأموریت ایجنت (Agent Task Presets):
 * **بازرسی وضعیت و شاخه‌های گیت محلی پروژه (Workspace Local Git Status & Inspection Engine):**

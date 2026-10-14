@@ -58,9 +58,19 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
             دانلود مستقیم نسخه دسکتاپ ویندوز برای کامپیوتر و اپلیکیشن همراه اندروید (Coucou) جهت کنترل و نظارت بیومتریک از راه دور
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href="https://github.com/RedBoy-011/OmniOps/actions/workflows/windows-build.yml"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-[11px] bg-slate-900/90 hover:bg-slate-800 text-cyan-300 border border-cyan-800/60 px-3 py-1 rounded-full transition shadow-sm"
+            title="مشاهده وضعیت بیلد خودکار در GitHub Actions"
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span className="font-mono font-bold">CI/CD: GitHub Actions</span>
+          </a>
           <span className="text-[11px] bg-cyan-950/80 text-cyan-300 border border-cyan-800 px-3 py-1 rounded-full font-mono font-bold">
-            نسخه v1.1.4 (پایدار)
+            نسخه v1.21.0 (پایدار)
           </span>
           <span className="text-[11px] bg-emerald-950/80 text-emerald-300 border border-emerald-800 px-3 py-1 rounded-full">
             سازگار با شبکه محلی LAN

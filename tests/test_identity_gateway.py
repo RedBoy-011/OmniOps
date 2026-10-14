@@ -754,6 +754,65 @@ class WorkerEndpointTests(unittest.TestCase):
             self.assertEqual(code, 200)
             self.assertEqual(art_del["status"], "deleted")
 
+            # Streaming Command API
+            code, stream_init = self.call("POST", "/api/web/workspace/project/command/stream", {
+                "project_id": p_id,
+                "command": "echo stream_http_gateway_test"
+            }, admin)
+            self.assertEqual(code, 200)
+            self.assertIn("id", stream_init)
+            self.assertIn(stream_init["status"], ("running", "streaming"))
+            cmd_stream_id = stream_init["id"]
+
+            # GET SSE endpoint
+            stream_req = Request(
+                self.root + f"/api/web/workspace/project/command/stream?command_id={cmd_stream_id}",
+                headers={"Authorization": f"Bearer {admin}"},
+                method="GET"
+            )
+            with self.opener.open(stream_req, timeout=10) as sse_resp:
+                self.assertEqual(sse_resp.status, 200)
+                self.assertIn("text/event-stream", sse_resp.headers.get("Content-Type", ""))
+                first_line = sse_resp.readline().decode("utf-8")
+                self.assertIn("data:", first_line)
+
+            # Interactive Step Debugger API
+            code, dbg_start = self.call("POST", "/api/web/workspace/task/run", {
+                "project_id": p_id,
+                "prompt": "اجرای تسک دیباگ از طریق درگاه وب",
+                "debug_mode": True
+            }, admin)
+            self.assertEqual(code, 201)
+            self.assertEqual(dbg_start["run"]["status"], "paused_debug")
+            self.assertEqual(dbg_start["run"]["debug_mode"], 1)
+            dbg_run_id = dbg_start["run"]["id"]
+
+            # Step Debugger: action 'step'
+            code, dbg_step = self.call("POST", "/api/web/workspace/task/run/debug/step", {
+                "run_id": dbg_run_id,
+                "action": "step"
+            }, admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(dbg_step["run"]["status"], "paused_debug")
+            self.assertEqual(dbg_step["run"]["current_step_index"], 2)
+
+            # Step Debugger: toggle debug
+            code, dbg_toggle = self.call("POST", "/api/web/workspace/task/run/debug/toggle", {
+                "run_id": dbg_run_id,
+                "debug_mode": False
+            }, admin)
+            self.assertEqual(code, 200)
+            self.assertFalse(dbg_toggle["run"]["debug_mode"])
+
+            # Step Debugger: continue to end
+            code, dbg_cont = self.call("POST", "/api/web/workspace/task/run/debug/step", {
+                "run_id": dbg_run_id,
+                "action": "continue"
+            }, admin)
+            self.assertEqual(code, 200)
+            self.assertIn(dbg_cont["run"]["status"], ("completed", "in_progress", "waiting_approval"))
+
+
 
 if __name__ == "__main__":
     unittest.main()

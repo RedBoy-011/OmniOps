@@ -531,10 +531,13 @@ def make_server(
                 "/api/web/workspace/project/file", "/api/agent/workspace/project/file",
                 "/api/web/workspace/project/patch", "/api/agent/workspace/project/patch",
                 "/api/web/workspace/project/command", "/api/agent/workspace/project/command",
+                "/api/web/workspace/project/command/stream", "/api/agent/workspace/project/command/stream",
                 "/api/web/workspace/task/run", "/api/agent/workspace/task/run",
                 "/api/web/workspace/task/run/advance", "/api/agent/workspace/task/run/advance",
                 "/api/web/workspace/task/run/approve", "/api/agent/workspace/task/run/approve",
                 "/api/web/workspace/task/run/cancel", "/api/agent/workspace/task/run/cancel",
+                "/api/web/workspace/task/run/debug/step", "/api/agent/workspace/task/run/debug/step",
+                "/api/web/workspace/task/run/debug/toggle", "/api/agent/workspace/task/run/debug/toggle",
                 "/api/admin/workspace/agent/runs/stop", "/api/admin/workspace/agent/runs/approve",
                 "/api/admin/workspace/sandbox/policy",
                 "/api/web/workspace/project/patches/rollback", "/api/agent/workspace/project/patches/rollback",
@@ -676,18 +679,24 @@ def make_server(
                     ))
                 elif path in ('/api/web/workspace/project/command', '/api/agent/workspace/project/command'):
                     self._send(200, workspace.execute_project_command(principal, payload.get('project_id'), payload.get('command'), payload.get('timeout', 15)))
+                elif path in ('/api/web/workspace/project/command/stream', '/api/agent/workspace/project/command/stream'):
+                    self._send(200, workspace.start_streaming_command(principal, payload.get('project_id'), payload.get('command'), timeout=int(payload.get('timeout', 30))))
                 elif path in ('/api/web/workspace/tasks', '/api/agent/workspace/tasks'):
                     self._send(201, workspace.create_task(principal, payload.get('project_id'), payload.get('description')))
                 elif path in ('/api/web/workspace/tasks/cancel', '/api/agent/workspace/tasks/cancel'):
                     self._send(200, workspace.cancel_task(principal, payload.get('id')))
                 elif path in ('/api/web/workspace/task/run', '/api/agent/workspace/task/run'):
-                    self._send(201, {'run': workspace.start_agent_run(principal, payload.get('project_id'), payload.get('prompt'), role=payload.get('role', 'general'), mode=payload.get('mode', 'single'))})
+                    self._send(201, {'run': workspace.start_agent_run(principal, payload.get('project_id'), payload.get('prompt'), role=payload.get('role', 'general'), mode=payload.get('mode', 'single'), debug_mode=bool(payload.get('debug_mode', False)))})
                 elif path in ('/api/web/workspace/task/run/advance', '/api/agent/workspace/task/run/advance'):
                     self._send(200, {'run': workspace.advance_agent_run(principal, payload.get('run_id'))})
                 elif path in ('/api/web/workspace/task/run/approve', '/api/agent/workspace/task/run/approve'):
                     self._send(200, {'run': workspace.approve_agent_run_step(principal, payload.get('run_id'))})
                 elif path in ('/api/web/workspace/task/run/cancel', '/api/agent/workspace/task/run/cancel'):
                     self._send(200, {'run': workspace.cancel_agent_run(principal, payload.get('run_id'))})
+                elif path in ('/api/web/workspace/task/run/debug/step', '/api/agent/workspace/task/run/debug/step'):
+                    self._send(200, {'run': workspace.step_agent_run(principal, payload.get('run_id'), action=payload.get('action', 'step'), modified_command=payload.get('modified_command'), modified_prompt=payload.get('modified_prompt'))})
+                elif path in ('/api/web/workspace/task/run/debug/toggle', '/api/agent/workspace/task/run/debug/toggle'):
+                    self._send(200, {'run': workspace.toggle_agent_run_debug(principal, payload.get('run_id'), debug_mode=payload.get('debug_mode'))})
                 elif path == '/api/admin/workspace/agent/runs/stop':
                     self._send(200, {'run': workspace.admin_stop_agent_run(principal, payload.get('run_id'), payload.get('reason', 'Admin emergency stop'))})
                 elif path == '/api/admin/workspace/agent/runs/approve':
@@ -971,6 +980,29 @@ def make_server(
                     self._send(200, {'commands': workspace.list_command_history(principal, p_id, limit=lim)})
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
+                return
+            if parsed.path in ('/api/web/workspace/project/command/stream', '/api/agent/workspace/project/command/stream'):
+                principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
+                if principal is None:
+                    return
+                q = parse_qs(parsed.query)
+                cmd_id = q.get('command_id', [None])[0]
+                try:
+                    workspace.validate_command_stream(principal, cmd_id)
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+                    self.send_header('Cache-Control', 'no-cache, no-transform')
+                    self.send_header('Connection', 'keep-alive')
+                    self.send_header('X-Accel-Buffering', 'no')
+                    self.end_headers()
+                    for event in workspace.get_command_stream_events(principal, cmd_id):
+                        raw = f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode('utf-8')
+                        self.wfile.write(raw)
+                        self.wfile.flush()
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    pass
                 return
             if parsed.path in ('/api/web/workspace/project/git/status', '/api/agent/workspace/project/git/status'):
                 principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')

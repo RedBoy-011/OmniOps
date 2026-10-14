@@ -49,10 +49,24 @@ export default function App() {
   const [models, setModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState("auto");
   const [modelError, setModelError] = useState("");
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("omniops_edge_theme");
+      if (saved === "light" || saved === "dark") return saved;
+    }
+    return "dark";
+  });
   const fields = useRef<Array<HTMLInputElement | null>>([]);
   const attempt = useRef("");
   const sessionGeneration = useRef(0);
   const connected = useRef(false);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try {
+      localStorage.setItem("omniops_edge_theme", theme);
+    } catch {}
+  }, [theme]);
 
   useEffect(() => {
     let active = true;
@@ -327,7 +341,7 @@ export default function App() {
           <span className="compact-pulse" aria-hidden="true" /><span className="compact-open" aria-hidden="true">↗</span>
         </button>
       ) : <>
-      <div className="agent-header" data-tauri-drag-region><div className="agent-heading" data-tauri-drag-region><div className="agent-orb" data-tauri-drag-region aria-hidden="true">✦</div><span data-tauri-drag-region><strong data-tauri-drag-region>OmniOps</strong><small data-tauri-drag-region>بازوی امن ویندوز</small></span></div><div className="agent-window-controls"><span className={`state-dot ${phase === "chat" ? "on" : ""}`} aria-label={phase === "chat" ? "متصل" : "قفل"} /><button className="agent-close" type="button" title="پنهان کردن کنار ساعت" aria-label="پنهان کردن کنار ساعت" disabled={!isTauri()} onClick={() => void hideToTray()}>−</button><button className="agent-close" type="button" title="انتخاب پنهان‌کردن یا خروج کامل" aria-label="انتخاب پنهان‌کردن یا خروج کامل" disabled={!isTauri()} onClick={requestExit}>×</button></div></div>
+      <div className="agent-header" data-tauri-drag-region><div className="agent-heading" data-tauri-drag-region><div className="agent-orb" data-tauri-drag-region aria-hidden="true">✦</div><span data-tauri-drag-region><strong data-tauri-drag-region>OmniOps</strong><small data-tauri-drag-region>بازوی امن ویندوز</small></span></div><div className="agent-window-controls"><span className={`state-dot ${phase === "chat" ? "on" : ""}`} aria-label={phase === "chat" ? "متصل" : "قفل"} /><button className="agent-close agent-theme-btn" type="button" title={theme === "dark" ? "تغییر به تم روشن شیشه‌ای (Light Mica)" : "تغییر به تم تیره نئونی (Dark Acrylic)"} aria-label="تغییر تم ظاهری" onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}>{theme === "dark" ? "☀️" : "🌙"}</button><button className="agent-close" type="button" title="پنهان کردن کنار ساعت" aria-label="پنهان کردن کنار ساعت" disabled={!isTauri()} onClick={() => void hideToTray()}>−</button><button className="agent-close" type="button" title="انتخاب پنهان‌کردن یا خروج کامل" aria-label="انتخاب پنهان‌کردن یا خروج کامل" disabled={!isTauri()} onClick={requestExit}>×</button></div></div>
       <AnimatePresence mode="wait">
         {phase === "locked" || phase === "verifying" ? (
           <motion.section key="pin" className="pair-view" initial={{ opacity: 0, scale: .97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: .95 }} transition={{ duration: .25 }}>

@@ -7362,6 +7362,404 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
   margin: 0;
 }
 
+/* ==========================================================================
+   Phase 9: Live Terminal SSE Streaming & Interactive Step Debugger (v1.21.0)
+   ========================================================================== */
+
+/* Stream Terminal Action Button in Context Bar */
+.action-button.stream-terminal-action-btn {
+  background: linear-gradient(135deg, rgba(234, 179, 8, 0.2), rgba(245, 158, 11, 0.25));
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+}
+
+.action-button.stream-terminal-action-btn:hover {
+  background: linear-gradient(135deg, rgba(234, 179, 8, 0.35), rgba(245, 158, 11, 0.45));
+  border-color: rgba(245, 158, 11, 0.7);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.3);
+}
+
+/* Debug Mode Pill in Task Mode Selector */
+.mode-pill-btn.debug-mode {
+  border-color: rgba(168, 85, 247, 0.3);
+  color: #c084fc;
+}
+
+.mode-pill-btn.debug-mode:hover {
+  border-color: rgba(168, 85, 247, 0.6);
+  background: rgba(168, 85, 247, 0.12);
+}
+
+.mode-pill-btn.debug-mode.active {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.35), rgba(147, 51, 234, 0.4));
+  border-color: #a855f7;
+  color: #fff;
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.35);
+}
+
+/* Paused Debug Status Pill */
+.run-status-pill.paused_debug {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+  animation: pulse-border 2s infinite ease-in-out;
+}
+
+/* Interactive Step Debugger Inspector Panel */
+.agent-debug-inspector-panel {
+  margin: 18px 0;
+  padding: 16px;
+  background: linear-gradient(145deg, rgba(30, 27, 75, 0.4), rgba(15, 23, 42, 0.7));
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+
+.debug-inspector-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.debug-badge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 600;
+  color: #e9d5ff;
+  font-size: 14px;
+}
+
+.debug-status-indicator {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-weight: 500;
+}
+
+.debug-status-indicator.paused {
+  background: rgba(245, 158, 11, 0.2);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  color: #fde047;
+}
+
+.debug-status-indicator.running {
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  color: #93c5fd;
+}
+
+.toggle-debug-btn {
+  font-size: 12px;
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.toggle-debug-btn:hover {
+  background: rgba(168, 85, 247, 0.15);
+  border-color: #a855f7;
+  color: #fff;
+}
+
+/* Step Details Inside Debugger */
+.debug-step-details {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.current-step-badge {
+  font-size: 13px;
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 8px 12px;
+  border-radius: 8px;
+  border-right: 3px solid #a855f7;
+}
+
+.current-step-summary {
+  font-size: 13px;
+  color: #cbd5e1;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.current-step-cmd {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.7);
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.current-step-cmd span {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.current-step-cmd code {
+  color: #38bdf8;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Debug Modify Box */
+.debug-modify-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  border-radius: 10px;
+  padding: 14px;
+  margin-top: 6px;
+}
+
+.debug-modify-box label {
+  font-size: 12px;
+  color: #e2e8f0;
+  font-weight: 500;
+}
+
+.debug-modify-input {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.debug-modify-input:focus {
+  outline: none;
+  border-color: #a855f7;
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
+}
+
+.debug-modify-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+/* Debug Actions Toolbar */
+.debug-actions-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.debug-actions-toolbar .action-button {
+  font-size: 12px;
+  padding: 8px 14px;
+  font-weight: 500;
+}
+
+.debug-actions-toolbar .step-btn {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  border-color: #3b82f6;
+  color: #fff;
+}
+
+.debug-actions-toolbar .step-btn:hover {
+  background: linear-gradient(135deg, #1d4ed8, #1e40af);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+}
+
+.debug-actions-toolbar .skip-btn {
+  background: rgba(100, 116, 139, 0.2);
+  border-color: rgba(148, 163, 184, 0.3);
+  color: #cbd5e1;
+}
+
+.debug-actions-toolbar .skip-btn:hover {
+  background: rgba(100, 116, 139, 0.35);
+  border-color: #cbd5e1;
+  color: #fff;
+}
+
+.debug-actions-toolbar .modify-btn {
+  background: rgba(168, 85, 247, 0.2);
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #d8b4fe;
+}
+
+.debug-actions-toolbar .modify-btn:hover {
+  background: rgba(168, 85, 247, 0.35);
+  border-color: #c084fc;
+  color: #fff;
+}
+
+.debug-actions-toolbar .continue-btn {
+  background: linear-gradient(135deg, #059669, #047857);
+  border-color: #10b981;
+  color: #fff;
+}
+
+.debug-actions-toolbar .continue-btn:hover {
+  background: linear-gradient(135deg, #047857, #065f46);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+}
+
+/* ==========================================================================
+   Live Streaming Terminal Modal & Screen Window
+   ========================================================================== */
+.terminal-stream-modal {
+  max-width: 960px;
+  width: 90%;
+}
+
+.terminal-header-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.terminal-icon {
+  font-size: 20px;
+  color: #fbbf24;
+}
+
+.terminal-header-title h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #f1f5f9;
+}
+
+.terminal-live-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #fca5a5;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  animation: pulse-border 1.5s infinite ease-in-out;
+}
+
+.terminal-cmd-form {
+  margin-bottom: 14px;
+}
+
+.terminal-cmd-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+
+.terminal-prompt-symbol {
+  color: #10b981;
+  font-weight: 700;
+  font-family: monospace;
+  font-size: 16px;
+}
+
+.terminal-cmd-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #f8fafc;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.terminal-cmd-input:focus {
+  outline: none;
+}
+
+/* Screen Window */
+.terminal-screen-window {
+  background: #090d16;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+
+.terminal-screen-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+  color: #64748b;
+  font-family: monospace;
+}
+
+.exit-code-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.exit-code-badge.success {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.exit-code-badge.failed {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.terminal-lines-container {
+  padding: 14px;
+  max-height: 420px;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #e2e8f0;
+}
+
+.terminal-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.terminal-empty-hint {
+  color: #64748b;
+  font-style: italic;
+  padding: 24px;
+  text-align: center;
+}
+
+.terminal-cursor-line {
+  margin-top: 4px;
+}
+
+.terminal-cursor {
+  display: inline-block;
+  color: #38bdf8;
+  animation: blink-cursor 1s steps(2, start) infinite;
+}
+
+@keyframes blink-cursor {
+  to {
+    visibility: hidden;
+  }
+}
+
+
 
 
 

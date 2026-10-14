@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   api,
   type WorkspaceProject,
@@ -104,6 +104,28 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
   const [agentTaskPrompt, setAgentTaskPrompt] = useState("");
   const [startingRun, setStartingRun] = useState(false);
   const [advancingRun, setAdvancingRun] = useState(false);
+
+  // Debugger state
+  const [debugMode, setDebugMode] = useState(false);
+  const [steppingRun, setSteppingRun] = useState(false);
+  const [showStepModify, setShowStepModify] = useState(false);
+  const [stepEditCmd, setStepEditCmd] = useState("");
+  const [stepEditPrompt, setStepEditPrompt] = useState("");
+
+  // Live Terminal Streaming state
+  const [showStreamModal, setShowStreamModal] = useState(false);
+  const [streamCommandInput, setStreamCommandInput] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingLines, setStreamingLines] = useState<string[]>([]);
+  const [streamExitCode, setStreamExitCode] = useState<number | null>(null);
+  const [streamDurationMs, setStreamDurationMs] = useState<number | null>(null);
+  const terminalOutputRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (terminalOutputRef.current) {
+      terminalOutputRef.current.scrollTop = terminalOutputRef.current.scrollHeight;
+    }
+  }, [streamingLines]);
 
   // Load projects list
   async function loadProjects() {
@@ -328,11 +350,13 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
     setError("");
     setSuccessMsg("");
     try {
-      const res = await api.startAgentRun(selectedProjectId, agentTaskPrompt.trim(), selectedRole, selectedMode);
+      const res = await api.startAgentRun(selectedProjectId, agentTaskPrompt.trim(), selectedRole, selectedMode, debugMode);
       setActiveRun(res.run);
       setAgentTaskPrompt("");
       setSuccessMsg(
-        selectedMode === "swarm"
+        debugMode
+          ? "🐞 چرخه وظیفه در حالت دیباگ گام‌به‌گام آغاز شد و در نقطه بازرسی متوقف گردید."
+          : selectedMode === "swarm"
           ? "🐝 چرخه همکاری چندعاملی سوارم (Multi-Agent Swarm) با موفقیت آغاز شد."
           : "چرخه اجرای خودکار وظیفه توسط ایجنت با موفقیت آغاز شد."
       );
@@ -341,6 +365,83 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
       setError(err instanceof Error ? err.message : "آغاز چرخه ایجنت ناموفق بود.");
     } finally {
       setStartingRun(false);
+    }
+  }
+
+  async function handleToggleDebug(enabled: boolean) {
+    if (!activeRun) return;
+    try {
+      const res = await api.toggleAgentRunDebug(activeRun.id, enabled);
+      setActiveRun(res.run);
+      await loadAgentRuns(selectedProjectId);
+      setSuccessMsg(enabled ? "حالت دیباگ برای این تسک فعال شد." : "حالت دیباگ برای این تسک غیرفعال شد.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطا در تغییر وضعیت دیباگ");
+    }
+  }
+
+  async function handleStepRun(action: "step" | "skip" | "modify" | "continue") {
+    if (!activeRun) return;
+    setSteppingRun(true);
+    setError("");
+    try {
+      const res = await api.stepAgentRun(
+        activeRun.id,
+        action,
+        action === "modify" ? stepEditCmd.trim() : undefined,
+        action === "modify" ? stepEditPrompt.trim() : undefined
+      );
+      setActiveRun(res.run);
+      setShowStepModify(false);
+      await loadAgentRuns(selectedProjectId);
+      if (action === "step") setSuccessMsg("گام با موفقیت اجرا شد و در گام بعدی متوقف شد.");
+      else if (action === "skip") setSuccessMsg("گام با موفقیت رد شد (Skip).");
+      else if (action === "modify") setSuccessMsg("گام با دستور اصلاح‌شده اجرا شد.");
+      else if (action === "continue") setSuccessMsg("ادامه اجرای خودکار تا پایان تسک فعال شد.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطا در اجرای گام دیباگ");
+    } finally {
+      setSteppingRun(false);
+    }
+  }
+
+  async function handleStartStreamingCommand(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedProjectId || !streamCommandInput.trim() || isStreaming) return;
+    setIsStreaming(true);
+    setStreamExitCode(null);
+    setStreamDurationMs(null);
+    setStreamingLines([`$ ${streamCommandInput.trim()}`]);
+    setError("");
+    try {
+      const res = await api.startStreamingCommand(selectedProjectId, streamCommandInput.trim());
+      await api.listenCommandStream(
+        res.id,
+        (event) => {
+          if (event.type === "stdout" && event.text) {
+            setStreamingLines((prev) => [...prev, event.text!]);
+          } else if (event.type === "stderr" && event.text) {
+            setStreamingLines((prev) => [...prev, `[stderr] ${event.text}`]);
+          } else if (event.type === "done") {
+            setStreamExitCode(event.exit_code ?? 0);
+            setStreamDurationMs(event.duration_ms ?? 0);
+          }
+        },
+        (streamErr) => {
+          setStreamingLines((prev) => [...prev, `[ERROR] ${streamErr}`]);
+          setError(streamErr);
+          setIsStreaming(false);
+        },
+        (exitCode, durationMs) => {
+          setStreamExitCode(exitCode);
+          setStreamDurationMs(durationMs);
+          setIsStreaming(false);
+          void loadCommandHistory(selectedProjectId);
+        }
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطا در شروع استریم ترمینال");
+      setIsStreaming(false);
     }
   }
 
@@ -690,6 +791,14 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
             >
               📑 گالری اسناد پروژه ({artifacts.length})
             </button>
+            <button
+              type="button"
+              className="action-button stream-terminal-action-btn"
+              onClick={() => setShowStreamModal(true)}
+              title="اجرای مستقیم و مشاهده خط‌به‌خط خروجی دستورات به صورت جریانی (SSE)"
+            >
+              ⚡ استریم زنده ترمینال
+            </button>
             <span className="context-action-tip">
               (ارسال خودکار ساختار، داکیومنت‌ها و تسک‌های ناتمام به دستیار جهت ادامه هوشمند توسعه)
             </span>
@@ -730,6 +839,7 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
                   وضعیت: {
                     activeRun.status === "in_progress" ? "⏳ در حال پردازش گام‌ها" :
                     activeRun.status === "waiting_approval" ? "⚠️ نیازمند تأیید اقدام" :
+                    activeRun.status === "paused_debug" ? "⏸️ متوقف در دیباگ (Paused Debug)" :
                     activeRun.status === "completed" ? "✅ پایان یافته" :
                     activeRun.status === "cancelled" ? "⛔ لغوشده" : activeRun.status
                   }
@@ -775,6 +885,14 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
                   title="همکاری تیمی ۳ ایجنت متخصص (معمار + برنامه‌نویس + تستر)"
                 >
                   🐝 همکاری گروهی سوارم (Multi-Agent Swarm)
+                </button>
+                <button
+                  type="button"
+                  className={`mode-pill-btn debug-mode ${debugMode ? "active" : ""}`}
+                  onClick={() => setDebugMode(!debugMode)}
+                  title="توقف در هر گام و امکان بازرسی، ویرایش دستور و رد کردن گام‌ها (Step Debugger)"
+                >
+                  🐞 حالت دیباگ گام‌به‌گام {debugMode ? "(فعال)" : "(غیرفعال)"}
                 </button>
               </div>
 
@@ -955,6 +1073,124 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
                   </div>
                 )}
 
+                {/* پنل دیباگر تعاملی گام‌به‌گام (Interactive Step Debugger) */}
+                {(activeRun.debug_mode || activeRun.status === "paused_debug") && (
+                  <div className="agent-debug-inspector-panel">
+                    <div className="debug-inspector-header">
+                      <div className="debug-badge">
+                        <span>🐞 دیباگر گام‌به‌گام هوشمند (Interactive Step Debugger)</span>
+                        <span className={`debug-status-indicator ${activeRun.status === "paused_debug" ? "paused" : "running"}`}>
+                          {activeRun.status === "paused_debug" ? "⏸️ متوقف در نقطه بازرسی (Paused at Breakpoint)" : "▶️ در حال پردازش..."}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="quiet-button toggle-debug-btn"
+                        onClick={() => void handleToggleDebug(!activeRun.debug_mode)}
+                        title="تغییر وضعیت دیباگ تسک جاری"
+                      >
+                        {activeRun.debug_mode ? "غیرفعال‌سازی دیباگ" : "فعال‌سازی دیباگ"}
+                      </button>
+                    </div>
+
+                    {activeRun.status === "paused_debug" && (
+                      <div className="debug-step-details">
+                        <div className="current-step-badge">
+                          🎯 گام جاری آماده بازرسی: <strong>گام {activeRun.current_step_index + 1} از {activeRun.plan_steps.length}: {activeRun.plan_steps[activeRun.current_step_index]?.title}</strong>
+                        </div>
+                        <p className="current-step-summary">{activeRun.plan_steps[activeRun.current_step_index]?.summary}</p>
+                        {activeRun.plan_steps[activeRun.current_step_index]?.command && (
+                          <div className="current-step-cmd">
+                            <span>دستور اجرایی تعیین‌شده:</span>
+                            <code dir="ltr">$ {activeRun.plan_steps[activeRun.current_step_index]?.command}</code>
+                          </div>
+                        )}
+
+                        {showStepModify ? (
+                          <div className="debug-modify-box">
+                            <label>ویرایش دستور گام قبل از اجرا:</label>
+                            <input
+                              type="text"
+                              dir="ltr"
+                              className="debug-modify-input"
+                              value={stepEditCmd}
+                              onChange={(e) => setStepEditCmd(e.target.value)}
+                              placeholder="دستور سفارشی..."
+                            />
+                            <label>ویرایش پرامپت ایجنت برای این گام:</label>
+                            <input
+                              type="text"
+                              className="debug-modify-input"
+                              value={stepEditPrompt}
+                              onChange={(e) => setStepEditPrompt(e.target.value)}
+                              placeholder="پرامپت اصلاح‌شده..."
+                            />
+                            <div className="debug-modify-actions">
+                              <button
+                                type="button"
+                                className="action-button confirm-btn"
+                                onClick={() => void handleStepRun("modify")}
+                                disabled={steppingRun}
+                              >
+                                {steppingRun ? "⏳ در حال اجرا..." : "✅ اعمال تغییر و اجرای این گام"}
+                              </button>
+                              <button
+                                type="button"
+                                className="quiet-button"
+                                onClick={() => setShowStepModify(false)}
+                              >
+                                انصراف
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="debug-actions-toolbar">
+                            <button
+                              type="button"
+                              className="action-button step-btn"
+                              onClick={() => void handleStepRun("step")}
+                              disabled={steppingRun}
+                              title="اجرای دقیق همین یک گام و توقف در گام بعدی"
+                            >
+                              {steppingRun ? "⏳ در حال اجرا..." : "⏭️ اجرای این گام (Step Over)"}
+                            </button>
+                            <button
+                              type="button"
+                              className="action-button skip-btn"
+                              onClick={() => void handleStepRun("skip")}
+                              disabled={steppingRun}
+                              title="رد کردن این گام بدون اجرا و رفتن به گام بعد"
+                            >
+                              ⏩ پرش از این گام (Skip Step)
+                            </button>
+                            <button
+                              type="button"
+                              className="action-button modify-btn"
+                              onClick={() => {
+                                setStepEditCmd(activeRun.plan_steps[activeRun.current_step_index]?.command || "");
+                                setStepEditPrompt(activeRun.plan_steps[activeRun.current_step_index]?.title || "");
+                                setShowStepModify(true);
+                              }}
+                              title="ویرایش دستور یا پرامپت قبل از اجرا"
+                            >
+                              ✏️ ویرایش دستور و اجرا (Modify & Run)
+                            </button>
+                            <button
+                              type="button"
+                              className="action-button continue-btn"
+                              onClick={() => void handleStepRun("continue")}
+                              disabled={steppingRun}
+                              title="ادامه اجرای بقیه گام‌ها بدون توقف"
+                            >
+                              🚀 ادامه تا انتها (Continue)
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* اقدامات هدایت گام‌ها */}
                 <div className="run-controls-row">
                   {activeRun.status === "waiting_approval" && (
@@ -994,7 +1230,7 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
                 </div>
 
                 {/* هدایت تعاملی حین اجرای ایجنت (Agent Steerability & Guidance) */}
-                {(activeRun.status === "in_progress" || activeRun.status === "waiting_approval") && (
+                {(activeRun.status === "in_progress" || activeRun.status === "waiting_approval" || activeRun.status === "paused_debug") && (
                   <form onSubmit={handleSendSteer} className="agent-steer-form">
                     <div className="steer-input-row">
                       <span className="steer-icon">🎯</span>
@@ -1764,6 +2000,99 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
                 </div>
                 <div className="modal-footer">
                   <button type="button" className="quiet-button" onClick={() => setViewingArtifact(null)}>
+                    بستن
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* مدال استریم زنده ترمینال (Live Terminal SSE Streaming) */}
+          {showStreamModal && (
+            <div className="agent-modal-overlay" onClick={() => !isStreaming && setShowStreamModal(false)}>
+              <div className="agent-modal-card terminal-stream-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <div className="terminal-header-title">
+                    <span className="terminal-icon">⚡</span>
+                    <h3>ترمینال استریم زنده سرور (Live Line-by-Line Terminal)</h3>
+                    {isStreaming && <span className="terminal-live-badge">در حال اجرا (LIVE)</span>}
+                  </div>
+                  <button
+                    type="button"
+                    className="close-btn"
+                    onClick={() => setShowStreamModal(false)}
+                    disabled={isStreaming}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="modal-body">
+                  <form onSubmit={handleStartStreamingCommand} className="terminal-cmd-form">
+                    <div className="terminal-cmd-input-row">
+                      <span className="terminal-prompt-symbol">$</span>
+                      <input
+                        type="text"
+                        dir="ltr"
+                        placeholder="دستور مورد نظر را وارد کنید... (مثلاً: pytest, git status, npm run build)"
+                        value={streamCommandInput}
+                        onChange={(e) => setStreamCommandInput(e.target.value)}
+                        disabled={isStreaming}
+                        className="terminal-cmd-input"
+                      />
+                      <button
+                        type="submit"
+                        className="action-button primary-accent"
+                        disabled={isStreaming || !streamCommandInput.trim()}
+                      >
+                        {isStreaming ? "⏳ در حال اجرا..." : "⚡ اجرای استریم"}
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="terminal-screen-window" ref={terminalOutputRef}>
+                    <div className="terminal-screen-header">
+                      <span>ROOT: {inspection?.root_path || "—"}</span>
+                      {streamExitCode !== null && (
+                        <span className={`exit-code-badge ${streamExitCode === 0 ? "success" : "failed"}`}>
+                          کد بازگشت: {streamExitCode} {streamDurationMs !== null ? `(${streamDurationMs}ms)` : ""}
+                        </span>
+                      )}
+                    </div>
+                    <div className="terminal-lines-container" dir="ltr">
+                      {streamingLines.length === 0 ? (
+                        <div className="terminal-empty-hint">
+                          دستوری وارد کنید و دکمه «اجرای استریم» را بزنید تا خروجی خط‌به‌خط در زمان واقعی نمایش داده شود...
+                        </div>
+                      ) : (
+                        streamingLines.map((line, idx) => (
+                          <div key={idx} className="terminal-line">
+                            {line}
+                          </div>
+                        ))
+                      )}
+                      {isStreaming && (
+                        <div className="terminal-cursor-line">
+                          <span className="terminal-cursor">█</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button
+                    type="button"
+                    className="quiet-button"
+                    onClick={() => setStreamingLines([])}
+                    disabled={isStreaming || streamingLines.length === 0}
+                  >
+                    پاکسازی صفحه
+                  </button>
+                  <button
+                    type="button"
+                    className="quiet-button"
+                    onClick={() => setShowStreamModal(false)}
+                    disabled={isStreaming}
+                  >
                     بستن
                   </button>
                 </div>
