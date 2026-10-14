@@ -86,6 +86,39 @@ export type DiskBreakdown = {
   diagnostics: string[];
 };
 
+export type WorkerOptimizationReport = {
+  status: string;
+  node_id: string;
+  node_name: string;
+  optimized_at: number;
+  before: {
+    disk_total_gb: number;
+    disk_used_gb: number;
+    disk_free_gb: number;
+    disk_percent: number;
+    wasted_gb: number;
+    incomplete_count: number;
+    failed_count: number;
+    temp_count: number;
+  };
+  after: {
+    disk_total_gb: number;
+    disk_used_gb: number;
+    disk_free_gb: number;
+    disk_percent: number;
+    wasted_gb: number;
+    freed_gb: number;
+    freed_bytes: number;
+  };
+  actions_taken: string[];
+  healthy_models: {
+    count: number;
+    models: string[];
+    status: string;
+  };
+  audit_event: string;
+};
+
 export type ManagedNode = {
   id: string; role: "worker" | "edge"; name: string; created_at: number;
   last_seen: number | null; revoked_at: number | null; credential_expires_at: number;
@@ -707,6 +740,8 @@ export const api = {
     ),
   nodeDiskDiagnostics: (node_id: string) =>
     request<{ breakdown: DiskBreakdown }>(`/api/admin/nodes/disk-diagnostics?node_id=${encodeURIComponent(node_id)}`),
+  optimizeWorkerResources: (node_id: string) =>
+    request<WorkerOptimizationReport>("/api/admin/nodes/optimize-resources", "POST", { node_id }),
   providers: () => request<{ providers: ApiProvider[] }>("/api/admin/providers"),
   saveProvider: (kind: string, api_key: string | null, network_mode: "direct" | "socks", proxy_url: string) =>
     request<{ status: string }>("/api/admin/providers/save", "POST", { kind, api_key, network_mode, proxy_url }),

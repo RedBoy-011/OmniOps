@@ -257,3 +257,75 @@ class NodeRegistryTests(unittest.TestCase):
         clean_res = self.nodes.clean_node_disk(self.admin, worker['id'])
         self.assertEqual(clean_res['status'], 'ok')
         self.assertIn('freed_gb', clean_res)
+
+    def test_optimize_worker_resources_and_audit(self):
+        grant = self.nodes.issue(self.admin, 'worker')['grant']
+        worker = self.nodes.enroll(grant, 'worker-optimize-test')
+
+        # Setup healthy models and sample metrics
+        healthy_models = ['qwen2.5:7b', 'deepseek-r1:7b']
+        sample_metrics = {
+            'cpu_percent': 15.0,
+            'ram_percent': 45.0,
+            'disk_percent': 85.0,
+            'disk_total_gb': 1000.0,
+            'disk_used_gb': 850.0,
+            'disk_free_gb': 150.0,
+            'models': healthy_models,
+            'disk_breakdown': {
+                'total_wasted_bytes': 20000000000,
+                'total_wasted_gb': 18.63,
+                'incomplete_models': {'count': 3, 'size_bytes': 15000000000, 'size_gb': 13.97, 'size_mb': 14305.11, 'items': []},
+                'failed_models': {'count': 1, 'size_bytes': 3000000000, 'size_gb': 2.79, 'size_mb': 2861.02, 'items': []},
+                'temp_files': {'count': 8, 'size_bytes': 2000000000, 'size_gb': 1.86, 'size_mb': 1907.35, 'items': []},
+                'diagnostics': ['مدل‌ها و لایه‌های ناقص: ۳ مورد']
+            }
+        }
+        self.nodes.heartbeat(worker['id'], worker['credential'], sample_metrics)
+
+        # Create a failed model pull in database
+        pull_job = self.nodes.queue_model_pull(self.admin, worker['id'], 'llama3.1:8b')
+        self.nodes.claim_model_pull(worker['id'], worker['credential'])
+        self.nodes.report_model_pull(worker['id'], worker['credential'], pull_job['id'], 'failed', None, 'Download timed out')
+
+        # Non-admin cannot optimize
+        with self.assertRaises(IdentityError):
+            self.nodes.optimize_worker_resources({'role': 'member', 'capabilities': []}, worker['id'])
+
+        # Execute optimization
+        report = self.nodes.optimize_worker_resources(self.admin, worker['id'])
+
+        # Verify report structure
+        self.assertEqual(report['status'], 'ok')
+        self.assertEqual(report['node_id'], worker['id'])
+        self.assertEqual(report['node_name'], 'worker-optimize-test')
+        self.assertIn('before', report)
+        self.assertIn('after', report)
+        self.assertIn('actions_taken', report)
+        self.assertIn('healthy_models', report)
+        self.assertEqual(report['audit_event'], 'worker_resources_optimized')
+
+        # Verify before values
+        self.assertEqual(report['before']['disk_total_gb'], 1000.0)
+        self.assertEqual(report['before']['disk_used_gb'], 850.0)
+        self.assertEqual(report['before']['failed_count'], 1)
+
+        # Verify after values - wasted space minimized
+        self.assertEqual(report['after']['wasted_gb'], 0.0)
+
+        # Verify healthy models were completely preserved and not damaged
+        self.assertEqual(report['healthy_models']['count'], 2)
+        self.assertEqual(report['healthy_models']['models'], healthy_models)
+        self.assertEqual(report['healthy_models']['status'], 'دست‌نخورده و کاملاً سالم')
+
+        # Verify failed pull was cleared from DB
+        with closing(sqlite3.connect(self.store.path)) as db:
+            failed_in_db = db.execute("SELECT COUNT(*) FROM model_pulls WHERE node_id=? AND status='failed'", (worker['id'],)).fetchone()[0]
+            self.assertEqual(failed_in_db, 0)
+
+            # Verify audit trail record
+            audit_row = db.execute("SELECT actor_id, event, subject_id FROM audit WHERE event='worker_resources_optimized' AND subject_id=?", (worker['id'],)).fetchone()
+            self.assertIsNotNone(audit_row)
+            self.assertEqual(audit_row[0], self.admin['id'])
+            self.assertEqual(audit_row[1], 'worker_resources_optimized')
+            self.assertEqual(audit_row[2], worker['id'])

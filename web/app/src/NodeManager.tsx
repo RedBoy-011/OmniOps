@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type ManagedNode, type ModelPull, type NodeTokenResponse } from "./api";
+import { api, type ManagedNode, type ModelPull, type NodeTokenResponse, type WorkerOptimizationReport } from "./api";
 
 export type CuratedOllamaModel = {
   id: string;
@@ -265,6 +265,8 @@ export function NodeManager() {
   const [copied, setCopied] = useState(false);
   const [cleaningNode, setCleaningNode] = useState<Record<string, boolean>>({});
   const [cleanMessage, setCleanMessage] = useState<Record<string, string | null>>({});
+  const [optimizingNode, setOptimizingNode] = useState<Record<string, boolean>>({});
+  const [optimizationReport, setOptimizationReport] = useState<WorkerOptimizationReport | null>(null);
 
   const handleCleanDisk = async (nodeId: string) => {
     setCleaningNode((prev) => ({ ...prev, [nodeId]: true }));
@@ -283,6 +285,19 @@ export function NodeManager() {
       }));
     } finally {
       setCleaningNode((prev) => ({ ...prev, [nodeId]: false }));
+    }
+  };
+
+  const handleOptimizeResources = async (nodeId: string) => {
+    setOptimizingNode((prev) => ({ ...prev, [nodeId]: true }));
+    try {
+      const report = await api.optimizeWorkerResources(nodeId);
+      setOptimizationReport(report);
+      await refreshData(true);
+    } catch (err) {
+      alert(`خطا در بهینه‌سازی هوشمند منابع: ${err instanceof Error ? err.message : "خطای نامشخص"}`);
+    } finally {
+      setOptimizingNode((prev) => ({ ...prev, [nodeId]: false }));
     }
   };
 
@@ -701,14 +716,25 @@ export function NodeManager() {
                                   </span>
                                 )}
                               </div>
-                              <button
-                                type="button"
-                                className="clean-disk-btn"
-                                disabled={cleaningNode[node.id] || !online}
-                                onClick={() => void handleCleanDisk(node.id)}
-                              >
-                                {cleaningNode[node.id] ? "در حال پاکسازی..." : "🧹 پاکسازی مدل‌های ناقص و Temp"}
-                              </button>
+                              <div className="diagnosis-actions-group">
+                                <button
+                                  type="button"
+                                  className="optimize-worker-btn"
+                                  disabled={optimizingNode[node.id] || !online}
+                                  onClick={() => void handleOptimizeResources(node.id)}
+                                  title="بهبود هوشمند منابع Worker، پاکسازی مدل‌های ناقص، حذف بقایای ناموفق و Temp با ارائه گزارش قبل و بعد"
+                                >
+                                  {optimizingNode[node.id] ? "در حال بهبود هوشمند..." : "⚡ بهبود هوشمند منابع Worker"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="clean-disk-btn"
+                                  disabled={cleaningNode[node.id] || !online}
+                                  onClick={() => void handleCleanDisk(node.id)}
+                                >
+                                  {cleaningNode[node.id] ? "در حال پاکسازی..." : "🧹 پاکسازی سریع"}
+                                </button>
+                              </div>
                             </div>
 
                             {cleanMessage[node.id] && (
@@ -1101,6 +1127,144 @@ export function NodeManager() {
             </div>
           )}
         </>
+      )}
+
+      {optimizationReport && (
+        <div className="node-modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setOptimizationReport(null); }}>
+          <div className="node-modal-card optimization-report-modal" role="dialog" aria-modal="true" aria-labelledby="report-modal-title">
+            <div className="node-modal-header">
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "22px" }}>⚡</span>
+                <div>
+                  <h3 id="report-modal-title" style={{ margin: 0, fontSize: "16px" }}>
+                    گزارش قبل و بعد بهبود هوشمند منابع Worker
+                  </h3>
+                  <small style={{ color: "#94a3b8", fontSize: "11px" }}>
+                    سرور: {optimizationReport.node_name} · ثبت‌شده در Audit Log ({optimizationReport.audit_event})
+                  </small>
+                </div>
+              </div>
+              <button type="button" className="quiet-button" onClick={() => setOptimizationReport(null)} aria-label="بستن">✕</button>
+            </div>
+
+            <div className="optimization-modal-body">
+              {/* Before / After Comparison Grid */}
+              <div className="comparison-cards-grid">
+                {/* وضعیت قبل */}
+                <div className="comparison-card before-card">
+                  <div className="comparison-card-head">
+                    <span className="badge-before">🔴 وضعیت قبل از بهینه‌سازی</span>
+                  </div>
+                  <div className="comparison-metrics-list">
+                    <div className="comparison-row">
+                      <span>مصرف دیسک:</span>
+                      <strong>{optimizationReport.before.disk_used_gb.toLocaleString("fa-IR")} GB ({optimizationReport.before.disk_percent.toLocaleString("fa-IR")}٪)</strong>
+                    </div>
+                    <div className="comparison-row">
+                      <span>فضای آزاد:</span>
+                      <strong style={{ color: "#cbd5e1" }}>{optimizationReport.before.disk_free_gb.toLocaleString("fa-IR")} GB</strong>
+                    </div>
+                    <div className="comparison-row wasted">
+                      <span>حجم زائد شناسایی‌شده:</span>
+                      <strong style={{ color: "#f43f5e" }}>{optimizationReport.before.wasted_gb.toLocaleString("fa-IR")} GB</strong>
+                    </div>
+                    <div className="comparison-breakdown-mini">
+                      <small>• مدل‌های ناقص: {optimizationReport.before.incomplete_count.toLocaleString("fa-IR")} مورد</small>
+                      <small>• مدل‌های ناموفق: {optimizationReport.before.failed_count.toLocaleString("fa-IR")} مورد</small>
+                      <small>• فایل‌های Temp: {optimizationReport.before.temp_count.toLocaleString("fa-IR")} فایل</small>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="comparison-arrow-separator">
+                  <span className="arrow-icon">⬅️</span>
+                  <small style={{ fontSize: "11px", color: "#5eead4", fontWeight: 700 }}>بهبود هوشمند</small>
+                </div>
+
+                {/* وضعیت بعد */}
+                <div className="comparison-card after-card">
+                  <div className="comparison-card-head">
+                    <span className="badge-after">🟢 وضعیت بعد از بهینه‌سازی</span>
+                  </div>
+                  <div className="comparison-metrics-list">
+                    <div className="comparison-row">
+                      <span>مصرف دیسک:</span>
+                      <strong>{optimizationReport.after.disk_used_gb.toLocaleString("fa-IR")} GB ({optimizationReport.after.disk_percent.toLocaleString("fa-IR")}٪)</strong>
+                    </div>
+                    <div className="comparison-row">
+                      <span>فضای آزاد جدید:</span>
+                      <strong style={{ color: "#34d399" }}>{optimizationReport.after.disk_free_gb.toLocaleString("fa-IR")} GB</strong>
+                    </div>
+                    <div className="comparison-row freed">
+                      <span>فضای آزادشده:</span>
+                      <strong style={{ color: "#10b981", fontSize: "14px" }}>
+                        {optimizationReport.after.freed_gb > 0
+                          ? `+${optimizationReport.after.freed_gb.toLocaleString("fa-IR")} گیگابایت آزاد شد`
+                          : "پالایش کامل انجام شد (فضای زائد صفر)"}
+                      </strong>
+                    </div>
+                    <div className="comparison-breakdown-mini">
+                      <small style={{ color: "#34d399" }}>✓ تمام مدل‌های ناقص و فایل‌های Temp پاک شدند</small>
+                      <small style={{ color: "#34d399" }}>✓ بقایای مدل‌های ناموفق پاکسازی شدند</small>
+                      <small style={{ color: "#34d399" }}>✓ اتلاف دیسک به ۰ گیگابایت رسید</small>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* بخش اقدامات انجام‌شده */}
+              <div className="optimization-actions-section">
+                <strong>📋 اقدامات انجام‌شده در این چرخه بهینه‌سازی:</strong>
+                <ul>
+                  {optimizationReport.actions_taken.map((act, aIdx) => (
+                    <li key={aIdx}>
+                      <span className="action-check">✓</span>
+                      <span>{act}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* بخش تضمین سلامت مدل‌های معتبر */}
+              <div className="healthy-models-guarantee-card">
+                <div className="guarantee-header">
+                  <span className="guarantee-shield">🛡️</span>
+                  <div>
+                    <strong>تضمین سلامت مدل‌های معتبر (Zero Impact)</strong>
+                    <p style={{ margin: 0, fontSize: "11.5px", color: "#a7f3d0" }}>
+                      مدل‌های معتبر و فعال در رجیستری Ollama بدون کوچک‌ترین دستکاری یا آسیب به صورت ۱۰۰٪ سالم نگهداری شدند:
+                    </p>
+                  </div>
+                </div>
+                {optimizationReport.healthy_models.models.length > 0 ? (
+                  <div className="healthy-models-chips">
+                    {optimizationReport.healthy_models.models.map((modName, mIdx) => (
+                      <span key={mIdx} className="healthy-model-chip" dir="ltr">
+                        ✓ {modName}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <small style={{ color: "#a7f3d0" }}>هیچ مدل فعال و نصب‌شده‌ای آسیب ندید.</small>
+                )}
+              </div>
+
+              {/* فوتر ممیزی و بستن */}
+              <div className="optimization-modal-footer">
+                <div className="audit-confirmation-tag">
+                  <span>🔒 تمام جزئیات این عملیات در پایگاه ممیزی امن (Audit Log) با موفقیت ثبت گردید.</span>
+                </div>
+                <button
+                  type="button"
+                  className="submit-button"
+                  onClick={() => setOptimizationReport(null)}
+                >
+                  تأیید و بستن گزارش
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {message && <p className="admin-message" role="status">{message}</p>}

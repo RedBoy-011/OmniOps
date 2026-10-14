@@ -446,7 +446,7 @@ def make_server(
                             "/api/admin/nodes/grants", "/api/admin/nodes/grants/revoke",
                             "/api/admin/nodes/revoke", "/api/admin/nodes/delete", "/api/admin/nodes/token",
                             "/api/admin/nodes/model-pulls", "/api/admin/nodes/model-pulls/cancel", "/api/admin/nodes/model-delete",
-                            "/api/admin/nodes/clean-disk",
+                            "/api/admin/nodes/clean-disk", "/api/admin/nodes/optimize-resources",
                             "/api/nodes/model-pulls/claim", "/api/nodes/model-pulls/report"}:
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
@@ -475,6 +475,8 @@ def make_server(
                     self._send(201, nodes.queue_model_delete(principal, body.get("node_id"), body.get("model")))
                 elif path == "/api/admin/nodes/clean-disk":
                     self._send(200, nodes.clean_node_disk(principal, body.get("node_id"), body.get("targets")))
+                elif path == "/api/admin/nodes/optimize-resources":
+                    self._send(200, nodes.optimize_worker_resources(principal, body.get("node_id")))
                 elif path == "/api/nodes/model-pulls/claim":
                     self._send(200, {"job": nodes.claim_model_pull(body.get("id"), body.get("credential"))})
                 elif path == "/api/nodes/model-pulls/report":
