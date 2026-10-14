@@ -2,6 +2,38 @@
 
 تمامی تغییرات، تفاوت‌های فرآیند آپدیت و انتشارات رسمی پلتفرم OmniOps بر اساس استاندارد [Keep a Changelog](https://keepachangelog.com/) در این فایل آرشیو می‌شوند.
 
+## [v1.20.0] - 2026-10-14
+### 🌿 بازرسی وضعیت گیت محلی پروژه (Project Git Status Inspection)، گالری اسناد هوشمند فرآورده‌ها (Smart Artifacts Gallery) و الگوهای مأموریت ایجنت (Agent Task Presets):
+* **بازرسی وضعیت و شاخه‌های گیت محلی پروژه (Workspace Local Git Status & Inspection Engine):**
+  - متد هسته `get_project_git_status` و اندپوینت‌های `GET /api/web/workspace/project/git/status?project_id=...` و `GET /api/agent/workspace/project/git/status?project_id=...`.
+  - استعلام هوشمند وجود یا عدم وجود مخزن محلی گیت (`.git`)، نام شاخه جاری فعال (`branch`) و وضعیت تمیز بودن دایرکتوری کاری (`clean`).
+  - تفکیک دقیق فایل‌های تغییریافته پروژه به سه دسته: فایل‌های آماده ثبت (`staged`)، فایل‌های اصلاح‌شده غیراستیج (`unstaged`)، و فایل‌های جدید ردیابی‌نشده (`untracked`).
+  - استخراج خودکار و نمایش ۵ کامیت اخیر شاخه جاری به همراه هش مخفف (`hash`)، نویسنده (`author`)، زمان ثبت (`date`) و متن پیام کامیت (`message`).
+* **سیستم اسناد و فرآورده‌های هوشمند پروژه (Smart Project Artifacts System & Gallery):**
+  - جدول دیتابیس اختصاصی `workspace_project_artifacts` در SQLite (`id`, `project_id`, `run_id`, `title`, `artifact_type`, `content`, `created_by`, `created_at`, `updated_at`) با ایندکس اختصاصی بر اساس `project_id`.
+  - متدهای هسته مدیریت چرخه حیات اسناد: `list_project_artifacts`، `create_project_artifact`، `get_project_artifact` و `delete_project_artifact`.
+  - تولید و ثبت خودکار سند فرآورده توسط ایجنت در پایان چرخه موفق مأموریت در `advance_agent_run` (گزارش جامع دستاوردها یا طرح معماری بر اساس نقش و نتیجه تسک).
+  - اندپوینت‌های امن API با کنترل دسترسی مالکان پروژه: `GET /api/web/workspace/project/artifacts`، `GET /api/web/workspace/project/artifact`، `POST /api/web/workspace/project/artifacts`، `POST /api/web/workspace/project/artifacts/delete` (و معادل‌های آن‌ها در درگاه `/api/agent/...`).
+* **الگوهای آماده مأموریت‌های سازمانی ایجنت (Agent Task Presets & Quick Action Chips):**
+  - نوار چیپ‌های الگوهای سریع وظیفه بالای فرم ارکستراسیون ایجنت برای ۵ سناریوی کلیدی مهندسی نرم‌افزار:
+    - 🛡️ ممیزی امنیتی و آسیب‌پذیری‌ها (`tester` + `swarm`)
+    - 🧪 تست خودکار و سنجش کیفیت QA (`tester` + `swarm`)
+    - ⚡ بهینه‌سازی کارایی و رفکتور کد (`coder` + `single`)
+    - 🏛️ تحلیل ساختار و طرح جامع معماری (`architect` + `swarm`)
+    - 📝 مستندسازی و تولید README / داکس (`general` + `single`)
+  - تنظیم ۱-کلیک پرامپت، نقش ایجنت و حالت تک/سوارم برای شروع فوق‌العاده سریع تسک‌ها.
+* **رابط کاربری پیشرفته وب پرتال سازمانی (`AgenticWorkspaceCard.tsx` و `styles.css`):**
+  - نشانگر و بج تعاملی وضعیت گیت (`Git Status Badge`) در هدر پروژه با نمایش شاخه فعال و تعداد فایل‌های تغییریافته.
+  - مدال تعاملی وضعیت گیت (`showGitModal`) با تفکیک بصری فایل‌های Staged/Unstaged/Untracked و فهرست کامیت‌های اخیر.
+  - گالری اسناد و فرآورده‌های هوشمند پروژه (`showArtifactsModal`) با کارت‌های تفکیک‌شده بر اساس نوع سند (`plan`, `report`, `review`, `code`).
+  - مشاهده‌گر تمام‌صفحه محتوای فرآورده‌ها با امکان کپی ۱-کلیک در کلیپ‌بورد، دانلود مستقیم فایل Markdown (`.md`) و حذف اسناد منسوخ‌شده.
+* **پوشش تست‌های خودکار:**
+  - افزودن آزمون‌های اعتبارسنجی استعلام وضعیت گیت، چرخه حیات کامل اسناد آرتفکت و تولید خودکار سند در انتهای چرخه ایجنت در `tests/test_workspace.py` (۲۰ تست).
+  - آزمون کامل اندپوینت‌های وب و ایجنت درگاه هویت برای گیت و اسناد در `tests/test_identity_gateway.py` (۱۹ تست).
+  - تضمین سازگاری کامل با تمامی استانداردهای امنیتی و معماری دوگانه.
+
+---
+
 ## [v1.19.0] - 2026-10-14
 ### 🔍 موتور جستجوی هوشمند کد در پروژه (Project Code Search & Grep)، تاریخچه فرامین اجرایی ترمینال (Terminal Command Execution History) و هدایت تعاملی ایجنت (Agent Steerability):
 * **موتور جستجوی هوشمند و Grep کد در دایرکتوری محلی پروژه (Workspace Project Code Search & Grep):**

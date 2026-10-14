@@ -12,6 +12,10 @@ import {
   type FilePatchRecord,
   type ProjectSearchResult,
   type CommandHistoryRecord,
+  type GitStatusResult,
+  type ProjectArtifact,
+  type TaskPreset,
+  TASK_PRESETS,
 } from "../api";
 
 interface AgenticWorkspaceCardProps {
@@ -60,6 +64,19 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
   // Steer active run state
   const [steerInput, setSteerInput] = useState("");
   const [steeringRun, setSteeringRun] = useState(false);
+
+  // Git Status state
+  const [gitStatus, setGitStatus] = useState<GitStatusResult | null>(null);
+  const [loadingGit, setLoadingGit] = useState(false);
+  const [showGitModal, setShowGitModal] = useState(false);
+
+  // Project Artifacts state
+  const [artifacts, setArtifacts] = useState<ProjectArtifact[]>([]);
+  const [loadingArtifacts, setLoadingArtifacts] = useState(false);
+  const [showArtifactsModal, setShowArtifactsModal] = useState(false);
+  const [viewingArtifact, setViewingArtifact] = useState<ProjectArtifact | null>(null);
+  const [deletingArtifactId, setDeletingArtifactId] = useState<string | null>(null);
+  const [copiedArtifactId, setCopiedArtifactId] = useState<string | null>(null);
 
   // Create / Bind state
   const [showNewModal, setShowNewModal] = useState(false);
@@ -127,7 +144,78 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
     void loadAgentRuns(selectedProjectId);
     void loadProjectPatches(selectedProjectId);
     void loadCommandHistory(selectedProjectId);
+    void loadGitStatus(selectedProjectId);
+    void loadArtifacts(selectedProjectId);
   }, [selectedProjectId, projects]);
+
+  async function loadGitStatus(projectId: string) {
+    if (!projectId) return;
+    try {
+      setLoadingGit(true);
+      const res = await api.getProjectGitStatus(projectId);
+      setGitStatus(res);
+    } catch {
+      setGitStatus(null);
+    } finally {
+      setLoadingGit(false);
+    }
+  }
+
+  async function loadArtifacts(projectId: string) {
+    if (!projectId) return;
+    try {
+      setLoadingArtifacts(true);
+      const res = await api.listProjectArtifacts(projectId);
+      setArtifacts(res.artifacts || []);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingArtifacts(false);
+    }
+  }
+
+  async function handleDeleteArtifact(artifactId: string) {
+    if (!selectedProjectId || !artifactId) return;
+    if (!window.confirm("آیا از حذف این سند اطمینان دارید؟")) return;
+    try {
+      setDeletingArtifactId(artifactId);
+      await api.deleteProjectArtifact(selectedProjectId, artifactId);
+      setArtifacts((prev) => prev.filter((a) => a.id !== artifactId));
+      if (viewingArtifact?.id === artifactId) {
+        setViewingArtifact(null);
+      }
+      setSuccessMsg("سند فرآورده با موفقیت حذف شد.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطا در حذف سند");
+    } finally {
+      setDeletingArtifactId(null);
+    }
+  }
+
+  function handleSelectPreset(preset: TaskPreset) {
+    setSelectedRole(preset.role);
+    setSelectedMode(preset.mode);
+    setAgentTaskPrompt(preset.prompt);
+    setSuccessMsg(`الگوی «${preset.title}» با نقش ${preset.role} و حالت ${preset.mode} اعمال شد.`);
+  }
+
+  function handleCopyArtifact(art: ProjectArtifact) {
+    navigator.clipboard.writeText(art.content);
+    setCopiedArtifactId(art.id);
+    setTimeout(() => setCopiedArtifactId(null), 2000);
+  }
+
+  function handleDownloadArtifact(art: ProjectArtifact) {
+    const blob = new Blob([art.content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${art.title.replace(/[\\/:*?"<>|]/g, "_")}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 
   async function loadCommandHistory(projectId: string) {
     if (!projectId) return;
@@ -554,9 +642,30 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
             <span className="meta-badge path-badge" dir="ltr" title={inspection.root_path}>
               📍 <code>{inspection.root_path}</code>
             </span>
+            {gitStatus?.is_git_repo && (
+              <button
+                type="button"
+                className="meta-badge git-badge clickable"
+                onClick={() => setShowGitModal(true)}
+                title="مشاهده شاخه، کامیت‌ها و تغییرات محلی گیت"
+              >
+                🌿 شاخه: <strong>{gitStatus.branch || "main"}</strong>
+                <span className={`git-clean-tag ${gitStatus.clean ? "clean" : "dirty"}`}>
+                  {gitStatus.clean ? "✓ تمیز" : `⚠️ ${(gitStatus.unstaged?.length || 0) + (gitStatus.staged?.length || 0) + (gitStatus.untracked?.length || 0)} تغییر`}
+                </span>
+              </button>
+            )}
+            <button
+              type="button"
+              className="meta-badge artifacts-badge clickable"
+              onClick={() => setShowArtifactsModal(true)}
+              title="مشاهده اسناد، طرح‌های معماری و گزارش‌های ایجنت"
+            >
+              📑 اسناد و طرح‌ها: <strong>{artifacts.length} سند</strong>
+            </button>
           </div>
 
-          {/* اکشن بار هوشمند برای بارگذاری در چت */}
+          {/* اکشن بار هوشمند برای بارگذاری در چت و دسترسی سریع */}
           <div className="agentic-context-actions-row">
             <button
               type="button"
@@ -564,6 +673,22 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
               onClick={handleSendContextToChat}
             >
               🚀 بارگذاری کانتکست و تسک‌های پروژه در چت هوش مصنوعی
+            </button>
+            {gitStatus?.is_git_repo && (
+              <button
+                type="button"
+                className="action-button git-action-btn"
+                onClick={() => setShowGitModal(true)}
+              >
+                🌿 کنترل وضعیت گیت
+              </button>
+            )}
+            <button
+              type="button"
+              className="action-button artifacts-action-btn"
+              onClick={() => setShowArtifactsModal(true)}
+            >
+              📑 گالری اسناد پروژه ({artifacts.length})
             </button>
             <span className="context-action-tip">
               (ارسال خودکار ساختار، داکیومنت‌ها و تسک‌های ناتمام به دستیار جهت ادامه هوشمند توسعه)
@@ -614,6 +739,25 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
 
             {/* فرم ورود تسک یا هدف */}
             <form onSubmit={handleStartAgentRun} className="agent-task-input-box">
+              {/* نوار الگوهای مأموریت آماده (Task Presets) */}
+              <div className="agent-presets-selector-row">
+                <span className="presets-label">⚡ الگوهای سریع مأموریت:</span>
+                <div className="presets-chips-container">
+                  {TASK_PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="preset-chip-btn"
+                      onClick={() => handleSelectPreset(p)}
+                      title={p.description}
+                    >
+                      <span className="preset-icon">{p.icon}</span>
+                      <span className="preset-title">{p.title}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="agent-mode-selector-row">
                 <span className="mode-selector-label">حالت ارکستراسیون:</span>
                 <button
@@ -1372,6 +1516,254 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
                 </div>
                 <div className="modal-footer">
                   <button type="button" className="quiet-button" onClick={() => setShowHistoryModal(false)}>
+                    بستن
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* مدال کنترل وضعیت و شاخه‌های گیت پروژه */}
+          {showGitModal && (
+            <div className="agent-modal-overlay" onClick={() => setShowGitModal(false)}>
+              <div className="agent-modal-card git-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3>🌿 وضعیت کنترل نسخه و شاخه‌های گیت</h3>
+                  <button type="button" className="close-btn" onClick={() => setShowGitModal(false)}>✕</button>
+                </div>
+                <div className="modal-body">
+                  <div className="git-modal-top-bar">
+                    <div className="git-branch-info">
+                      <span>شاخه فعال:</span>
+                      <span className="git-branch-name">🌿 {gitStatus?.branch || "main"}</span>
+                      <span className={`git-clean-tag ${gitStatus?.clean ? "clean" : "dirty"}`}>
+                        {gitStatus?.clean ? "✓ درخت کاری کاملاً تمیز است" : "⚠️ دارای تغییرات ثبت‌نشده"}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="quiet-button"
+                      onClick={() => selectedProjectId && void loadGitStatus(selectedProjectId)}
+                      disabled={loadingGit}
+                    >
+                      {loadingGit ? "⏳..." : "🔄 بروزرسانی وضعیت"}
+                    </button>
+                  </div>
+
+                  {/* تغییرات Staged */}
+                  <div className="git-changes-group">
+                    <h4>تغییرات استیج‌شده (Staged Changes) ({gitStatus?.staged?.length || 0}):</h4>
+                    {!gitStatus?.staged?.length ? (
+                      <p className="no-matches-hint">هیچ فایلی برای کامیت مرحله‌بندی نشده است.</p>
+                    ) : (
+                      <div className="git-files-list">
+                        {gitStatus.staged.map((f, idx) => (
+                          <div key={idx} className="git-file-row staged">
+                            <span className="git-status-badge staged">{f.status}</span>
+                            <code dir="ltr">{f.path}</code>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* تغییرات Unstaged */}
+                  <div className="git-changes-group">
+                    <h4>تغییرات اصلاح‌شده (Unstaged Modified) ({gitStatus?.unstaged?.length || 0}):</h4>
+                    {!gitStatus?.unstaged?.length ? (
+                      <p className="no-matches-hint">تغییرات مرحله‌بندی نشده‌ای وجود ندارد.</p>
+                    ) : (
+                      <div className="git-files-list">
+                        {gitStatus.unstaged.map((f, idx) => (
+                          <div key={idx} className="git-file-row unstaged">
+                            <span className="git-status-badge unstaged">{f.status}</span>
+                            <code dir="ltr">{f.path}</code>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* فایل‌های Untracked */}
+                  <div className="git-changes-group">
+                    <h4>فایل‌های جدید و ردیابی‌نشده (Untracked) ({gitStatus?.untracked?.length || 0}):</h4>
+                    {!gitStatus?.untracked?.length ? (
+                      <p className="no-matches-hint">فایل جدید ردیابی‌نشده‌ای وجود ندارد.</p>
+                    ) : (
+                      <div className="git-files-list">
+                        {gitStatus.untracked.map((p, idx) => (
+                          <div key={idx} className="git-file-row untracked">
+                            <span className="git-status-badge untracked">??</span>
+                            <code dir="ltr">{p}</code>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* آخرین کامیت‌ها */}
+                  <div className="git-commits-group">
+                    <h4>آخرین کامیت‌های ثبت‌شده شاخه:</h4>
+                    {!gitStatus?.recent_commits?.length ? (
+                      <p className="no-matches-hint">هنوز هیچ کمیتی در این مخزن یافت نشد.</p>
+                    ) : (
+                      <div className="git-commits-list">
+                        {gitStatus.recent_commits.map((c) => (
+                          <div key={c.hash} className="git-commit-item">
+                            <div className="commit-header">
+                              <code className="commit-hash" dir="ltr">{c.hash}</code>
+                              <span className="commit-time">{c.date}</span>
+                            </div>
+                            <div className="commit-message">{c.message}</div>
+                            <div className="commit-author">نویسنده: {c.author}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="quiet-button" onClick={() => setShowGitModal(false)}>
+                    بستن
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* مدال گالری اسناد و طرح‌های پروژه */}
+          {showArtifactsModal && (
+            <div className="agent-modal-overlay" onClick={() => setShowArtifactsModal(false)}>
+              <div className="agent-modal-card artifacts-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3>📑 اسناد، گزارش‌ها و طرح‌های اجرایی پروژه</h3>
+                  <button type="button" className="close-btn" onClick={() => setShowArtifactsModal(false)}>✕</button>
+                </div>
+                <div className="modal-body">
+                  <div className="artifacts-modal-meta">
+                    <span>مجموع اسناد ثبت‌شده: <strong>{artifacts.length} سند</strong></span>
+                    <button
+                      type="button"
+                      className="quiet-button"
+                      onClick={() => selectedProjectId && void loadArtifacts(selectedProjectId)}
+                      disabled={loadingArtifacts}
+                    >
+                      {loadingArtifacts ? "⏳..." : "🔄 بازخوانی اسناد"}
+                    </button>
+                  </div>
+
+                  {artifacts.length === 0 ? (
+                    <div className="empty-artifacts-box">
+                      <span className="empty-icon">📂</span>
+                      <p>هنوز سندی برای این پروژه ثبت نشده است.</p>
+                      <small>هنگامی که ایجنت‌ها مأموریتی را به اتمام برسانند، گزارش و نقشه راه فنی به‌طور خودکار در این گالری ذخیره می‌شود.</small>
+                    </div>
+                  ) : (
+                    <div className="artifacts-grid">
+                      {artifacts.map((art) => (
+                        <div key={art.id} className={`artifact-card type-${art.artifact_type}`}>
+                          <div className="artifact-card-header">
+                            <span className={`artifact-type-badge ${art.artifact_type}`}>
+                              {art.artifact_type === "plan" ? "🏛️ طرح معماری" :
+                               art.artifact_type === "report" ? "📊 گزارش مأموریت" :
+                               art.artifact_type === "review" ? "🔍 ممیزی کد" :
+                               art.artifact_type === "code" ? "💻 قطعه کد" : "📄 سند فنی"}
+                            </span>
+                            <span className="artifact-date">
+                              {new Date(art.created_at * 1000).toLocaleDateString("fa-IR")}
+                            </span>
+                          </div>
+                          <h4 className="artifact-title">{art.title}</h4>
+                          <p className="artifact-snippet">
+                            {art.content.slice(0, 140)}...
+                          </p>
+                          <div className="artifact-actions-row">
+                            <button
+                              type="button"
+                              className="action-button primary-accent"
+                              onClick={() => setViewingArtifact(art)}
+                            >
+                              👁️ مشاهده کامل
+                            </button>
+                            <button
+                              type="button"
+                              className="quiet-button"
+                              onClick={() => handleCopyArtifact(art)}
+                              title="کپی متن در کلیپ‌بورد"
+                            >
+                              {copiedArtifactId === art.id ? "✓ کپی شد" : "📋 کپی"}
+                            </button>
+                            <button
+                              type="button"
+                              className="quiet-button"
+                              onClick={() => handleDownloadArtifact(art)}
+                              title="دانلود فایل مارک‌داون"
+                            >
+                              📥 دانلود .md
+                            </button>
+                            <button
+                              type="button"
+                              className="quiet-button danger-btn"
+                              onClick={() => void handleDeleteArtifact(art.id)}
+                              disabled={deletingArtifactId === art.id}
+                              title="حذف سند"
+                            >
+                              {deletingArtifactId === art.id ? "..." : "🗑️"}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="quiet-button" onClick={() => setShowArtifactsModal(false)}>
+                    بستن
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* مدال مشاهده متن کامل سند */}
+          {viewingArtifact && (
+            <div className="agent-modal-overlay" onClick={() => setViewingArtifact(null)}>
+              <div className="agent-modal-card artifact-view-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <div className="view-modal-title">
+                    <span className={`artifact-type-badge ${viewingArtifact.artifact_type}`}>
+                      {viewingArtifact.artifact_type}
+                    </span>
+                    <h3>{viewingArtifact.title}</h3>
+                  </div>
+                  <button type="button" className="close-btn" onClick={() => setViewingArtifact(null)}>✕</button>
+                </div>
+                <div className="modal-body">
+                  <div className="artifact-view-meta">
+                    <span>زمان ثبت: {new Date(viewingArtifact.created_at * 1000).toLocaleString("fa-IR")}</span>
+                    <div className="meta-actions">
+                      <button
+                        type="button"
+                        className="quiet-button"
+                        onClick={() => handleCopyArtifact(viewingArtifact)}
+                      >
+                        {copiedArtifactId === viewingArtifact.id ? "✓ در کلیپ‌بورد کپی شد" : "📋 کپی متن"}
+                      </button>
+                      <button
+                        type="button"
+                        className="quiet-button"
+                        onClick={() => handleDownloadArtifact(viewingArtifact)}
+                      >
+                        📥 دانلود فایل .md
+                      </button>
+                    </div>
+                  </div>
+                  <div className="artifact-content-viewer">
+                    <pre className="artifact-pre-text">{viewingArtifact.content}</pre>
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="quiet-button" onClick={() => setViewingArtifact(null)}>
                     بستن
                   </button>
                 </div>

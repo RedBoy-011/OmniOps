@@ -381,6 +381,94 @@ export type CommandHistoryRecord = {
   created_at: number;
 };
 
+export type GitCommitInfo = {
+  hash: string;
+  author: string;
+  date: string;
+  message: string;
+};
+
+export type GitStatusResult = {
+  is_git_repo: boolean;
+  branch?: string;
+  clean?: boolean;
+  staged?: Array<{ path: string; status: string }>;
+  unstaged?: Array<{ path: string; status: string }>;
+  untracked?: string[];
+  recent_commits?: GitCommitInfo[];
+  message?: string;
+};
+
+export type ProjectArtifact = {
+  id: string;
+  project_id: string;
+  run_id?: string | null;
+  title: string;
+  artifact_type: "plan" | "report" | "review" | "code" | "general";
+  content: string;
+  created_by: string;
+  created_at: number;
+  updated_at: number;
+};
+
+export type TaskPreset = {
+  id: string;
+  title: string;
+  icon: string;
+  role: AgentRole;
+  mode: AgentMode;
+  prompt: string;
+  description: string;
+};
+
+export const TASK_PRESETS: TaskPreset[] = [
+  {
+    id: "security_audit",
+    title: "ممیزی امنیتی و آسیب‌پذیری‌ها",
+    icon: "🛡️",
+    role: "tester",
+    mode: "swarm",
+    prompt: "بررسی جامع امنیتی پروژه، اسکن فایل‌های پیکربندی و وابستگی‌ها برای جلوگیری از نشت کلیدها و آسیب‌پذیری‌های امنیتی.",
+    description: "پویش فایل‌های محرمانه و بررسی پکیج‌های آسیب‌پذیر"
+  },
+  {
+    id: "quality_qa",
+    title: "تست خودکار و سنجش کیفیت (QA)",
+    icon: "🧪",
+    role: "tester",
+    mode: "swarm",
+    prompt: "یافتن تست‌های پروژه، اجرای دستورات اعتبارسنجی کیفی، تحلیل تست‌کیس‌ها و تدوین گزارش پوشش آزمون.",
+    description: "اجرای تست‌ها و ارائه گزارش کنترل کیفیت"
+  },
+  {
+    id: "refactor_clean",
+    title: "بهینه‌سازی کارایی و رفکتور کد",
+    icon: "⚡",
+    role: "coder",
+    mode: "single",
+    prompt: "بازبینی توابع حجیم، پاک‌سازی کدهای تکراری و بدهی‌های فنی و بهینه‌سازی سرعت پردازش توابع کلیدی.",
+    description: "اصلاح ساختار کدهای پیچیده و ارتقای پرفورمنس"
+  },
+  {
+    id: "architecture_plan",
+    title: "تحلیل ساختار و طرح جامع معماری",
+    icon: "🏛️",
+    role: "architect",
+    mode: "swarm",
+    prompt: "تحلیل ماژول‌ها، درخت وابستگی‌ها، مانیفست‌ها و تدوین سند تفصیلی معماری و نقشه راه توسعه سیستم.",
+    description: "ترسیم دیاگرام ارتباطات و طرح نقشه راه فنی"
+  },
+  {
+    id: "auto_docs",
+    title: "مستندسازی و تولید README / داکس",
+    icon: "📝",
+    role: "general",
+    mode: "single",
+    prompt: "استخراج متادیتا، تدوین داکیومنت کامل راهنمای نصب و راه‌اندازی (README.md) و مستندسازی اندپوینت‌ها.",
+    description: "تدوین راهنمای توسعه و مستندات استاندارد"
+  }
+];
+
 export type AgentRun = {
   id: string;
   owner_id?: string;
@@ -636,4 +724,12 @@ export const api = {
     request<{ commands: CommandHistoryRecord[] }>(`/api/web/workspace/project/commands?project_id=${encodeURIComponent(project_id)}&limit=${limit}`),
   sendAgentRunFeedback: (run_id: string, message: string) =>
     request<{ run: AgentRun }>("/api/web/workspace/task/run/feedback", "POST", { run_id, message }),
+  getProjectGitStatus: (project_id: string) =>
+    request<GitStatusResult>(`/api/web/workspace/project/git/status?project_id=${encodeURIComponent(project_id)}`),
+  listProjectArtifacts: (project_id: string, limit = 50) =>
+    request<{ artifacts: ProjectArtifact[] }>(`/api/web/workspace/project/artifacts?project_id=${encodeURIComponent(project_id)}&limit=${limit}`),
+  createProjectArtifact: (payload: { project_id: string; title: string; content: string; artifact_type?: string; run_id?: string }) =>
+    request<{ artifact: ProjectArtifact }>("/api/web/workspace/project/artifacts", "POST", payload),
+  deleteProjectArtifact: (project_id: string, artifact_id: string) =>
+    request<{ status: string; artifact_id: string }>("/api/web/workspace/project/artifacts/delete", "POST", { project_id, artifact_id }),
 };

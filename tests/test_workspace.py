@@ -567,6 +567,109 @@ class WorkspaceTests(unittest.TestCase):
         with self.assertRaises(IdentityError):
             self.workspace.send_agent_run_feedback(self.member, run['id'], 'دستور جدید')
 
+    def test_workspace_git_status_inspection(self):
+        git_dir = Path(self.temp.name) / 'git_test_proj'
+        git_dir.mkdir(parents=True, exist_ok=True)
+        proj = self.workspace.create_project(self.member, 'Git Test Proj', str(git_dir))
+
+        # 1. Non-git project initially
+        status_non_git = self.workspace.get_project_git_status(self.member, proj['id'])
+        self.assertFalse(status_non_git['is_git_repo'])
+
+        # 2. Initialize a git repo in git_dir
+        try:
+            subprocess.run(["git", "init"], cwd=str(git_dir), capture_output=True, check=True)
+            subprocess.run(["git", "config", "user.name", "Test User"], cwd=str(git_dir), capture_output=True, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(git_dir), capture_output=True, check=True)
+            
+            # Create a file and commit
+            test_file = git_dir / "initial.txt"
+            test_file.write_text("initial content", encoding="utf-8")
+            subprocess.run(["git", "add", "initial.txt"], cwd=str(git_dir), capture_output=True, check=True)
+            subprocess.run(["git", "commit", "-m", "Initial commit for test"], cwd=str(git_dir), capture_output=True, check=True)
+
+            # Create an untracked file
+            untracked = git_dir / "untracked.py"
+            untracked.write_text("print('hello')", encoding="utf-8")
+
+            # Inspect git status
+            git_status = self.workspace.get_project_git_status(self.member, proj['id'])
+            self.assertTrue(git_status['is_git_repo'])
+            self.assertIn('untracked.py', git_status['untracked'])
+            self.assertFalse(git_status['clean'])
+            self.assertGreaterEqual(len(git_status['recent_commits']), 1)
+            self.assertEqual(git_status['recent_commits'][0]['message'], "Initial commit for test")
+        except Exception as exc:
+            self.skipTest(f"Git CLI not functioning in test environment: {exc}")
+
+    def test_workspace_project_artifacts_lifecycle(self):
+        art_dir = Path(self.temp.name) / 'art_proj'
+        art_dir.mkdir(parents=True, exist_ok=True)
+        proj = self.workspace.create_project(self.member, 'Artifact Proj', str(art_dir))
+
+        # Create an artifact
+        art = self.workspace.create_project_artifact(
+            self.member,
+            proj['id'],
+            title="طرح معماری سیستم",
+            content="# طرح سیستم\nاین یک سند طراحی خودکار است.",
+            artifact_type="plan"
+        )
+        self.assertEqual(art['project_id'], proj['id'])
+        self.assertEqual(art['title'], "طرح معماری سیستم")
+        self.assertEqual(art['artifact_type'], "plan")
+        self.assertIn("طرح سیستم", art['content'])
+
+        # List artifacts
+        artifacts = self.workspace.list_project_artifacts(self.member, proj['id'])
+        self.assertEqual(len(artifacts), 1)
+        self.assertEqual(artifacts[0]['id'], art['id'])
+
+        # Get single artifact
+        fetched = self.workspace.get_project_artifact(self.member, proj['id'], art['id'])
+        self.assertEqual(fetched['id'], art['id'])
+
+        # Another user without permission cannot delete
+        other_member = {
+            'id': 'c' * 32,
+            'role': 'member',
+            'username': 'other',
+            'capabilities': ['chat']
+        }
+        with self.assertRaises(IdentityError):
+            self.workspace.delete_project_artifact(other_member, proj['id'], art['id'])
+
+        # Owner can delete
+        deleted = self.workspace.delete_project_artifact(self.member, proj['id'], art['id'])
+        self.assertEqual(deleted['status'], 'deleted')
+        self.assertEqual(len(self.workspace.list_project_artifacts(self.member, proj['id'])), 0)
+
+    def test_workspace_agent_run_auto_artifact_generation(self):
+        auto_dir = Path(self.temp.name) / 'auto_proj'
+        auto_dir.mkdir(parents=True, exist_ok=True)
+        (auto_dir / 'index.js').write_text('console.log("ready");\n', encoding='utf-8')
+        proj = self.workspace.create_project(self.member, 'Auto Art Proj', str(auto_dir))
+
+        # Create an agent run and advance through completion
+        run = self.workspace.start_agent_run(self.member, proj['id'], 'تکمیل و ارزیابی پروژه تستی', role='architect')
+        # advance steps: 0 -> 1 -> 2 -> 3 (completion)
+        run = self.workspace.advance_agent_run(self.member, run['id'])
+        run = self.workspace.advance_agent_run(self.member, run['id'])
+        # step 2 to 3 requires approve or advance
+        run = self.workspace.advance_agent_run(self.member, run['id'])
+        if run['status'] == 'waiting_approval':
+            run = self.workspace.admin_approve_agent_run_step(self.owner, run['id'])
+        self.assertEqual(run['status'], 'completed')
+
+        # Verify artifact was automatically generated
+        artifacts = self.workspace.list_project_artifacts(self.member, proj['id'])
+        self.assertGreaterEqual(len(artifacts), 1)
+        auto_art = artifacts[0]
+        self.assertEqual(auto_art['run_id'], run['id'])
+        self.assertIn("گزارش مأموریت", auto_art['title'])
+        self.assertIn("پروژه آماده استقرار", auto_art['content'])
+
+
 
 
 

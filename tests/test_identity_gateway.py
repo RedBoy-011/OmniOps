@@ -722,6 +722,38 @@ class WorkerEndpointTests(unittest.TestCase):
             self.assertIn("run", fb_res)
             self.assertTrue(any(l.get("type") == "user_feedback" for l in fb_res["run"]["logs"]))
 
+            # Git Status API
+            code, git_res = self.call("GET", f"/api/web/workspace/project/git/status?project_id={p_id}", None, admin)
+            self.assertEqual(code, 200)
+            self.assertIn("is_git_repo", git_res)
+
+            # Artifacts API Lifecycle
+            code, art_create = self.call("POST", "/api/web/workspace/project/artifacts", {
+                "project_id": p_id,
+                "title": "ممیزی امنیتی فریم‌ورک",
+                "artifact_type": "review",
+                "content": "# گزارش ممیزی امنیتی\nکلیه پکیج‌ها بررسی شدند."
+            }, admin)
+            self.assertEqual(code, 201)
+            self.assertIn("artifact", art_create)
+            art_id = art_create["artifact"]["id"]
+
+            code, art_list = self.call("GET", f"/api/web/workspace/project/artifacts?project_id={p_id}", None, admin)
+            self.assertEqual(code, 200)
+            self.assertGreaterEqual(len(art_list["artifacts"]), 1)
+            self.assertEqual(art_list["artifacts"][0]["title"], "ممیزی امنیتی فریم‌ورک")
+
+            code, art_single = self.call("GET", f"/api/web/workspace/project/artifact?project_id={p_id}&artifact_id={art_id}", None, admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(art_single["artifact"]["id"], art_id)
+
+            code, art_del = self.call("POST", "/api/web/workspace/project/artifacts/delete", {
+                "project_id": p_id,
+                "artifact_id": art_id
+            }, admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(art_del["status"], "deleted")
+
 
 if __name__ == "__main__":
     unittest.main()

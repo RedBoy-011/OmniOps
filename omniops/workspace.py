@@ -119,6 +119,18 @@ class WorkspaceStore:
                     created_at INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_workspace_cmd_history ON workspace_command_history(project_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS workspace_project_artifacts (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES workspace_projects(id) ON DELETE CASCADE,
+                    run_id TEXT REFERENCES workspace_agent_runs(id) ON DELETE SET NULL,
+                    title TEXT NOT NULL,
+                    artifact_type TEXT NOT NULL DEFAULT 'plan' CHECK(artifact_type IN ('plan', 'report', 'review', 'code', 'general')),
+                    content TEXT NOT NULL,
+                    created_by TEXT NOT NULL REFERENCES users(id),
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_workspace_artifacts_proj ON workspace_project_artifacts(project_id, created_at DESC);
             """)
             try:
                 db.execute("ALTER TABLE workspace_projects ADD COLUMN root_path TEXT DEFAULT ''")
@@ -152,6 +164,19 @@ class WorkspaceStore:
             return [dict(row) for row in db.execute(
                 "SELECT id,name,created_at,COALESCE(root_path,'') as root_path FROM workspace_projects WHERE owner_id=? ORDER BY created_at DESC, rowid DESC LIMIT 30",
                 (principal['id'],))]
+
+    def get_project(self, principal, project_id):
+        self._cap(principal, 'chat')
+        if not isinstance(project_id, str) or len(project_id) != 32:
+            raise IdentityError('Invalid project ID')
+        with self.store._db() as db:
+            if principal.get('role') == 'superadmin':
+                row = db.execute("SELECT id, owner_id, name, created_at, COALESCE(root_path,'') as root_path FROM workspace_projects WHERE id=?", (project_id,)).fetchone()
+            else:
+                row = db.execute("SELECT id, owner_id, name, created_at, COALESCE(root_path,'') as root_path FROM workspace_projects WHERE id=? AND owner_id=?", (project_id, principal['id'])).fetchone()
+            if not row:
+                raise IdentityError('Project not found', 404)
+            return dict(row)
 
     def create_project(self, principal, name, root_path=""):
         self._cap(principal, 'chat')
@@ -1481,6 +1506,17 @@ class WorkspaceStore:
                 WHERE id=?
             """, (new_status, current_idx, json.dumps(plan_steps), json.dumps(logs), result_summary, now, run_id))
 
+            if new_status == 'completed':
+                existing_art = db.execute("SELECT id FROM workspace_project_artifacts WHERE run_id=?", (run_id,)).fetchone()
+                if not existing_art:
+                    art_id = uuid.uuid4().hex
+                    art_title = f"گزارش مأموریت: {run['prompt'][:45]}"
+                    art_type = 'report' if is_swarm else 'plan'
+                    db.execute("""
+                        INSERT INTO workspace_project_artifacts (id, project_id, run_id, title, artifact_type, content, created_by, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (art_id, run['project_id'], run_id, art_title, art_type, result_summary, run['owner_id'], now, now))
+
             run['status'] = new_status
             run['current_step_index'] = current_idx
             run['plan_steps'] = json.dumps(plan_steps)
@@ -1696,4 +1732,164 @@ class WorkspaceStore:
             self.store._audit(db, principal['id'], 'workspace_admin_agent_run_approved', run_id)
 
         return self.advance_agent_run(principal, run_id)
+
+    def get_project_git_status(self, principal, project_id):
+        if not isinstance(project_id, str) or len(project_id) != 32:
+            raise IdentityError('Invalid project ID')
+        project = self.get_project(principal, project_id)
+        root_path = project.get('root_path')
+        if not root_path:
+            return {'is_git_repo': False, 'message': 'No root path bound'}
+        root = Path(root_path)
+        if not root.is_dir():
+            return {'is_git_repo': False, 'message': 'Project root directory does not exist'}
+
+        git_dir = root / '.git'
+        if not (git_dir.is_dir() or git_dir.is_file()):
+            return {'is_git_repo': False, 'message': 'Directory is not a git repository'}
+
+        branch = "unknown"
+        staged = []
+        unstaged = []
+        untracked = []
+        recent_commits = []
+
+        try:
+            res = subprocess.run(
+                ["git", "status", "--porcelain=v1", "-b"],
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5
+            )
+            if res.returncode == 0:
+                lines = res.stdout.splitlines()
+                for line in lines:
+                    if not line:
+                        continue
+                    if line.startswith("## "):
+                        b_info = line[3:].strip()
+                        if "..." in b_info:
+                            branch = b_info.split("...")[0].strip()
+                        elif " " in b_info:
+                            branch = b_info.split(" ")[0].strip()
+                        else:
+                            branch = b_info
+                    elif line.startswith("?? "):
+                        untracked.append(line[3:].strip())
+                    elif len(line) >= 3:
+                        x = line[0]
+                        y = line[1]
+                        filepath = line[3:].strip()
+                        if x in ('M', 'A', 'D', 'R', 'C'):
+                            staged.append({'path': filepath, 'status': x})
+                        if y in ('M', 'D'):
+                            unstaged.append({'path': filepath, 'status': y})
+            else:
+                return {'is_git_repo': False, 'message': res.stderr.strip() or 'Git status command failed'}
+        except Exception as exc:
+            return {'is_git_repo': False, 'message': f'Git inspection error: {exc}'}
+
+        try:
+            log_res = subprocess.run(
+                ["git", "log", "-n", "5", "--format=%h|%an|%ar|%s"],
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5
+            )
+            if log_res.returncode == 0 and log_res.stdout:
+                for log_line in log_res.stdout.splitlines():
+                    if not log_line or '|' not in log_line:
+                        continue
+                    parts = log_line.split('|', 3)
+                    if len(parts) == 4:
+                        recent_commits.append({
+                            'hash': parts[0],
+                            'author': parts[1],
+                            'date': parts[2],
+                            'message': parts[3]
+                        })
+        except Exception:
+            pass
+
+        return {
+            'is_git_repo': True,
+            'branch': branch,
+            'clean': len(staged) == 0 and len(unstaged) == 0 and len(untracked) == 0,
+            'staged': staged,
+            'unstaged': unstaged,
+            'untracked': untracked,
+            'recent_commits': recent_commits
+        }
+
+    def list_project_artifacts(self, principal, project_id, limit=50):
+        if not isinstance(project_id, str) or len(project_id) != 32:
+            raise IdentityError('Invalid project ID')
+        self.get_project(principal, project_id)
+        limit = max(1, min(int(limit), 100))
+        with self.store._lock, self.store._db() as db:
+            rows = db.execute("""
+                SELECT * FROM workspace_project_artifacts
+                WHERE project_id=?
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (project_id, limit)).fetchall()
+            return [dict(r) for r in rows]
+
+    def create_project_artifact(self, principal, project_id, title, content, artifact_type='plan', run_id=None):
+        if not isinstance(project_id, str) or len(project_id) != 32:
+            raise IdentityError('Invalid project ID')
+        self.get_project(principal, project_id)
+        if not isinstance(title, str) or not title.strip():
+            raise IdentityError('Artifact title is required')
+        if not isinstance(content, str):
+            raise IdentityError('Artifact content must be string')
+        if artifact_type not in ('plan', 'report', 'review', 'code', 'general'):
+            artifact_type = 'general'
+
+        now = int(self.store.clock())
+        artifact_id = uuid.uuid4().hex
+        with self.store._lock, self.store._db() as db:
+            db.execute("""
+                INSERT INTO workspace_project_artifacts (id, project_id, run_id, title, artifact_type, content, created_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (artifact_id, project_id, run_id, title.strip()[:100], artifact_type, content, principal['id'], now, now))
+            self.store._audit(db, principal['id'], 'workspace_artifact_created', f"{project_id}:{artifact_id}:{title[:30]}")
+
+        return self.get_project_artifact(principal, project_id, artifact_id)
+
+    def get_project_artifact(self, principal, project_id, artifact_id):
+        if not isinstance(project_id, str) or len(project_id) != 32:
+            raise IdentityError('Invalid project ID')
+        if not isinstance(artifact_id, str) or len(artifact_id) != 32:
+            raise IdentityError('Invalid artifact ID')
+        self.get_project(principal, project_id)
+        with self.store._lock, self.store._db() as db:
+            row = db.execute("SELECT * FROM workspace_project_artifacts WHERE id=? AND project_id=?", (artifact_id, project_id)).fetchone()
+            if not row:
+                raise IdentityError('Artifact not found', 404)
+            return dict(row)
+
+    def delete_project_artifact(self, principal, project_id, artifact_id):
+        if not isinstance(project_id, str) or len(project_id) != 32:
+            raise IdentityError('Invalid project ID')
+        if not isinstance(artifact_id, str) or len(artifact_id) != 32:
+            raise IdentityError('Invalid artifact ID')
+        project = self.get_project(principal, project_id)
+        with self.store._lock, self.store._db() as db:
+            row = db.execute("SELECT * FROM workspace_project_artifacts WHERE id=? AND project_id=?", (artifact_id, project_id)).fetchone()
+            if not row:
+                raise IdentityError('Artifact not found', 404)
+            art = dict(row)
+            if principal.get('role') != 'superadmin' and art['created_by'] != principal['id'] and project['owner_id'] != principal['id']:
+                raise IdentityError('Permission denied to delete artifact', 403)
+            db.execute("DELETE FROM workspace_project_artifacts WHERE id=?", (artifact_id,))
+            self.store._audit(db, principal['id'], 'workspace_artifact_deleted', f"{project_id}:{artifact_id}")
+            return {'status': 'deleted', 'artifact_id': artifact_id}
+
 

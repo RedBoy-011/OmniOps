@@ -540,6 +540,8 @@ def make_server(
                 "/api/web/workspace/project/patches/rollback", "/api/agent/workspace/project/patches/rollback",
                 "/api/web/workspace/project/search", "/api/agent/workspace/project/search",
                 "/api/web/workspace/task/run/feedback", "/api/agent/workspace/task/run/feedback",
+                "/api/web/workspace/project/artifacts", "/api/agent/workspace/project/artifacts",
+                "/api/web/workspace/project/artifacts/delete", "/api/agent/workspace/project/artifacts/delete",
                 "/api/admin/workspace/webhooks", "/api/admin/workspace/webhooks/test", "/api/admin/workspace/webhooks/delete",
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/test-socks", "/api/admin/providers/enable", "/api/admin/providers/price",
@@ -715,6 +717,21 @@ def make_server(
                     self._send(200, workspace.test_governance_webhook(principal, payload.get('webhook_id')))
                 elif path == '/api/admin/workspace/webhooks/delete':
                     self._send(200, workspace.delete_governance_webhook(principal, payload.get('webhook_id')))
+                elif path in ('/api/web/workspace/project/artifacts', '/api/agent/workspace/project/artifacts'):
+                    self._send(201, {'artifact': workspace.create_project_artifact(
+                        principal,
+                        payload.get('project_id'),
+                        payload.get('title'),
+                        payload.get('content', ''),
+                        artifact_type=payload.get('artifact_type', 'plan'),
+                        run_id=payload.get('run_id')
+                    )})
+                elif path in ('/api/web/workspace/project/artifacts/delete', '/api/agent/workspace/project/artifacts/delete'):
+                    self._send(200, workspace.delete_project_artifact(
+                        principal,
+                        payload.get('project_id'),
+                        payload.get('artifact_id')
+                    ))
                 elif path in ('/api/web/workspace/attachments', '/api/agent/workspace/attachments'):
                     self._send(201, workspace.add_attachment(principal, payload.get('project_id'),
                                                               payload.get('name'), payload.get('mime'), payload.get('content_base64')))
@@ -952,6 +969,41 @@ def make_server(
                     p_id = q.get('project_id', [None])[0]
                     lim = int(q.get('limit', ['50'])[0])
                     self._send(200, {'commands': workspace.list_command_history(principal, p_id, limit=lim)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                return
+            if parsed.path in ('/api/web/workspace/project/git/status', '/api/agent/workspace/project/git/status'):
+                principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
+                if principal is None:
+                    return
+                try:
+                    q = parse_qs(parsed.query)
+                    p_id = q.get('project_id', [None])[0]
+                    self._send(200, workspace.get_project_git_status(principal, p_id))
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                return
+            if parsed.path in ('/api/web/workspace/project/artifacts', '/api/agent/workspace/project/artifacts'):
+                principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
+                if principal is None:
+                    return
+                try:
+                    q = parse_qs(parsed.query)
+                    p_id = q.get('project_id', [None])[0]
+                    lim = int(q.get('limit', ['50'])[0])
+                    self._send(200, {'artifacts': workspace.list_project_artifacts(principal, p_id, limit=lim)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                return
+            if parsed.path in ('/api/web/workspace/project/artifact', '/api/agent/workspace/project/artifact'):
+                principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
+                if principal is None:
+                    return
+                try:
+                    q = parse_qs(parsed.query)
+                    p_id = q.get('project_id', [None])[0]
+                    art_id = q.get('artifact_id', [None])[0]
+                    self._send(200, {'artifact': workspace.get_project_artifact(principal, p_id, art_id)})
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 return
