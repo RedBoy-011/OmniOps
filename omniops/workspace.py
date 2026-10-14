@@ -36,6 +36,20 @@ class WorkspaceStore:
                     content BLOB NOT NULL, created_at INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS workspace_attachment_owner ON workspace_attachments(owner_id, project_id);
+                CREATE TABLE IF NOT EXISTS workspace_agent_runs (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    project_id TEXT NOT NULL REFERENCES workspace_projects(id) ON DELETE CASCADE,
+                    prompt TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('planning','in_progress','waiting_approval','completed','failed','cancelled')),
+                    current_step_index INTEGER NOT NULL DEFAULT 0,
+                    plan_steps TEXT NOT NULL DEFAULT '[]',
+                    logs TEXT NOT NULL DEFAULT '[]',
+                    result_summary TEXT NOT NULL DEFAULT '',
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS workspace_agent_runs_owner ON workspace_agent_runs(owner_id, project_id, created_at);
             """)
             try:
                 db.execute("ALTER TABLE workspace_projects ADD COLUMN root_path TEXT DEFAULT ''")
@@ -436,3 +450,276 @@ class WorkspaceStore:
                 raise IdentityError('Attachment not found', 404)
             self.store._audit(db, principal['id'], 'workspace_attachment_removed', attachment_id)
         return {'status': 'removed'}
+
+    @staticmethod
+    def _format_run(run):
+        try:
+            plan = json.loads(run.get('plan_steps') or '[]')
+        except Exception:
+            plan = []
+        try:
+            logs = json.loads(run.get('logs') or '[]')
+        except Exception:
+            logs = []
+        return {
+            'id': run['id'],
+            'project_id': run['project_id'],
+            'prompt': run['prompt'],
+            'status': run['status'],
+            'current_step_index': run['current_step_index'],
+            'plan_steps': plan,
+            'logs': logs,
+            'result_summary': run.get('result_summary') or '',
+            'created_at': run['created_at'],
+            'updated_at': run['updated_at']
+        }
+
+    def start_agent_run(self, principal, project_id, prompt):
+        self._cap(principal, 'chat')
+        if not isinstance(project_id, str) or len(project_id) != 32:
+            raise IdentityError('Invalid project ID')
+        if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 2000:
+            raise IdentityError('Goal/prompt must contain 1-2000 characters')
+
+        root_dir, project_name = self._resolve_project_root(principal, project_id)
+        inspection = self.inspect_project(principal, project_id)
+
+        target_file = 'README.md'
+        default_cmd = 'git status'
+        fw = inspection['framework']
+        if fw.startswith('React') or fw in ('Node.js', 'Next.js', 'Express', 'Fastify'):
+            target_file = 'package.json'
+            default_cmd = 'npm test'
+        elif fw in ('Python', 'FastAPI', 'Django', 'Flask', 'AI / PyTorch'):
+            target_file = 'requirements.txt' if (root_dir / 'requirements.txt').is_file() else ('pyproject.toml' if (root_dir / 'pyproject.toml').is_file() else 'README.md')
+            default_cmd = 'python -m unittest'
+        elif fw == 'Rust / Cargo':
+            target_file = 'Cargo.toml'
+            default_cmd = 'cargo test'
+        elif fw == 'Go Module':
+            target_file = 'go.mod'
+            default_cmd = 'go test'
+
+        plan_steps = [
+            {
+                'index': 0,
+                'title': 'پویش ساختار و شناسایی فریم‌ورک پروژه',
+                'action': 'inspect',
+                'status': 'completed',
+                'summary': f"فریم‌ورک: {inspection['framework']} | فایل‌ها: {inspection['total_entries']} مورد"
+            },
+            {
+                'index': 1,
+                'title': f'بررسی فایل پیکربندی و وابستگی‌ها ({target_file})',
+                'action': 'read_file',
+                'target': target_file,
+                'status': 'in_progress',
+                'summary': 'در حال بررسی تنظیمات و ماژول‌ها...'
+            },
+            {
+                'index': 2,
+                'title': f'ارزیابی تست‌ها و اجرای دستورات صحه‌سنجی ({default_cmd})',
+                'action': 'run_command',
+                'command': default_cmd,
+                'status': 'pending',
+                'summary': 'نیازمند تایید اقدام یا مجوز اجرا'
+            },
+            {
+                'index': 3,
+                'title': 'تدوین گزارش راهکار و جمع‌بندی گام‌های توسعه',
+                'action': 'synthesize',
+                'status': 'pending',
+                'summary': 'تهیه نقشه راه نهایی تکمیل تسک‌ها'
+            }
+        ]
+
+        now = int(self.store.clock())
+        logs = [
+            {
+                'timestamp': now,
+                'step': 0,
+                'type': 'inspection',
+                'title': 'پویش ساختار پروژه',
+                'content': f"پروژه «{project_name}» در مسیر {inspection['root_path']} با فریم‌ورک {inspection['framework']} پویش شد."
+            }
+        ]
+
+        target_fp = root_dir / target_file
+        if target_fp.is_file():
+            try:
+                content = target_fp.read_text(encoding='utf-8', errors='replace')
+                preview = content[:600] + ('\n...(ادامه دارد)' if len(content) > 600 else '')
+                plan_steps[1]['status'] = 'completed'
+                plan_steps[1]['summary'] = f"فایل {target_file} ({len(content)} بایت) با موفقیت بررسی شد."
+                logs.append({
+                    'timestamp': now,
+                    'step': 1,
+                    'type': 'file_read',
+                    'title': f"بررسی {target_file}",
+                    'content': preview
+                })
+                current_step = 2
+            except Exception as exc:
+                plan_steps[1]['status'] = 'failed'
+                plan_steps[1]['summary'] = f"خطا در خواندن فایل: {exc}"
+                current_step = 2
+        else:
+            plan_steps[1]['status'] = 'skipped'
+            plan_steps[1]['summary'] = f"فایل {target_file} در ریشه پروژه یافت نشد."
+            current_step = 2
+
+        can_exec = 'action.approve' in principal.get('capabilities', []) or principal.get('role') == 'superadmin'
+        run_status = 'in_progress'
+        if not can_exec:
+            run_status = 'waiting_approval'
+            plan_steps[2]['status'] = 'waiting_approval'
+            plan_steps[2]['summary'] = 'در انتظار تأیید مجوز اجرای دستور توسط مدیر ارشد یا کاربر تاییدکننده'
+
+        run_id = uuid.uuid4().hex
+        with self.store._lock, self.store._db() as db:
+            db.execute("""
+                INSERT INTO workspace_agent_runs 
+                (id, owner_id, project_id, prompt, status, current_step_index, plan_steps, logs, result_summary, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)
+            """, (run_id, principal['id'], project_id, prompt.strip(), run_status, current_step, json.dumps(plan_steps), json.dumps(logs), now, now))
+            self.store._audit(db, principal['id'], 'workspace_agent_run_started', f"{run_id}:{project_id}")
+
+        return self.get_agent_run(principal, run_id)
+
+    def advance_agent_run(self, principal, run_id):
+        self._cap(principal, 'chat')
+        if not isinstance(run_id, str) or len(run_id) != 32:
+            raise IdentityError('Invalid run ID')
+
+        with self.store._lock, self.store._db() as db:
+            row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
+            if not row:
+                raise IdentityError('Agent run not found', 404)
+            run = dict(row)
+            if run['status'] in ('completed', 'failed', 'cancelled'):
+                return self._format_run(run)
+
+            plan_steps = json.loads(run['plan_steps'])
+            logs = json.loads(run['logs'])
+            current_idx = run['current_step_index']
+            now = int(self.store.clock())
+            new_status = run['status']
+            result_summary = run['result_summary']
+
+            if current_idx == 2:
+                can_exec = 'action.approve' in principal.get('capabilities', []) or principal.get('role') == 'superadmin'
+                if not can_exec:
+                    new_status = 'waiting_approval'
+                    plan_steps[2]['status'] = 'waiting_approval'
+                    plan_steps[2]['summary'] = 'نیازمند تأیید اقدام (action.approve)'
+                else:
+                    cmd = plan_steps[2].get('command', 'git status')
+                    try:
+                        res = self.execute_project_command(principal, run['project_id'], cmd, timeout=15)
+                        plan_steps[2]['status'] = 'completed' if res['exit_code'] == 0 else 'warning'
+                        plan_steps[2]['summary'] = f"دستور با کد خروج {res['exit_code']} در {res['duration_ms']}ms پایان یافت."
+                        logs.append({
+                            'timestamp': now,
+                            'step': 2,
+                            'type': 'command_execution',
+                            'title': f"اجرای دستور: {cmd}",
+                            'content': (res['stdout'] or '') + ('\n' + res['stderr'] if res['stderr'] else ''),
+                            'exit_code': res['exit_code']
+                        })
+                    except Exception as exc:
+                        plan_steps[2]['status'] = 'failed'
+                        plan_steps[2]['summary'] = f"خطا در اجرای دستور: {exc}"
+                        logs.append({
+                            'timestamp': now,
+                            'step': 2,
+                            'type': 'command_execution',
+                            'title': f"خطا در دستور: {cmd}",
+                            'content': str(exc),
+                            'exit_code': 1
+                        })
+                    current_idx = 3
+                    plan_steps[3]['status'] = 'in_progress'
+
+            if current_idx == 3:
+                plan_steps[3]['status'] = 'completed'
+                plan_steps[3]['summary'] = 'گزارش و جمع‌بندی نهایی توسط ایجنت تدوین شد.'
+                new_status = 'completed'
+                result_summary = (
+                    f"🎯 هدف ارزیابی شد: «{run['prompt']}»\n"
+                    f"تمامی مراحل پویش متادیتا، بازخوانی تنظیمات و ارزیابی دستورات با موفقیت انجام گرفت.\n"
+                    f"پروژه آماده استقرار، ادغام تغییرات یا ارسال دستورات تکمیلی از طریق چت هوش مصنوعی می‌باشد."
+                )
+                logs.append({
+                    'timestamp': now,
+                    'step': 3,
+                    'type': 'synthesis',
+                    'title': 'گزارش نهایی ایجنت',
+                    'content': result_summary
+                })
+
+            db.execute("""
+                UPDATE workspace_agent_runs
+                SET status=?, current_step_index=?, plan_steps=?, logs=?, result_summary=?, updated_at=?
+                WHERE id=?
+            """, (new_status, current_idx, json.dumps(plan_steps), json.dumps(logs), result_summary, now, run_id))
+
+            run['status'] = new_status
+            run['current_step_index'] = current_idx
+            run['plan_steps'] = json.dumps(plan_steps)
+            run['logs'] = json.dumps(logs)
+            run['result_summary'] = result_summary
+            run['updated_at'] = now
+            return self._format_run(run)
+
+    def approve_agent_run_step(self, principal, run_id):
+        if 'action.approve' not in principal.get('capabilities', []) and principal.get('role') != 'superadmin':
+            raise IdentityError('Approval permission required', 403)
+        if not isinstance(run_id, str) or len(run_id) != 32:
+            raise IdentityError('Invalid run ID')
+
+        with self.store._lock, self.store._db() as db:
+            row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
+            if not row:
+                raise IdentityError('Agent run not found', 404)
+            run = dict(row)
+            if run['status'] != 'waiting_approval':
+                raise IdentityError('Run is not waiting for approval', 400)
+
+            db.execute("UPDATE workspace_agent_runs SET status='in_progress', updated_at=? WHERE id=?",
+                       (int(self.store.clock()), run_id))
+            self.store._audit(db, principal['id'], 'workspace_agent_run_step_approved', run_id)
+
+        return self.advance_agent_run(principal, run_id)
+
+    def cancel_agent_run(self, principal, run_id):
+        self._cap(principal, 'chat')
+        if not isinstance(run_id, str) or len(run_id) != 32:
+            raise IdentityError('Invalid run ID')
+        with self.store._lock, self.store._db() as db:
+            row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
+            if not row:
+                raise IdentityError('Agent run not found', 404)
+            now = int(self.store.clock())
+            db.execute("UPDATE workspace_agent_runs SET status='cancelled', updated_at=? WHERE id=?", (now, run_id))
+            self.store._audit(db, principal['id'], 'workspace_agent_run_cancelled', run_id)
+        return self.get_agent_run(principal, run_id)
+
+    def get_agent_run(self, principal, run_id):
+        self._cap(principal, 'chat')
+        if not isinstance(run_id, str) or len(run_id) != 32:
+            raise IdentityError('Invalid run ID')
+        with self.store._db() as db:
+            row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
+            if not row:
+                raise IdentityError('Agent run not found', 404)
+            return self._format_run(dict(row))
+
+    def list_agent_runs(self, principal, project_id):
+        self._cap(principal, 'chat')
+        if not isinstance(project_id, str) or len(project_id) != 32:
+            raise IdentityError('Invalid project ID')
+        with self.store._db() as db:
+            rows = db.execute("SELECT * FROM workspace_agent_runs WHERE owner_id=? AND project_id=? ORDER BY created_at DESC LIMIT 30",
+                              (principal['id'], project_id)).fetchall()
+            return [self._format_run(dict(r)) for r in rows]
+

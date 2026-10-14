@@ -1,4 +1,5 @@
 import base64
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -135,3 +136,46 @@ class WorkspaceTests(unittest.TestCase):
         with self.assertRaises(IdentityError) as ctx:
             self.workspace.execute_project_command(self.owner, admin_proj['id'], 'format c: /q')
         self.assertEqual(ctx.exception.status, 400)
+
+    def test_workspace_agent_run_lifecycle_and_advance(self):
+        proj_dir = Path(self.temp.name) / 'agentic_run_project'
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        (proj_dir / 'package.json').write_text(json.dumps({'name': 'test-run', 'dependencies': {'react': '^19.0.0'}}), encoding='utf-8')
+        (proj_dir / 'TODO.md').write_text('- [ ] Complete authentication flow\n- [ ] Fix navbar bug\n', encoding='utf-8')
+
+        proj = self.workspace.create_project(self.member, 'Agentic Run Project', str(proj_dir))
+
+        # Member starts agent run
+        run = self.workspace.start_agent_run(self.member, proj['id'], 'بررسی و حل باگ‌های پروژه')
+        self.assertEqual(run['project_id'], proj['id'])
+        self.assertEqual(run['status'], 'waiting_approval')  # member lacks action.approve
+        self.assertEqual(len(run['plan_steps']), 4)
+        self.assertEqual(run['plan_steps'][0]['status'], 'completed')  # inspection done
+        self.assertEqual(run['plan_steps'][1]['status'], 'completed')  # package.json read
+        self.assertIn('React', run['plan_steps'][0]['summary'])
+
+        # Member cannot approve without action.approve
+        with self.assertRaises(IdentityError) as ctx:
+            self.workspace.approve_agent_run_step(self.member, run['id'])
+        self.assertEqual(ctx.exception.status, 403)
+
+        # Cancel run
+        cancelled = self.workspace.cancel_agent_run(self.member, run['id'])
+        self.assertEqual(cancelled['status'], 'cancelled')
+
+        # Superadmin starts run and advances to completion
+        admin_proj = self.workspace.create_project(self.owner, 'Admin Agentic Project', str(proj_dir))
+        admin_run = self.workspace.start_agent_run(self.owner, admin_proj['id'], 'بررسی پکیج‌ها و اجرای دستور')
+        self.assertIn(admin_run['status'], ('in_progress', 'completed'))
+
+        # Advance to completion
+        completed_run = self.workspace.advance_agent_run(self.owner, admin_run['id'])
+        self.assertEqual(completed_run['status'], 'completed')
+        self.assertTrue(len(completed_run['result_summary']) > 0)
+        self.assertEqual(completed_run['plan_steps'][3]['status'], 'completed')
+
+        # List runs
+        runs_list = self.workspace.list_agent_runs(self.owner, admin_proj['id'])
+        self.assertEqual(len(runs_list), 1)
+        self.assertEqual(runs_list[0]['id'], admin_run['id'])
+

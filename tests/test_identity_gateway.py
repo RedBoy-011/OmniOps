@@ -542,6 +542,50 @@ class WorkerEndpointTests(unittest.TestCase):
             self.assertEqual(cmd_res["exit_code"], 0)
             self.assertIn("42", cmd_res["stdout"])
 
+    def test_workspace_agent_runs_api_endpoints(self):
+        admin = self.store.login("root-admin", "a very strong admin password")["token"]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            (tmp_path / "package.json").write_text('{"name": "test-agent-run", "dependencies": {"react": "19.0.0"}}', encoding="utf-8")
+            (tmp_path / "TODO.md").write_text("- [ ] Task 1: Complete testing\n", encoding="utf-8")
+
+            # Create project
+            code, proj_res = self.call("POST", "/api/web/workspace/projects", {
+                "name": "Integration Run Project",
+                "root_path": str(tmp_path)
+            }, admin)
+            self.assertEqual(code, 201)
+            p_id = proj_res["id"]
+
+            # Start agent run
+            code, start_res = self.call("POST", "/api/web/workspace/task/run", {
+                "project_id": p_id,
+                "prompt": "بررسی خودکار و تست پروژه"
+            }, admin)
+            self.assertEqual(code, 201)
+            run = start_res["run"]
+            run_id = run["id"]
+            self.assertEqual(run["project_id"], p_id)
+            self.assertIn(run["status"], ("in_progress", "completed"))
+
+            # List runs
+            code, list_res = self.call("GET", f"/api/web/workspace/task/runs?project_id={p_id}", None, admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(len(list_res["runs"]), 1)
+
+            # Get single run
+            code, get_res = self.call("GET", f"/api/web/workspace/task/run?run_id={run_id}", None, admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(get_res["run"]["id"], run_id)
+
+            # Advance run
+            code, adv_res = self.call("POST", "/api/web/workspace/task/run/advance", {
+                "run_id": run_id
+            }, admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(adv_res["run"]["status"], "completed")
+            self.assertTrue(len(adv_res["run"]["result_summary"]) > 0)
+
 
 if __name__ == "__main__":
     unittest.main()

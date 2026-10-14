@@ -4995,3 +4995,356 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
   overflow-y: auto;
 }
 
+/* Autonomous Agent Task Loop Styles */
+.agentic-autonomous-runner-card {
+  background: rgba(30, 41, 59, 0.45);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: relative;
+  overflow: hidden;
+}
+
+.agentic-autonomous-runner-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, #6366f1, #a855f7, #3b82f6);
+}
+
+.runner-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.runner-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.runner-pulse-icon {
+  font-size: 26px;
+  background: rgba(99, 102, 241, 0.15);
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.runner-title strong {
+  display: block;
+  font-size: 15px;
+  color: #f1f5f9;
+}
+
+.runner-title small {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.run-status-pill {
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-weight: 600;
+}
+
+.run-status-pill.in_progress {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.run-status-pill.waiting_approval {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.run-status-pill.completed {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.run-status-pill.cancelled {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.agent-task-input-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.prompt-input-row {
+  display: flex;
+  gap: 10px;
+}
+
+.prompt-input-row input {
+  flex: 1;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 10px 14px;
+  color: #f8fafc;
+  font-size: 13px;
+  outline: none;
+}
+
+.prompt-input-row input:focus {
+  border-color: #818cf8;
+}
+
+.quick-suggestions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.quick-suggestions-row button {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 3px 10px;
+  color: #cbd5e1;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.quick-suggestions-row button:hover {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: #818cf8;
+  color: #e2e8f0;
+}
+
+.past-runs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.07);
+}
+
+.past-runs-row small {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.past-run-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 4px 10px;
+  color: #cbd5e1;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.past-run-chip.active {
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.15);
+  color: #fff;
+}
+
+.agent-active-run-view {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.run-goal-banner {
+  font-size: 13px;
+  color: #e2e8f0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.run-steps-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.timeline-step-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 10px 14px;
+  transition: all 0.2s;
+}
+
+.timeline-step-card.completed {
+  border-left: 3px solid #10b981;
+}
+
+.timeline-step-card.in_progress {
+  border-left: 3px solid #3b82f6;
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.timeline-step-card.waiting_approval {
+  border-left: 3px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.step-badge {
+  font-size: 16px;
+  margin-top: 2px;
+}
+
+.step-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.step-info strong {
+  font-size: 13px;
+  color: #f1f5f9;
+}
+
+.step-info p {
+  margin: 0;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.step-info code {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #38bdf8;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 3px 8px;
+  border-radius: 6px;
+  display: inline-block;
+  max-width: fit-content;
+}
+
+.step-status-tag {
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.run-controls-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+}
+
+.step-approval-alert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #fef3c7;
+}
+
+.cancel-run-btn {
+  margin-right: auto;
+  color: #f87171 !important;
+}
+
+.run-result-summary-box {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.summary-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #34d399;
+  margin-bottom: 6px;
+}
+
+.run-result-summary-box pre {
+  margin: 0;
+  font-size: 12px;
+  color: #e2e8f0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  line-height: 1.6;
+}
+
+.run-logs-collapsible {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.run-logs-collapsible summary {
+  cursor: pointer;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.run-logs-content {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.run-log-item {
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.run-log-item .log-title {
+  font-size: 11px;
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
+.run-log-item pre {
+  margin: 4px 0 0 0;
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: pre-wrap;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+

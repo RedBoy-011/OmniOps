@@ -268,6 +268,38 @@ export type CommandExecutionResult = {
   duration_ms: number;
 };
 
+export type AgentPlanStep = {
+  index: number;
+  title: string;
+  action: string;
+  status: "completed" | "in_progress" | "pending" | "waiting_approval" | "failed" | "skipped" | "warning";
+  summary: string;
+  command?: string;
+  target?: string;
+};
+
+export type AgentRunLog = {
+  timestamp: number;
+  step: number;
+  type: string;
+  title: string;
+  content: string;
+  exit_code?: number;
+};
+
+export type AgentRun = {
+  id: string;
+  project_id: string;
+  prompt: string;
+  status: "planning" | "in_progress" | "waiting_approval" | "completed" | "failed" | "cancelled";
+  current_step_index: number;
+  plan_steps: AgentPlanStep[];
+  logs: AgentRunLog[];
+  result_summary: string;
+  created_at: number;
+  updated_at: number;
+};
+
 export const api = {
   login: (username: string, password: string) => request<LoginResult>("/api/auth/login", "POST", { username, password }),
   register: (username: string, password: string, mobile: string) => request<{ status: string; message: string }>("/api/auth/register", "POST", { username, password, mobile }),
@@ -462,4 +494,16 @@ export const api = {
     request<{ status: string; project_id: string; path: string; bytes: number }>("/api/web/workspace/project/file", "POST", { project_id, path, content }),
   executeProjectCommand: (project_id: string, command: string, timeout = 15) =>
     request<CommandExecutionResult>("/api/web/workspace/project/command", "POST", { project_id, command, timeout }),
+  startAgentRun: (project_id: string, prompt: string) =>
+    request<{ run: AgentRun }>("/api/web/workspace/task/run", "POST", { project_id, prompt }),
+  advanceAgentRun: (run_id: string) =>
+    request<{ run: AgentRun }>("/api/web/workspace/task/run/advance", "POST", { run_id }),
+  approveAgentRunStep: (run_id: string) =>
+    request<{ run: AgentRun }>("/api/web/workspace/task/run/approve", "POST", { run_id }),
+  cancelAgentRun: (run_id: string) =>
+    request<{ run: AgentRun }>("/api/web/workspace/task/run/cancel", "POST", { run_id }),
+  getAgentRun: (run_id: string) =>
+    request<{ run: AgentRun }>(`/api/web/workspace/task/run?run_id=${encodeURIComponent(run_id)}`),
+  listAgentRuns: (project_id: string) =>
+    request<{ runs: AgentRun[] }>(`/api/web/workspace/task/runs?project_id=${encodeURIComponent(project_id)}`),
 };

@@ -1,5 +1,12 @@
 import { useState, useEffect } from "react";
-import { api, type WorkspaceProject, type ProjectInspection, type ProjectFileEntry, type CommandExecutionResult } from "../api";
+import {
+  api,
+  type WorkspaceProject,
+  type ProjectInspection,
+  type ProjectFileEntry,
+  type CommandExecutionResult,
+  type AgentRun,
+} from "../api";
 
 interface AgenticWorkspaceCardProps {
   onLoadContextToChat?: (contextPrompt: string) => void;
@@ -32,6 +39,13 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
   const [commandRunning, setCommandRunning] = useState(false);
   const [lastCommandResult, setLastCommandResult] = useState<CommandExecutionResult | null>(null);
   const [commandApprovalRequired, setCommandApprovalRequired] = useState(false);
+
+  // Agent Runs state
+  const [agentRuns, setAgentRuns] = useState<AgentRun[]>([]);
+  const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
+  const [agentTaskPrompt, setAgentTaskPrompt] = useState("");
+  const [startingRun, setStartingRun] = useState(false);
+  const [advancingRun, setAdvancingRun] = useState(false);
 
   // Load projects list
   async function loadProjects() {
@@ -69,7 +83,92 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
     }
 
     void handleInspectProject(selectedProjectId);
+    void loadAgentRuns(selectedProjectId);
   }, [selectedProjectId, projects]);
+
+  async function loadAgentRuns(projectId: string) {
+    if (!projectId) return;
+    try {
+      const res = await api.listAgentRuns(projectId);
+      setAgentRuns(res.runs || []);
+      if (res.runs?.length) {
+        const ongoing = res.runs.find(
+          (r) => r.status === "in_progress" || r.status === "waiting_approval" || r.status === "planning"
+        );
+        setActiveRun(ongoing || res.runs[0]);
+      } else {
+        setActiveRun(null);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleStartAgentRun(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    if (!selectedProjectId || !agentTaskPrompt.trim()) return;
+    setStartingRun(true);
+    setError("");
+    setSuccessMsg("");
+    try {
+      const res = await api.startAgentRun(selectedProjectId, agentTaskPrompt.trim());
+      setActiveRun(res.run);
+      setAgentTaskPrompt("");
+      setSuccessMsg("چرخه اجرای خودکار وظیفه توسط ایجنت با موفقیت آغاز شد.");
+      await loadAgentRuns(selectedProjectId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "آغاز چرخه ایجنت ناموفق بود.");
+    } finally {
+      setStartingRun(false);
+    }
+  }
+
+  async function handleAdvanceRun() {
+    if (!activeRun) return;
+    setAdvancingRun(true);
+    setError("");
+    try {
+      const res = await api.advanceAgentRun(activeRun.id);
+      setActiveRun(res.run);
+      await loadAgentRuns(selectedProjectId);
+      if (res.run.status === "completed") {
+        const filesRes = await api.listProjectFiles(selectedProjectId);
+        setFiles(filesRes.entries || []);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "پیشبرد گام با خطا مواجه شد.");
+    } finally {
+      setAdvancingRun(false);
+    }
+  }
+
+  async function handleApproveStep() {
+    if (!activeRun) return;
+    setAdvancingRun(true);
+    setError("");
+    try {
+      const res = await api.approveAgentRunStep(activeRun.id);
+      setActiveRun(res.run);
+      await loadAgentRuns(selectedProjectId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "تأیید اقدام با خطا مواجه شد.");
+    } finally {
+      setAdvancingRun(false);
+    }
+  }
+
+  async function handleCancelRun() {
+    if (!activeRun) return;
+    setError("");
+    try {
+      const res = await api.cancelAgentRun(activeRun.id);
+      setActiveRun(res.run);
+      await loadAgentRuns(selectedProjectId);
+      setSuccessMsg("اجرای تسک ایجنت متوقف شد.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "لغو تسک ناموفق بود.");
+    }
+  }
 
   async function handleInspectProject(projectId: string) {
     setInspecting(true);
@@ -317,6 +416,174 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
               <pre>{inspection.readme_preview}</pre>
             </div>
           )}
+
+          {/* بخش چرخه اجرای وظیفه خودکار هوش مصنوعی (Antigravity Autonomous Agent Task Loop) */}
+          <div className="agentic-autonomous-runner-card">
+            <div className="runner-header-row">
+              <div className="runner-title">
+                <span className="runner-pulse-icon">🤖</span>
+                <div>
+                  <strong>چرخه خودکار وظایف ایجنت (Autonomous Agent Task Loop)</strong>
+                  <small>تعریف هدف یا وظیفه روی پروژه و واگذاری گام‌به‌گام به هوش مصنوعی با تأیید انسانی</small>
+                </div>
+              </div>
+              {activeRun && (
+                <div className={`run-status-pill ${activeRun.status}`}>
+                  وضعیت: {
+                    activeRun.status === "in_progress" ? "⏳ در حال پردازش گام‌ها" :
+                    activeRun.status === "waiting_approval" ? "⚠️ نیازمند تأیید اقدام" :
+                    activeRun.status === "completed" ? "✅ پایان یافته" :
+                    activeRun.status === "cancelled" ? "⛔ لغوشده" : activeRun.status
+                  }
+                </div>
+              )}
+            </div>
+
+            {/* فرم ورود تسک یا هدف */}
+            <form onSubmit={handleStartAgentRun} className="agent-task-input-box">
+              <div className="prompt-input-row">
+                <input
+                  type="text"
+                  placeholder="هدف یا وظیفه مورد نظر روی پروژه... (مثلاً: بررسی کدهای پروژه و حل تسک‌های مشخص‌شده در TODO)"
+                  value={agentTaskPrompt}
+                  onChange={(e) => setAgentTaskPrompt(e.target.value)}
+                  disabled={startingRun}
+                />
+                <button
+                  type="submit"
+                  className="action-button primary-accent"
+                  disabled={startingRun || !agentTaskPrompt.trim()}
+                >
+                  {startingRun ? "⏳ در حال آغاز..." : "🚀 اجرای خودکار وظیفه"}
+                </button>
+              </div>
+              <div className="quick-suggestions-row">
+                <span>پیشنهادات سریع:</span>
+                <button type="button" onClick={() => setAgentTaskPrompt("بررسی سلامت پروژه و اجرای تست‌ها")}>
+                  ⚡ ارزیابی و تست پروژه
+                </button>
+                <button type="button" onClick={() => setAgentTaskPrompt("تحلیل تسک‌های ناتمام TODO و ارائه نقشه راه تکمیل")}>
+                  📝 سازماندهی تسک‌های TODO
+                </button>
+                <button type="button" onClick={() => setAgentTaskPrompt("بررسی معماری و فایل‌های کانفیگ")}>
+                  🔍 تحلیل پیکربندی و ساختار
+                </button>
+              </div>
+            </form>
+
+            {/* تاریخچه اجراهای گذشته این پروژه */}
+            {agentRuns.length > 1 && (
+              <div className="past-runs-row">
+                <small>تاریخچه اجراهای ایجنت روی این پروژه:</small>
+                {agentRuns.map((r) => (
+                  <button
+                    type="button"
+                    key={r.id}
+                    className={`past-run-chip ${activeRun?.id === r.id ? "active" : ""}`}
+                    onClick={() => setActiveRun(r)}
+                  >
+                    <span>{r.status === "completed" ? "✅" : r.status === "in_progress" ? "⏳" : "⚪"}</span>
+                    <span>{r.prompt.slice(0, 24)}...</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* تایم‌لاین گام‌های ایجنت */}
+            {activeRun && (
+              <div className="agent-active-run-view">
+                <div className="run-goal-banner">
+                  <span>🎯 هدف فعال:</span> <strong>«{activeRun.prompt}»</strong>
+                </div>
+
+                <div className="run-steps-timeline">
+                  {activeRun.plan_steps.map((step, idx) => (
+                    <div key={idx} className={`timeline-step-card ${step.status}`}>
+                      <div className="step-badge">
+                        {step.status === "completed" ? "✅" :
+                         step.status === "in_progress" ? "⏳" :
+                         step.status === "waiting_approval" ? "⚠️" :
+                         step.status === "warning" ? "⚠️" :
+                         step.status === "failed" ? "❌" : "⚪"}
+                      </div>
+                      <div className="step-info">
+                        <strong>گام {step.index + 1}: {step.title}</strong>
+                        <p>{step.summary}</p>
+                        {step.command && <code dir="ltr">$ {step.command}</code>}
+                      </div>
+                      <div className="step-status-tag">
+                        {step.status === "completed" ? "تکمیل شده" :
+                         step.status === "in_progress" ? "در حال اجرا" :
+                         step.status === "waiting_approval" ? "در انتظار تایید" :
+                         step.status === "pending" ? "در نوبت" : step.status}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* اقدامات هدایت گام‌ها */}
+                <div className="run-controls-row">
+                  {activeRun.status === "waiting_approval" && (
+                    <div className="step-approval-alert">
+                      <span>⚠️ گام بعدی نیازمند تأیید مجوز اجرای دستور در پروژه است:</span>
+                      <button
+                        type="button"
+                        className="action-button confirm-btn"
+                        onClick={() => void handleApproveStep()}
+                        disabled={advancingRun}
+                      >
+                        {advancingRun ? "⏳ در حال اجرا..." : "✅ تأیید و ادامه اجرا"}
+                      </button>
+                    </div>
+                  )}
+
+                  {activeRun.status === "in_progress" && (
+                    <button
+                      type="button"
+                      className="action-button"
+                      onClick={() => void handleAdvanceRun()}
+                      disabled={advancingRun}
+                    >
+                      {advancingRun ? "⏳ در حال اجرا..." : "▶️ گام بعد"}
+                    </button>
+                  )}
+
+                  {activeRun.status !== "completed" && activeRun.status !== "cancelled" && (
+                    <button
+                      type="button"
+                      className="quiet-button cancel-run-btn"
+                      onClick={() => void handleCancelRun()}
+                    >
+                      🛑 توقف / لغو تسک
+                    </button>
+                  )}
+                </div>
+
+                {/* خلاصه نتیجه نهایی */}
+                {activeRun.result_summary && (
+                  <div className="run-result-summary-box">
+                    <div className="summary-title">🏁 گزارش دستاورد ایجنت:</div>
+                    <pre>{activeRun.result_summary}</pre>
+                  </div>
+                )}
+
+                {/* لاگ‌های سیستمی گام‌ها */}
+                {activeRun.logs.length > 0 && (
+                  <details className="run-logs-collapsible">
+                    <summary>📜 مشاهده لاگ‌ها و جزئیات تله‌متری ایجنت ({activeRun.logs.length} رویداد)</summary>
+                    <div className="run-logs-content">
+                      {activeRun.logs.map((log, lIdx) => (
+                        <div key={lIdx} className="run-log-item">
+                          <span className="log-title">🔹 {log.title}</span>
+                          {log.content && <pre dir="ltr">{log.content}</pre>}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* کاوشگر سریع فایل‌ها */}
           <div className="agentic-files-explorer">

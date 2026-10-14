@@ -477,6 +477,82 @@ async fn cancel_agent_task(
 }
 
 #[tauri::command]
+async fn start_agent_run(
+    project_id: String,
+    prompt: String,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    profile_call(
+        state,
+        "chat",
+        reqwest::Method::POST,
+        "/api/agent/workspace/task/run",
+        Some(serde_json::json!({"project_id": project_id, "prompt": prompt})),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn advance_agent_run(
+    run_id: String,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    profile_call(
+        state,
+        "chat",
+        reqwest::Method::POST,
+        "/api/agent/workspace/task/run/advance",
+        Some(serde_json::json!({"run_id": run_id})),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn approve_agent_run_step(
+    run_id: String,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    profile_call(
+        state,
+        "action.approve",
+        reqwest::Method::POST,
+        "/api/agent/workspace/task/run/approve",
+        Some(serde_json::json!({"run_id": run_id})),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn cancel_agent_run(
+    run_id: String,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    profile_call(
+        state,
+        "chat",
+        reqwest::Method::POST,
+        "/api/agent/workspace/task/run/cancel",
+        Some(serde_json::json!({"run_id": run_id})),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn list_agent_runs(
+    project_id: String,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    profile_call(
+        state,
+        "chat",
+        reqwest::Method::GET,
+        &format!("/api/agent/workspace/task/runs?project_id={}", project_id),
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
 async fn list_agent_models(state: State<'_, SharedState>) -> Result<ModelList, String> {
     let (origin, token) = {
         let guard = state.session.lock().map_err(|_| "نشست در دسترس نیست")?;
@@ -670,6 +746,11 @@ pub fn run() {
             list_agent_tasks,
             create_agent_task,
             cancel_agent_task,
+            start_agent_run,
+            advance_agent_run,
+            approve_agent_run_step,
+            cancel_agent_run,
+            list_agent_runs,
             list_agent_models,
             disconnect_agent,
             hide_agent,
