@@ -7905,3 +7905,373 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
   border-radius: 14px;
   margin: 12px 0;
 }
+
+/* ============================================================
+   Worker Disk Metrics & Root-Cause Diagnosis (مرحله ۲)
+   ============================================================ */
+
+.disk-meter-enhanced {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.disk-stats-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.disk-stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #cbd5e1;
+  font-family: inherit;
+}
+
+.disk-stat-chip b {
+  font-family: "Courier New", monospace, inherit;
+  font-weight: 700;
+  font-size: 11.5px;
+}
+
+.disk-stat-chip.total {
+  border-color: rgba(148, 163, 184, 0.25);
+  color: #cbd5e1;
+}
+.disk-stat-chip.total b {
+  color: #f1f5f9;
+}
+
+.disk-stat-chip.used {
+  border-color: rgba(56, 189, 248, 0.3);
+  color: #bae6fd;
+}
+.disk-stat-chip.used b {
+  color: #38bdf8;
+}
+
+.disk-stat-chip.free {
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #a7f3d0;
+}
+.disk-stat-chip.free b {
+  color: #34d399;
+}
+
+/* Worker Disk Diagnosis Card */
+.worker-disk-diagnosis-card {
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(94, 234, 212, 0.2);
+  border-radius: 14px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.diagnosis-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.diagnosis-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.diagnosis-title-icon {
+  font-size: 16px;
+}
+
+.diagnosis-title-group strong {
+  font-size: 13.5px;
+  color: #f1f5f9;
+  letter-spacing: -0.2px;
+}
+
+.wasted-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(244, 63, 94, 0.18);
+  border: 1px solid rgba(244, 63, 94, 0.4);
+  color: #fda4af;
+  font-weight: 600;
+}
+
+.clean-disk-btn {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(94, 234, 212, 0.15));
+  border: 1px solid rgba(94, 234, 212, 0.4);
+  color: #5eead4;
+  padding: 6px 14px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.clean-disk-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.35), rgba(94, 234, 212, 0.3));
+  border-color: #5eead4;
+  color: #fff;
+  box-shadow: 0 0 12px rgba(94, 234, 212, 0.3);
+  transform: translateY(-1px);
+}
+
+.clean-disk-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.clean-feedback-banner {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #a7f3d0;
+  line-height: 1.5;
+}
+
+/* 3 Categories Grid */
+.diagnosis-categories-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.diagnosis-cat-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.diagnosis-cat-card:hover {
+  transform: translateY(-1px);
+}
+
+.diagnosis-cat-card.incomplete {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.08) 0%, rgba(30, 41, 59, 0.45) 100%);
+}
+.diagnosis-cat-card.incomplete .cat-name {
+  color: #fcd34d;
+}
+.diagnosis-cat-card.incomplete .cat-badge {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fef3c7;
+}
+
+.diagnosis-cat-card.failed {
+  border-color: rgba(244, 63, 94, 0.3);
+  background: linear-gradient(180deg, rgba(244, 63, 94, 0.08) 0%, rgba(30, 41, 59, 0.45) 100%);
+}
+.diagnosis-cat-card.failed .cat-name {
+  color: #fda4af;
+}
+.diagnosis-cat-card.failed .cat-badge {
+  background: rgba(244, 63, 94, 0.2);
+  color: #ffe4e6;
+}
+
+.diagnosis-cat-card.temp {
+  border-color: rgba(129, 140, 248, 0.3);
+  background: linear-gradient(180deg, rgba(129, 140, 248, 0.08) 0%, rgba(30, 41, 59, 0.45) 100%);
+}
+.diagnosis-cat-card.temp .cat-name {
+  color: #c7d2fe;
+}
+.diagnosis-cat-card.temp .cat-badge {
+  background: rgba(129, 140, 248, 0.2);
+  color: #e0e7ff;
+}
+
+.cat-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.cat-icon {
+  font-size: 14px;
+}
+
+.cat-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  flex: 1;
+}
+
+.cat-badge {
+  font-size: 10.5px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.cat-volume {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f8fafc;
+  letter-spacing: -0.3px;
+}
+
+.cat-explanation {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.45;
+}
+
+.cat-items-list {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  padding-top: 4px;
+}
+
+.cat-items-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 10px;
+  color: #cbd5e1;
+}
+
+.cat-items-list .item-name {
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cat-items-list .item-size {
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+/* Analytical Insights Box */
+.diagnosis-insights-box {
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 9px;
+  padding: 8px 12px;
+  font-size: 11.5px;
+  color: #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.diagnosis-insights-box strong {
+  color: #5eead4;
+  font-size: 12px;
+}
+
+.diagnosis-insights-box ul {
+  margin: 0;
+  padding-right: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.diagnosis-insights-box li {
+  line-height: 1.5;
+}
+
+/* Light Theme Overrides */
+[data-theme="light"] .worker-disk-diagnosis-card {
+  background: rgba(255, 255, 255, 0.88);
+  border-color: rgba(16, 185, 129, 0.3);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .diagnosis-title-group strong {
+  color: #0f172a;
+}
+
+[data-theme="light"] .disk-stat-chip {
+  background: rgba(241, 245, 249, 0.85);
+  border-color: rgba(203, 213, 225, 0.7);
+  color: #334155;
+}
+
+[data-theme="light"] .disk-stat-chip.total b {
+  color: #0f172a;
+}
+
+[data-theme="light"] .disk-stat-chip.used b {
+  color: #0284c7;
+}
+
+[data-theme="light"] .disk-stat-chip.free b {
+  color: #059669;
+}
+
+[data-theme="light"] .diagnosis-cat-card {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+[data-theme="light"] .cat-volume {
+  color: #0f172a;
+}
+
+[data-theme="light"] .cat-explanation {
+  color: #64748b;
+}
+
+[data-theme="light"] .cat-items-list {
+  border-top-color: #e2e8f0;
+}
+
+[data-theme="light"] .cat-items-list .item-name {
+  color: #64748b;
+}
+
+[data-theme="light"] .cat-items-list .item-size {
+  color: #0f172a;
+}
+
+[data-theme="light"] .diagnosis-insights-box {
+  background: rgba(248, 250, 252, 0.8);
+  border-color: #e2e8f0;
+  color: #334155;
+}
+
+[data-theme="light"] .diagnosis-insights-box strong {
+  color: #0d9488;
+}
+

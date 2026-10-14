@@ -185,3 +185,75 @@ class NodeRegistryTests(unittest.TestCase):
             results = list(pool.map(redeem, (self.nodes, other)))
         self.assertEqual(sum(result is not None for result in results), 1)
         self.assertEqual(len(self.nodes.list_nodes(self.admin)), 1)
+
+    def test_worker_disk_metrics_breakdown_and_cleanup(self):
+        grant = self.nodes.issue(self.admin, 'worker')['grant']
+        worker = self.nodes.enroll(grant, 'worker-disk-test')
+
+        # Negative disk value should fail
+        with self.assertRaises(IdentityError):
+            self.nodes.heartbeat(worker['id'], worker['credential'], {'disk_total_gb': -10})
+
+        # Non-dict disk_breakdown should fail
+        with self.assertRaises(IdentityError):
+            self.nodes.heartbeat(worker['id'], worker['credential'], {'disk_breakdown': "bad"})
+
+        # Valid metrics with total, used, free and breakdown
+        sample_metrics = {
+            'cpu_percent': 24.5,
+            'ram_percent': 60.2,
+            'disk_percent': 78.4,
+            'disk_total_gb': 500.0,
+            'disk_used_gb': 392.0,
+            'disk_free_gb': 108.0,
+            'disk_breakdown': {
+                'total_wasted_bytes': 15000000000,
+                'total_wasted_gb': 13.97,
+                'incomplete_models': {
+                    'count': 2,
+                    'size_bytes': 8000000000,
+                    'size_gb': 7.45,
+                    'size_mb': 7629.39,
+                    'items': [{'name': 'sha256-part1', 'path': '/tmp/part1', 'size_bytes': 4000000000, 'size_mb': 3814.7, 'size_gb': 3.72, 'reason': 'ناقص'}]
+                },
+                'failed_models': {
+                    'count': 1,
+                    'size_bytes': 6000000000,
+                    'size_gb': 5.59,
+                    'size_mb': 5722.05,
+                    'items': [{'name': 'deepseek-r1:14b', 'path': 'job:1', 'size_bytes': 6000000000, 'size_mb': 5722.05, 'size_gb': 5.59, 'reason': 'خطا'}]
+                },
+                'temp_files': {
+                    'count': 5,
+                    'size_bytes': 1000000000,
+                    'size_gb': 0.93,
+                    'size_mb': 953.67,
+                    'items': [{'name': '.node-temp.tmp', 'path': '/tmp/node', 'size_bytes': 200000000, 'size_mb': 190.73, 'size_gb': 0.19, 'reason': 'موقت'}]
+                },
+                'diagnostics': ['مدل‌ها و لایه‌های ناقص: ۲ مورد']
+            }
+        }
+        res = self.nodes.heartbeat(worker['id'], worker['credential'], sample_metrics)
+        self.assertEqual(res['status'], 'ok')
+
+        # Verify list_nodes returns metrics with total, used, free and breakdown
+        listed = self.nodes.list_nodes(self.admin)
+        self.assertEqual(len(listed), 1)
+        w_node = listed[0]
+        self.assertEqual(w_node['metrics']['disk_total_gb'], 500.0)
+        self.assertEqual(w_node['metrics']['disk_used_gb'], 392.0)
+        self.assertEqual(w_node['metrics']['disk_free_gb'], 108.0)
+        self.assertEqual(w_node['metrics']['disk_breakdown']['incomplete_models']['count'], 2)
+        self.assertEqual(w_node['metrics']['disk_breakdown']['failed_models']['count'], 1)
+        self.assertEqual(w_node['metrics']['disk_breakdown']['temp_files']['count'], 5)
+
+        # Diagnostics retrieval
+        diag = self.nodes.get_node_disk_diagnostics(self.admin, worker['id'])
+        self.assertIn('incomplete_models', diag)
+        self.assertIn('failed_models', diag)
+        self.assertIn('temp_files', diag)
+
+        # Cleanup execution
+        clean_res = self.nodes.clean_node_disk(self.admin, worker['id'])
+        self.assertEqual(clean_res['status'], 'ok')
+        self.assertIn('freed_gb', clean_res)

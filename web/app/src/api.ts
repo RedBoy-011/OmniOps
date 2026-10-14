@@ -58,11 +58,48 @@ export type PendingUser = { id: string; username: string; mobile: string; create
 export type LoginResult = { token: string; user: Profile; pending_count: number };
 export type LocalModel = { id: string; size_bytes: number | null };
 export type NodeStatus = { id: string; kind: "master" | "worker"; status: "up" | "no_models" | "unreachable"; checked_at: number; latency_ms?: number | null; models?: LocalModel[] };
+export type DiskItem = {
+  name: string;
+  path: string;
+  size_bytes: number;
+  size_mb: number;
+  size_gb: number;
+  reason?: string;
+};
+
+export type DiskCategory = {
+  count: number;
+  size_bytes: number;
+  size_gb: number;
+  size_mb: number;
+  items?: DiskItem[];
+};
+
+export type DiskBreakdown = {
+  total_wasted_bytes: number;
+  total_wasted_gb: number;
+  freed_bytes?: number;
+  freed_gb?: number;
+  incomplete_models: DiskCategory;
+  failed_models: DiskCategory;
+  temp_files: DiskCategory;
+  diagnostics: string[];
+};
+
 export type ManagedNode = {
   id: string; role: "worker" | "edge"; name: string; created_at: number;
   last_seen: number | null; revoked_at: number | null; credential_expires_at: number;
-  metrics: { version?: string; cpu_percent?: number; ram_percent?: number;
-             disk_percent?: number; models?: string[] } | null;
+  metrics: {
+    version?: string;
+    cpu_percent?: number;
+    ram_percent?: number;
+    disk_percent?: number;
+    disk_total_gb?: number;
+    disk_used_gb?: number;
+    disk_free_gb?: number;
+    disk_breakdown?: DiskBreakdown;
+    models?: string[];
+  } | null;
 };
 export type ModelPull = { id: string; node_id: string; model: string; action: "pull" | "delete";
   status: "queued" | "running" | "completed" | "failed"; progress: number | null;
@@ -662,6 +699,14 @@ export const api = {
   createModelPull: (node_id: string, model: string) => request<{ id: string; status: string }>("/api/admin/nodes/model-pulls", "POST", { node_id, model }),
   cancelModelPull: (id: string) => request<{ status: string; id: string }>("/api/admin/nodes/model-pulls/cancel", "POST", { id }),
   deleteModel: (node_id: string, model: string) => request<{ id: string; status: string }>("/api/admin/nodes/model-delete", "POST", { node_id, model }),
+  cleanNodeDisk: (node_id: string, targets?: string[]) =>
+    request<{ status: string; node_id: string; freed_bytes: number; freed_gb: number; message: string }>(
+      "/api/admin/nodes/clean-disk",
+      "POST",
+      { node_id, targets }
+    ),
+  nodeDiskDiagnostics: (node_id: string) =>
+    request<{ breakdown: DiskBreakdown }>(`/api/admin/nodes/disk-diagnostics?node_id=${encodeURIComponent(node_id)}`),
   providers: () => request<{ providers: ApiProvider[] }>("/api/admin/providers"),
   saveProvider: (kind: string, api_key: string | null, network_mode: "direct" | "socks", proxy_url: string) =>
     request<{ status: string }>("/api/admin/providers/save", "POST", { kind, api_key, network_mode, proxy_url }),

@@ -446,6 +446,7 @@ def make_server(
                             "/api/admin/nodes/grants", "/api/admin/nodes/grants/revoke",
                             "/api/admin/nodes/revoke", "/api/admin/nodes/delete", "/api/admin/nodes/token",
                             "/api/admin/nodes/model-pulls", "/api/admin/nodes/model-pulls/cancel", "/api/admin/nodes/model-delete",
+                            "/api/admin/nodes/clean-disk",
                             "/api/nodes/model-pulls/claim", "/api/nodes/model-pulls/report"}:
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
@@ -472,6 +473,8 @@ def make_server(
                     self._send(200, nodes.cancel_model_pull(principal, body.get("id")))
                 elif path == "/api/admin/nodes/model-delete":
                     self._send(201, nodes.queue_model_delete(principal, body.get("node_id"), body.get("model")))
+                elif path == "/api/admin/nodes/clean-disk":
+                    self._send(200, nodes.clean_node_disk(principal, body.get("node_id"), body.get("targets")))
                 elif path == "/api/nodes/model-pulls/claim":
                     self._send(200, {"job": nodes.claim_model_pull(body.get("id"), body.get("credential"))})
                 elif path == "/api/nodes/model-pulls/report":
@@ -1215,6 +1218,19 @@ def make_server(
                     return
                 try:
                     self._send(200, {"nodes": nodes.list_nodes(principal)})
+                except IdentityError as exc:
+                    self._send(exc.status, {"error": {"message": str(exc)}})
+                return
+            if parsed.path == "/api/admin/nodes/disk-diagnostics":
+                if not self._node_channel():
+                    return
+                principal = self._principal()
+                if principal is None:
+                    return
+                try:
+                    q = parse_qs(parsed.query)
+                    node_id = q.get("node_id", [None])[0]
+                    self._send(200, {"breakdown": nodes.get_node_disk_diagnostics(principal, node_id)})
                 except IdentityError as exc:
                     self._send(exc.status, {"error": {"message": str(exc)}})
                 return

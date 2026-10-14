@@ -263,6 +263,28 @@ export function NodeManager() {
   const [tokenData, setTokenData] = useState<NodeTokenResponse | null>(null);
   const [seconds, setSeconds] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [cleaningNode, setCleaningNode] = useState<Record<string, boolean>>({});
+  const [cleanMessage, setCleanMessage] = useState<Record<string, string | null>>({});
+
+  const handleCleanDisk = async (nodeId: string) => {
+    setCleaningNode((prev) => ({ ...prev, [nodeId]: true }));
+    setCleanMessage((prev) => ({ ...prev, [nodeId]: null }));
+    try {
+      const res = await api.cleanNodeDisk(nodeId);
+      setCleanMessage((prev) => ({
+        ...prev,
+        [nodeId]: `✅ ${res.message || "عملیات پاکسازی انجام شد."} (${res.freed_gb != null ? `${res.freed_gb.toLocaleString("fa-IR")} گیگابایت آزاد شد` : ""})`
+      }));
+      await refreshData(true);
+    } catch (err) {
+      setCleanMessage((prev) => ({
+        ...prev,
+        [nodeId]: `❌ خطا در پاکسازی دیسک: ${err instanceof Error ? err.message : "خطای نامشخص"}`
+      }));
+    } finally {
+      setCleaningNode((prev) => ({ ...prev, [nodeId]: false }));
+    }
+  };
 
   const hasActiveDownloads = jobs.some((j) => j.status === "queued" || j.status === "running");
 
@@ -642,7 +664,7 @@ export function NodeManager() {
                             </div>
                           </div>
 
-                          <div className="resource-meter">
+                          <div className="resource-meter disk-meter-enhanced">
                             <div className="meter-header">
                               <span>فضای دیسک (Disk)</span>
                               <strong>{node.metrics.disk_percent != null ? `${node.metrics.disk_percent.toLocaleString("fa-IR")}٪` : "—"}</strong>
@@ -653,8 +675,143 @@ export function NodeManager() {
                                 style={{ width: `${Math.min(100, Math.max(0, node.metrics.disk_percent ?? 0))}%` }}
                               />
                             </div>
+                            <div className="disk-stats-row">
+                              <span className="disk-stat-chip total" title="حجم کل دیسک">
+                                کل: <b>{node.metrics.disk_total_gb != null ? `${node.metrics.disk_total_gb.toLocaleString("fa-IR")} GB` : "—"}</b>
+                              </span>
+                              <span className="disk-stat-chip used" title="حجم مصرف‌شده">
+                                مصرف: <b>{node.metrics.disk_used_gb != null ? `${node.metrics.disk_used_gb.toLocaleString("fa-IR")} GB` : "—"}</b>
+                              </span>
+                              <span className="disk-stat-chip free" title="حجم آزاد دیسک">
+                                آزاد: <b>{node.metrics.disk_free_gb != null ? `${node.metrics.disk_free_gb.toLocaleString("fa-IR")} GB` : "—"}</b>
+                              </span>
+                            </div>
                           </div>
                         </div>
+
+                        {node.role === "worker" && node.metrics.disk_breakdown && (
+                          <div className="worker-disk-diagnosis-card">
+                            <div className="diagnosis-card-header">
+                              <div className="diagnosis-title-group">
+                                <span className="diagnosis-title-icon">🔍</span>
+                                <strong>ریشه‌یابی و تحلیل حجم دیسک Worker</strong>
+                                {node.metrics.disk_breakdown.total_wasted_gb > 0 && (
+                                  <span className="wasted-badge">
+                                    {node.metrics.disk_breakdown.total_wasted_gb.toLocaleString("fa-IR")} گیگابایت قابل پاکسازی
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                className="clean-disk-btn"
+                                disabled={cleaningNode[node.id] || !online}
+                                onClick={() => void handleCleanDisk(node.id)}
+                              >
+                                {cleaningNode[node.id] ? "در حال پاکسازی..." : "🧹 پاکسازی مدل‌های ناقص و Temp"}
+                              </button>
+                            </div>
+
+                            {cleanMessage[node.id] && (
+                              <div className="clean-feedback-banner">
+                                {cleanMessage[node.id]}
+                              </div>
+                            )}
+
+                            <div className="diagnosis-categories-grid">
+                              {/* ۱. مدل‌های ناقص */}
+                              <div className="diagnosis-cat-card incomplete">
+                                <div className="cat-card-header">
+                                  <span className="cat-icon">⚠️</span>
+                                  <span className="cat-name">مدل‌های ناقص</span>
+                                  <span className="cat-badge">
+                                    {node.metrics.disk_breakdown.incomplete_models.count.toLocaleString("fa-IR")} مورد
+                                  </span>
+                                </div>
+                                <div className="cat-volume">
+                                  {node.metrics.disk_breakdown.incomplete_models.size_gb > 0
+                                    ? `${node.metrics.disk_breakdown.incomplete_models.size_gb.toLocaleString("fa-IR")} گیگابایت`
+                                    : `${node.metrics.disk_breakdown.incomplete_models.size_mb.toLocaleString("fa-IR")} مگابایت`}
+                                </div>
+                                <p className="cat-explanation">لایه‌ها و دانلودهای ناقص قطع‌شده هنگام دریافت از رجیستری</p>
+                                {node.metrics.disk_breakdown.incomplete_models.items && node.metrics.disk_breakdown.incomplete_models.items.length > 0 && (
+                                  <ul className="cat-items-list">
+                                    {node.metrics.disk_breakdown.incomplete_models.items.slice(0, 3).map((item, idx) => (
+                                      <li key={idx} title={item.path}>
+                                        <span className="item-name" dir="ltr">{item.name.length > 26 ? `${item.name.slice(0, 26)}...` : item.name}</span>
+                                        <span className="item-size">{item.size_mb.toLocaleString("fa-IR")} MB</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+
+                              {/* ۲. مدل‌های ناموفق */}
+                              <div className="diagnosis-cat-card failed">
+                                <div className="cat-card-header">
+                                  <span className="cat-icon">❌</span>
+                                  <span className="cat-name">مدل‌های ناموفق</span>
+                                  <span className="cat-badge">
+                                    {node.metrics.disk_breakdown.failed_models.count.toLocaleString("fa-IR")} مورد
+                                  </span>
+                                </div>
+                                <div className="cat-volume">
+                                  {node.metrics.disk_breakdown.failed_models.size_gb > 0
+                                    ? `${node.metrics.disk_breakdown.failed_models.size_gb.toLocaleString("fa-IR")} گیگابایت`
+                                    : `${node.metrics.disk_breakdown.failed_models.size_mb.toLocaleString("fa-IR")} مگابایت`}
+                                </div>
+                                <p className="cat-explanation">بقایای مدل‌های دارای خطای دانلود، کرش یا لغوشده</p>
+                                {node.metrics.disk_breakdown.failed_models.items && node.metrics.disk_breakdown.failed_models.items.length > 0 && (
+                                  <ul className="cat-items-list">
+                                    {node.metrics.disk_breakdown.failed_models.items.slice(0, 3).map((item, idx) => (
+                                      <li key={idx} title={item.reason || item.path}>
+                                        <span className="item-name" dir="ltr">{item.name}</span>
+                                        <span className="item-size">{item.reason ? "خطا" : `${item.size_mb.toLocaleString("fa-IR")} MB`}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+
+                              {/* ۳. فایل‌های Temp */}
+                              <div className="diagnosis-cat-card temp">
+                                <div className="cat-card-header">
+                                  <span className="cat-icon">🗄️</span>
+                                  <span className="cat-name">فایل‌های Temp</span>
+                                  <span className="cat-badge">
+                                    {node.metrics.disk_breakdown.temp_files.count.toLocaleString("fa-IR")} فایل
+                                  </span>
+                                </div>
+                                <div className="cat-volume">
+                                  {node.metrics.disk_breakdown.temp_files.size_gb > 0
+                                    ? `${node.metrics.disk_breakdown.temp_files.size_gb.toLocaleString("fa-IR")} گیگابایت`
+                                    : `${node.metrics.disk_breakdown.temp_files.size_mb.toLocaleString("fa-IR")} مگابایت`}
+                                </div>
+                                <p className="cat-explanation">فایل‌های کش، لاگ و بافر موقت Worker در مسیرهای موقت</p>
+                                {node.metrics.disk_breakdown.temp_files.items && node.metrics.disk_breakdown.temp_files.items.length > 0 && (
+                                  <ul className="cat-items-list">
+                                    {node.metrics.disk_breakdown.temp_files.items.slice(0, 3).map((item, idx) => (
+                                      <li key={idx} title={item.path}>
+                                        <span className="item-name" dir="ltr">{item.name.length > 26 ? `${item.name.slice(0, 26)}...` : item.name}</span>
+                                        <span className="item-size">{item.size_mb.toLocaleString("fa-IR")} MB</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            </div>
+
+                            {node.metrics.disk_breakdown.diagnostics && node.metrics.disk_breakdown.diagnostics.length > 0 && (
+                              <div className="diagnosis-insights-box">
+                                <strong>💡 نتیجه ارزیابی هوشمند ریشه مصرف دیسک:</strong>
+                                <ul>
+                                  {node.metrics.disk_breakdown.diagnostics.map((diag, dIdx) => (
+                                    <li key={dIdx}>{diag}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         <div className="worker-node-meta-row">
                           <small>نسخه گره: <code dir="ltr">{node.metrics.version || "نامشخص"}</code></small>

@@ -118,10 +118,14 @@ class NodeRegistry:
         return row
 
     def heartbeat(self, node_id, credential, metrics):
-        if not isinstance(metrics, dict) or len(json.dumps(metrics)) > 2048:
+        if not isinstance(metrics, dict) or len(json.dumps(metrics)) > 65536:
             raise IdentityError("Invalid node metrics")
-        allowed = {"version", "cpu_percent", "ram_percent", "disk_percent", "models"}
+        allowed = {"version", "cpu_percent", "ram_percent", "disk_percent", "disk_total_gb", "disk_used_gb", "disk_free_gb", "disk_breakdown", "models"}
         if set(metrics) - allowed or any(key in metrics and (not isinstance(metrics[key], (int, float)) or isinstance(metrics[key], bool) or not math.isfinite(metrics[key]) or not 0 <= metrics[key] <= 100) for key in ("cpu_percent", "ram_percent", "disk_percent")):
+            raise IdentityError("Invalid node metrics")
+        if any(key in metrics and (not isinstance(metrics[key], (int, float)) or isinstance(metrics[key], bool) or not math.isfinite(metrics[key]) or metrics[key] < 0) for key in ("disk_total_gb", "disk_used_gb", "disk_free_gb")):
+            raise IdentityError("Invalid node metrics")
+        if "disk_breakdown" in metrics and not isinstance(metrics["disk_breakdown"], dict):
             raise IdentityError("Invalid node metrics")
         if "version" in metrics and (not isinstance(metrics["version"], str) or len(metrics["version"]) > 64):
             raise IdentityError("Invalid node version")
@@ -168,12 +172,95 @@ class NodeRegistry:
                 raise IdentityError("Node not found", 404)
             self.identity._audit(db, principal["id"], "node_deleted", node_id)
 
+    def _enrich_breakdown_with_db_failures(self, db, node_id, breakdown):
+        if not isinstance(breakdown, dict):
+            return breakdown
+        try:
+            failed_rows = db.execute(
+                "SELECT id, model, detail, updated_at FROM model_pulls WHERE node_id=? AND status='failed' ORDER BY updated_at DESC LIMIT 20",
+                (node_id,)
+            ).fetchall()
+            if failed_rows:
+                failed_category = breakdown.get("failed_models") or {
+                    "count": 0, "size_bytes": 0, "size_gb": 0.0, "size_mb": 0.0, "items": []
+                }
+                items = list(failed_category.get("items") or [])
+                existing_names = {it.get("name") for it in items if isinstance(it, dict)}
+                added = 0
+                for r in failed_rows:
+                    if r["model"] not in existing_names:
+                        items.append({
+                            "name": r["model"],
+                            "path": f"job:{r['id']}",
+                            "size_bytes": 0,
+                            "size_mb": 0.0,
+                            "size_gb": 0.0,
+                            "reason": f"خطا در دانلود یا استقرار مدل: {r['detail']}"
+                        })
+                        existing_names.add(r["model"])
+                        added += 1
+                if added > 0:
+                    failed_category["items"] = items[:20]
+                    failed_category["count"] = max(failed_category.get("count", 0), len(items))
+                    breakdown["failed_models"] = failed_category
+                    diags = breakdown.get("diagnostics") or []
+                    diags = [d for d in diags if "دیسک در وضعیت بهینه است" not in d]
+                    diags.append(f"مدل‌های ناموفق ثبت‌شده در پایگاه: {len(items)} مورد خطا")
+                    breakdown["diagnostics"] = diags
+        except Exception:
+            pass
+        return breakdown
+
     def list_nodes(self, principal):
         self._admin(principal)
         with self.identity._db() as db:
             rows = db.execute("SELECT id, role, name, credential_expires_at, created_at, last_seen, metrics, revoked_at FROM managed_nodes ORDER BY created_at DESC").fetchall()
-            return [{**{key: row[key] for key in row.keys() if key != "metrics"},
-                     "metrics": json.loads(row["metrics"]) if row["metrics"] else None} for row in rows]
+            nodes = []
+            for row in rows:
+                item = {key: row[key] for key in row.keys() if key != "metrics"}
+                metrics = json.loads(row["metrics"]) if row["metrics"] else None
+                if metrics and item.get("role") == "worker":
+                    if "disk_breakdown" in metrics and metrics["disk_breakdown"]:
+                        metrics["disk_breakdown"] = self._enrich_breakdown_with_db_failures(db, item["id"], metrics["disk_breakdown"])
+                item["metrics"] = metrics
+                nodes.append(item)
+            return nodes
+
+    def clean_node_disk(self, principal, node_id, targets=None):
+        self._admin(principal)
+        if not isinstance(node_id, str) or not re.fullmatch(r"[0-9a-f]{32}", node_id):
+            raise IdentityError("Invalid node ID")
+        with self.identity._lock, self.identity._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            node = db.execute("SELECT * FROM managed_nodes WHERE id=?", (node_id,)).fetchone()
+            if node is None or node["role"] != "worker" or node["revoked_at"] is not None:
+                raise IdentityError("Active Worker not found", 404)
+            from omniops.node_client import diagnose_worker_disk
+            result = diagnose_worker_disk(clean=True)
+            self.identity._audit(db, principal["id"], "worker_disk_cleaned", node_id)
+            return {
+                "status": "ok",
+                "node_id": node_id,
+                "freed_bytes": result.get("freed_bytes", 0),
+                "freed_gb": result.get("freed_gb", 0.0),
+                "message": f"عملیات پاکسازی با موفقیت انجام شد ({result.get('freed_gb', 0)} گیگابایت آزاد شد)."
+            }
+
+    def get_node_disk_diagnostics(self, principal, node_id):
+        self._admin(principal)
+        if not isinstance(node_id, str) or not re.fullmatch(r"[0-9a-f]{32}", node_id):
+            raise IdentityError("Invalid node ID")
+        with self.identity._db() as db:
+            node = db.execute("SELECT * FROM managed_nodes WHERE id=?", (node_id,)).fetchone()
+            if node is None or node["role"] != "worker" or node["revoked_at"] is not None:
+                raise IdentityError("Active Worker not found", 404)
+            metrics = json.loads(node["metrics"]) if node["metrics"] else {}
+            breakdown = metrics.get("disk_breakdown")
+            if not breakdown:
+                from omniops.node_client import diagnose_worker_disk
+                breakdown = diagnose_worker_disk(clean=False)
+            breakdown = self._enrich_breakdown_with_db_failures(db, node_id, breakdown)
+            return breakdown
 
 
     def queue_model_pull_local_root(self, node_id, model):

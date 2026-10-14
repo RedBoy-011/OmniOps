@@ -6,6 +6,7 @@ import ipaddress
 import json
 import os
 import secrets
+import shutil
 import ssl
 import stat
 import sys
@@ -131,24 +132,238 @@ def local_ollama_url():
     return raw.rstrip('/')
 
 
+def get_local_disk_metrics():
+    try:
+        root_path = os.path.abspath(os.sep)
+        usage = shutil.disk_usage(root_path)
+        total_gb = round(usage.total / (1024**3), 2)
+        used_gb = round(usage.used / (1024**3), 2)
+        free_gb = round(usage.free / (1024**3), 2)
+        disk_pct = round((usage.used / usage.total) * 100.0, 1) if usage.total > 0 else 0.0
+    except Exception:
+        total_gb = 0.0
+        used_gb = 0.0
+        free_gb = 0.0
+        disk_pct = 0.0
+    return total_gb, used_gb, free_gb, disk_pct
+
+
+def diagnose_worker_disk(clean: bool = False) -> dict:
+    """Diagnoses worker disk space to identify large volume sources:
+    - Incomplete models (interrupted/partial Ollama model downloads)
+    - Failed models (corrupt or unreferenced models from failed pulls)
+    - Temp files (temporary files in /tmp, node temp credentials, and scratch caches)
+    """
+    incomplete_items = []
+    failed_items = []
+    temp_items = []
+    freed_bytes = 0
+
+    ollama_candidates = []
+    if os.environ.get("OLLAMA_MODELS"):
+        ollama_candidates.append(Path(os.environ["OLLAMA_MODELS"]))
+    ollama_candidates.extend([
+        Path.home() / ".ollama" / "models",
+        Path("/usr/share/ollama/.ollama/models"),
+    ])
+
+    manifest_digests = set()
+    for model_dir in ollama_candidates:
+        if not model_dir.is_dir():
+            continue
+        manifests_dir = model_dir / "manifests"
+        if manifests_dir.is_dir():
+            try:
+                for mf in manifests_dir.rglob("*"):
+                    if mf.is_file():
+                        try:
+                            content = json.loads(mf.read_text(encoding="utf-8", errors="ignore"))
+                            for layer in content.get("layers", []):
+                                digest = layer.get("digest", "")
+                                if digest.startswith("sha256:"):
+                                    manifest_digests.add(digest[7:])
+                            config_digest = content.get("config", {}).get("digest", "")
+                            if config_digest.startswith("sha256:"):
+                                manifest_digests.add(config_digest[7:])
+                        except Exception:
+                            st = mf.stat()
+                            failed_items.append({
+                                "model": mf.name,
+                                "path": str(mf),
+                                "size_bytes": st.st_size,
+                                "size_mb": round(st.st_size / (1024**2), 2),
+                                "size_gb": round(st.st_size / (1024**3), 2),
+                                "reason": "مانیفست ناقص یا فایل خراب شده"
+                            })
+            except Exception:
+                pass
+
+        blobs_dir = model_dir / "blobs"
+        if blobs_dir.is_dir():
+            try:
+                for entry in blobs_dir.iterdir():
+                    if not entry.is_file():
+                        continue
+                    name = entry.name
+                    try:
+                        st = entry.stat()
+                    except OSError:
+                        continue
+
+                    if any(name.endswith(ext) or ext in name for ext in ("-partial", ".partial", ".tmp", ".download", ".part")):
+                        incomplete_items.append({
+                            "name": name,
+                            "path": str(entry),
+                            "size_bytes": st.st_size,
+                            "size_mb": round(st.st_size / (1024**2), 2),
+                            "size_gb": round(st.st_size / (1024**3), 2),
+                            "reason": "دانلود ناتمام قطع‌شده در حین دریافت لایه"
+                        })
+                        if clean:
+                            try:
+                                entry.unlink()
+                                freed_bytes += st.st_size
+                            except OSError:
+                                pass
+                    elif manifest_digests and name.startswith("sha256-"):
+                        raw_hash = name[7:]
+                        if raw_hash not in manifest_digests:
+                            incomplete_items.append({
+                                "name": name,
+                                "path": str(entry),
+                                "size_bytes": st.st_size,
+                                "size_mb": round(st.st_size / (1024**2), 2),
+                                "size_gb": round(st.st_size / (1024**3), 2),
+                                "reason": "لایه بدون مانیفست ناشی از قطع دانلود مدل"
+                            })
+                            if clean:
+                                try:
+                                    entry.unlink()
+                                    freed_bytes += st.st_size
+                                except OSError:
+                                    pass
+            except Exception:
+                pass
+
+    temp_dirs = [Path(tempfile.gettempdir())]
+    try:
+        current_dir = Path.cwd()
+        if current_dir != temp_dirs[0]:
+            temp_dirs.append(current_dir)
+    except Exception:
+        pass
+
+    for tdir in temp_dirs:
+        if not tdir.is_dir():
+            continue
+        try:
+            for item in tdir.iterdir():
+                if not item.is_file():
+                    continue
+                name = item.name
+                if any(name.startswith(pfx) for pfx in (".node-", "omniops-", "tmp", "ollama-")) or \
+                   any(name.endswith(sfx) for sfx in (".tmp", ".temp", ".part")):
+                    try:
+                        st = item.stat()
+                        temp_items.append({
+                            "name": name,
+                            "path": str(item),
+                            "size_bytes": st.st_size,
+                            "size_mb": round(st.st_size / (1024**2), 2),
+                            "size_gb": round(st.st_size / (1024**3), 2),
+                            "reason": "فایل موقت فرآیند Worker"
+                        })
+                        if clean and name.startswith((".node-", "omniops-")):
+                            try:
+                                item.unlink()
+                                freed_bytes += st.st_size
+                            except OSError:
+                                pass
+                    except OSError:
+                        pass
+        except Exception:
+            pass
+
+    inc_bytes = sum(item["size_bytes"] for item in incomplete_items)
+    fail_bytes = sum(item["size_bytes"] for item in failed_items)
+    tmp_bytes = sum(item["size_bytes"] for item in temp_items)
+    total_wasted = inc_bytes + fail_bytes + tmp_bytes
+
+    diagnostics = []
+    if inc_bytes > 0:
+        diagnostics.append(f"مدل‌ها و لایه‌های ناقص: {len(incomplete_items)} مورد ({round(inc_bytes / (1024**3), 2)} گیگابایت)")
+    if fail_bytes > 0:
+        diagnostics.append(f"مدل‌های ناموفق و خراب: {len(failed_items)} مورد ({round(fail_bytes / (1024**3), 2)} گیگابایت)")
+    if tmp_bytes > 0:
+        diagnostics.append(f"فایل‌های موقت سیستم (Temp): {len(temp_items)} فایل ({round(tmp_bytes / (1024**2), 2)} مگابایت)")
+    if not diagnostics:
+        diagnostics.append("دیسک در وضعیت بهینه است و فایل زائد یا ناقص شناسایی نشد.")
+
+    return {
+        "total_wasted_bytes": total_wasted,
+        "total_wasted_gb": round(total_wasted / (1024**3), 2),
+        "freed_bytes": freed_bytes,
+        "freed_gb": round(freed_bytes / (1024**3), 2),
+        "incomplete_models": {
+            "count": len(incomplete_items),
+            "size_bytes": inc_bytes,
+            "size_gb": round(inc_bytes / (1024**3), 2),
+            "size_mb": round(inc_bytes / (1024**2), 2),
+            "items": incomplete_items[:20]
+        },
+        "failed_models": {
+            "count": len(failed_items),
+            "size_bytes": fail_bytes,
+            "size_gb": round(fail_bytes / (1024**3), 2),
+            "size_mb": round(fail_bytes / (1024**2), 2),
+            "items": failed_items[:20]
+        },
+        "temp_files": {
+            "count": len(temp_items),
+            "size_bytes": tmp_bytes,
+            "size_gb": round(tmp_bytes / (1024**3), 2),
+            "size_mb": round(tmp_bytes / (1024**2), 2),
+            "items": temp_items[:20]
+        },
+        "diagnostics": diagnostics
+    }
+
+
 def local_metrics():
     def cpu_sample():
         with open('/proc/stat', encoding='ascii') as file:
             fields = [int(value) for value in file.readline().split()[1:]]
         return sum(fields), fields[3] + fields[4]
-    total1, idle1 = cpu_sample()
-    time.sleep(0.2)
-    total2, idle2 = cpu_sample()
-    cpu = 100 * (1 - (idle2 - idle1) / max(total2 - total1, 1))
-    with open('/proc/meminfo', encoding='ascii') as file:
-        memory = {key.rstrip(':'): int(value.split()[0]) for key, value in
-                  (line.split(':', 1) for line in file if ':' in line)}
-    ram = 100 * (1 - memory['MemAvailable'] / memory['MemTotal'])
-    disk = os.statvfs('/')
-    disk_percent = 100 * (1 - disk.f_bavail / disk.f_blocks) if disk.f_blocks else 0
-    metrics = {'version': 'node-client-0.1', 'cpu_percent': round(max(0, min(cpu, 100)), 1),
-               'ram_percent': round(max(0, min(ram, 100)), 1),
-               'disk_percent': round(max(0, min(disk_percent, 100)), 1)}
+
+    try:
+        total1, idle1 = cpu_sample()
+        time.sleep(0.2)
+        total2, idle2 = cpu_sample()
+        cpu = 100 * (1 - (idle2 - idle1) / max(total2 - total1, 1))
+    except (OSError, IndexError, ValueError):
+        cpu = 0.0
+
+    try:
+        with open('/proc/meminfo', encoding='ascii') as file:
+            memory = {key.rstrip(':'): int(value.split()[0]) for key, value in
+                      (line.split(':', 1) for line in file if ':' in line)}
+        ram = 100 * (1 - memory['MemAvailable'] / memory['MemTotal'])
+    except (OSError, KeyError, ZeroDivisionError, ValueError):
+        ram = 0.0
+
+    total_gb, used_gb, free_gb, disk_percent = get_local_disk_metrics()
+    breakdown = diagnose_worker_disk()
+
+    metrics = {
+        'version': 'node-client-0.1',
+        'cpu_percent': round(max(0, min(cpu, 100)), 1),
+        'ram_percent': round(max(0, min(ram, 100)), 1),
+        'disk_percent': round(max(0, min(disk_percent, 100)), 1),
+        'disk_total_gb': total_gb,
+        'disk_used_gb': used_gb,
+        'disk_free_gb': free_gb,
+        'disk_breakdown': breakdown,
+    }
     try:
         with build_opener(ProxyHandler({})).open(local_ollama_url() + '/api/tags', timeout=2) as response:
             raw = response.read(1024 * 1024 + 1)
