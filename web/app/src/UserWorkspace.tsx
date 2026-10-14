@@ -16,7 +16,7 @@ type Props = {
 export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
   const [currentUser, setCurrentUser] = useState<Profile>(user);
   const [showProfile, setShowProfile] = useState(false);
-  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "pilot" | "task" | "customizations" | "downloads">("chat");
+  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "pilot" | "task" | "customizations" | "downloads" | "profile">("chat");
   const [chatInitialPrompt, setChatInitialPrompt] = useState("");
 
   // Pair state for downloads / pairing
@@ -88,7 +88,7 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
             <button
               type="button"
               className="profile-pill-button"
-              onClick={() => setShowProfile(true)}
+              onClick={() => setWorkspaceMode("profile")}
               title="مشاهده پروفایل، آمار عملکرد و تغییر رمز عبور"
             >
               <span className="profile-pill-icon">{currentUser.role === "superadmin" ? "👑" : "👤"}</span>
@@ -180,6 +180,16 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
           >
             📥 دریافت برنامه‌ها (ویندوز / اندروید)
           </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workspaceMode === "profile"}
+            className={workspaceMode === "profile" ? "active" : ""}
+            onClick={() => setWorkspaceMode("profile")}
+          >
+            👤 پروفایل و امنیت حساب
+          </button>
         </div>
 
         {/* محتوای تب‌های انتخابی کاربر */}
@@ -219,6 +229,14 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
             copyStatus={copyStatus}
             onGeneratePair={createPair}
             onCopyPair={() => void copyPair()}
+          />
+        </div>
+
+        <div hidden={workspaceMode !== "profile"}>
+          <UserProfileModal
+            embedded
+            currentUser={currentUser}
+            onProfileUpdated={(updated) => setCurrentUser(updated)}
           />
         </div>
       </div>

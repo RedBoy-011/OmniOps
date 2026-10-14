@@ -22,6 +22,7 @@ const choices = [
 ] as const;
 
 type AdminTab = "nodes" | "providers" | "users" | "health" | "backups" | "audit" | "agents";
+type UserSubTab = "users" | "pending" | "profile" | "pairing";
 
 type Props = {
   user: Profile;
@@ -34,6 +35,7 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
   const [currentUser, setCurrentUser] = useState<Profile>(user);
   const [showProfile, setShowProfile] = useState(false);
   const [adminTab, setAdminTab] = useState<AdminTab>("nodes");
+  const [userSubTab, setUserSubTab] = useState<UserSubTab>("users");
 
   const [pending, setPending] = useState<PendingUser[]>([]);
   const [count, setCount] = useState(initialPending);
@@ -216,12 +218,19 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20 }}
             role="status"
+            style={{ cursor: "pointer" }}
+            onClick={() => {
+              setAdminTab("users");
+              setUserSubTab("pending");
+              setToast(false);
+            }}
+            title="کلیک برای باز کردن تب درخواست‌های ثبت‌نام"
           >
             <span className="toast-icon">✦</span>
             <span>
-              شما <strong>{count.toLocaleString("fa-IR")}</strong> درخواست عضویت جدید در انتظار بررسی دارید.
+              شما <strong>{count.toLocaleString("fa-IR")}</strong> درخواست عضویت جدید در انتظار بررسی دارید (کلیک جهت بررسی در تب درخواست‌ها).
             </span>
-            <button onClick={() => setToast(false)} aria-label="بستن اعلان">
+            <button onClick={(e) => { e.stopPropagation(); setToast(false); }} aria-label="بستن اعلان">
               ×
             </button>
           </motion.div>
@@ -253,8 +262,11 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
             <button
               type="button"
               className="profile-pill-button"
-              onClick={() => setShowProfile(true)}
-              title="مشاهده پروفایل و تغییر رمز"
+              onClick={() => {
+                setAdminTab("users");
+                setUserSubTab("profile");
+              }}
+              title="مشاهده پروفایل، آمار عملکرد و تغییر رمز"
             >
               <span className="profile-pill-icon">👑</span>
               <span>{currentUser.username}</span>
@@ -305,7 +317,7 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
             className={`admin-nav-tab ${adminTab === "users" ? "active" : ""}`}
             onClick={() => setAdminTab("users")}
           >
-            👥 کاربران و سطوح دسترسی
+            👥 مدیریت کاربران، دسترسی‌ها و پروفایل
             {count > 0 && <span className="tab-counter-badge">{count.toLocaleString("fa-IR")}</span>}
           </button>
 
@@ -488,95 +500,187 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
           <ProviderManager />
         </div>
 
-        {/* ۳. تب کاربران و دسترسی‌ها */}
+        {/* ۳. مرکز جامع مدیریت کاربران، دسترسی‌ها و پروفایل */}
         <div hidden={adminTab !== "users"}>
-          {/* کارت درخواست‌های عضویت جدید در انتظار */}
-          <section className="glass admin-card" style={{ marginBottom: "16px" }}>
-            <div className="card-title">
-              <div>
-                <h2>درخواست‌های ثبت‌نام جدید در انتظار تأیید</h2>
-                <p>تعیین و تخصیص ۱۰ مجوز اولیه همزمان با تأیید دسترسی کاربر.</p>
+          {/* هدر یکپارچه و معرفی ماژول */}
+          <div className="user-hub-hero">
+            <div className="user-hub-hero-inner">
+              <div className="user-hub-title">
+                <span className="user-hub-icon">👥</span>
+                <div>
+                  <h2 className="text-base md:text-lg font-bold text-cyan-400">مرکز جامع مدیریت کاربران، سطوح دسترسی و پروفایل</h2>
+                  <p className="text-xs text-gray-300 mt-1 leading-relaxed">
+                    کنترل یکپارچه اعضای سازمان، تعیین ماتریس مجوزها، بررسی درخواست‌های ثبت‌نام جدید، امنیت حساب کاربری و جفت‌سازی کلاینت‌ها.
+                  </p>
+                </div>
               </div>
-              <span className="count-pill">{count.toLocaleString("fa-IR")} در انتظار</span>
-            </div>
-
-            {pending.length === 0 ? (
-              <p className="empty-note">درخواستی در انتظار تأیید نیست.</p>
-            ) : (
-              <div className="pending-list">
-                {pending.map((person) => (
-                  <article className="pending-user" key={person.id}>
-                    <div className="pending-title">
-                      <div>
-                        <strong>{person.username}</strong>
-                        <span dir="ltr">{person.mobile}</span>
-                      </div>
-                      <time>{new Date(person.created_at * 1000).toLocaleString("fa-IR")}</time>
-                    </div>
-
-                    <div className="capabilities" aria-label={`مجوزهای ${person.username}`}>
-                      {choices.map(([value, title]) => (
-                        <label key={value} className="capability">
-                          <input
-                            type="checkbox"
-                            checked={(selected[person.id] || ["chat"]).includes(value)}
-                            onChange={() => toggle(person.id, value)}
-                          />
-                          {title}
-                        </label>
-                      ))}
-                    </div>
-
-                    <div className="pending-actions">
-                      <button disabled={loading} className="submit-button" onClick={() => decide(person.id, true)}>
-                        تأیید با این مجوزها
-                      </button>
-                      <button disabled={loading} className="quiet-button danger" onClick={() => decide(person.id, false)}>
-                        رد درخواست
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* ابزار صدور سریع کد اتصال ایجنت */}
-          <section className="glass admin-card" style={{ marginBottom: "16px" }}>
-            <div className="card-title">
-              <div>
-                <h2>اتصال موقت ایجنت ویندوز</h2>
-                <p>کد یک‌بارمصرف ۶ رقمی با اعتبار ۲ دقیقه جهت جفت‌سازی کلاینت.</p>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] bg-slate-900/90 text-cyan-300 border border-cyan-800/60 px-3 py-1 rounded-full font-mono">
+                  نقش شما: {currentUser.role === "superadmin" ? "مدیر ارشد کل" : "کاربر سازمان"}
+                </span>
+                {count > 0 && (
+                  <span className="text-[11px] bg-rose-950/80 text-rose-300 border border-rose-800 px-3 py-1 rounded-full animate-pulse">
+                    {count.toLocaleString("fa-IR")} درخواست جدید در انتظار
+                  </span>
+                )}
               </div>
             </div>
+          </div>
 
-            <button className="submit-button" onClick={createPair}>
-              صدور کد اتصال تازه
+          {/* نوار زیرتب‌های منسجم و منطقی */}
+          <div className="user-subtabs-nav" role="tablist" aria-label="بخش‌های مدیریت کاربران و پروفایل">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={userSubTab === "users"}
+              className={`user-subtab-btn ${userSubTab === "users" ? "active" : ""}`}
+              onClick={() => setUserSubTab("users")}
+            >
+              <span>👥 مدیریت کاربران و سطوح دسترسی</span>
             </button>
 
-            <AnimatePresence mode="wait">
-              {pair && (
-                <motion.div
-                  key={pair.code}
-                  className="pair-result"
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                >
-                  <p>این کد را در برنامه وارد کنید:</p>
-                  <strong dir="ltr">{pair.code}</strong>
-                  <button type="button" className="quiet-button pair-copy" onClick={() => void copyPair()}>
-                    کپی کد
-                  </button>
-                  <small>{seconds.toLocaleString("fa-IR")} ثانیه باقی‌مانده · پس از استفاده باطل می‌شود</small>
-                  {copyStatus && <span className="pair-copy-status" role="status">{copyStatus}</span>}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </section>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={userSubTab === "pending"}
+              className={`user-subtab-btn ${userSubTab === "pending" ? "active" : ""}`}
+              onClick={() => setUserSubTab("pending")}
+            >
+              <span>📋 درخواست‌های ثبت‌نام</span>
+              {count > 0 && <span className="tab-counter-badge">{count.toLocaleString("fa-IR")}</span>}
+            </button>
 
-          {/* پنل جامع مدیریت کاربران و سطوح دسترسی */}
-          <UserManagementCard />
+            <button
+              type="button"
+              role="tab"
+              aria-selected={userSubTab === "profile"}
+              className={`user-subtab-btn ${userSubTab === "profile" ? "active" : ""}`}
+              onClick={() => setUserSubTab("profile")}
+            >
+              <span>👤 پروفایل و امنیت حساب</span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={userSubTab === "pairing"}
+              className={`user-subtab-btn ${userSubTab === "pairing" ? "active" : ""}`}
+              onClick={() => setUserSubTab("pairing")}
+            >
+              <span>🔑 اتصال موقت ایجنت</span>
+            </button>
+          </div>
+
+          {/* تب فرعی ۱: مدیریت کاربران و سطوح دسترسی */}
+          <div hidden={userSubTab !== "users"}>
+            <UserManagementCard />
+          </div>
+
+          {/* تب فرعی ۲: درخواست‌های ثبت‌نام جدید در انتظار تأیید */}
+          <div hidden={userSubTab !== "pending"}>
+            <section className="glass admin-card" style={{ marginBottom: "16px" }}>
+              <div className="card-title">
+                <div>
+                  <h2>درخواست‌های ثبت‌نام جدید در انتظار تأیید</h2>
+                  <p>تعیین و تخصیص ۱۰ مجوز اولیه همزمان با تأیید دسترسی کاربر.</p>
+                </div>
+                <span className="count-pill">{count.toLocaleString("fa-IR")} در انتظار</span>
+              </div>
+
+              {pending.length === 0 ? (
+                <div className="empty-note-box" style={{ textAlign: "center", padding: "36px 16px" }}>
+                  <span style={{ fontSize: "36px", display: "block", marginBottom: "8px" }}>✅</span>
+                  <strong style={{ display: "block", fontSize: "14px", color: "#34d399", marginBottom: "6px" }}>
+                    تمامی درخواست‌های ثبت‌نام بررسی شده‌اند
+                  </strong>
+                  <p className="empty-note" style={{ margin: 0 }}>
+                    در حال حاضر هیچ کاربر جدیدی در صف انتظار تأیید عضویت نیست.
+                  </p>
+                </div>
+              ) : (
+                <div className="pending-list">
+                  {pending.map((person) => (
+                    <article className="pending-user" key={person.id}>
+                      <div className="pending-title">
+                        <div>
+                          <strong>{person.username}</strong>
+                          <span dir="ltr">{person.mobile}</span>
+                        </div>
+                        <time>{new Date(person.created_at * 1000).toLocaleString("fa-IR")}</time>
+                      </div>
+
+                      <div className="capabilities" aria-label={`مجوزهای ${person.username}`}>
+                        {choices.map(([value, title]) => (
+                          <label key={value} className="capability">
+                            <input
+                              type="checkbox"
+                              checked={(selected[person.id] || ["chat"]).includes(value)}
+                              onChange={() => toggle(person.id, value)}
+                            />
+                            {title}
+                          </label>
+                        ))}
+                      </div>
+
+                      <div className="pending-actions">
+                        <button disabled={loading} className="submit-button" onClick={() => decide(person.id, true)}>
+                          تأیید با این مجوزها
+                        </button>
+                        <button disabled={loading} className="quiet-button danger" onClick={() => decide(person.id, false)}>
+                          رد درخواست
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+
+          {/* تب فرعی ۳: پروفایل و امنیت حساب مدیر */}
+          <div hidden={userSubTab !== "profile"}>
+            <UserProfileModal
+              embedded
+              currentUser={currentUser}
+              onProfileUpdated={(updated) => setCurrentUser(updated)}
+            />
+          </div>
+
+          {/* تب فرعی ۴: ابزار صدور سریع کد اتصال ایجنت */}
+          <div hidden={userSubTab !== "pairing"}>
+            <section className="glass admin-card" style={{ marginBottom: "16px" }}>
+              <div className="card-title">
+                <div>
+                  <h2>اتصال موقت ایجنت ویندوز</h2>
+                  <p>کد یک‌بارمصرف ۶ رقمی با اعتبار ۲ دقیقه جهت جفت‌سازی کلاینت.</p>
+                </div>
+              </div>
+
+              <button className="submit-button" onClick={createPair}>
+                صدور کد اتصال تازه
+              </button>
+
+              <AnimatePresence mode="wait">
+                {pair && (
+                  <motion.div
+                    key={pair.code}
+                    className="pair-result"
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                  >
+                    <p>این کد را در برنامه وارد کنید:</p>
+                    <strong dir="ltr">{pair.code}</strong>
+                    <button type="button" className="quiet-button pair-copy" onClick={() => void copyPair()}>
+                      کپی کد
+                    </button>
+                    <small>{seconds.toLocaleString("fa-IR")} ثانیه باقی‌مانده · پس از استفاده باطل می‌شود</small>
+                    {copyStatus && <span className="pair-copy-status" role="status">{copyStatus}</span>}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </section>
+          </div>
         </div>
 
         {/* ۴. تب سلامت سیستم و پایش تله‌متری */}

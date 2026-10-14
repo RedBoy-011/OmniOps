@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
 import { api, type Profile, type UserProfileReport } from "../api";
 
-interface UserProfileModalProps {
+export interface UserProfileModalProps {
   currentUser: Profile;
-  onClose: () => void;
+  onClose?: () => void;
   onProfileUpdated: (user: Profile) => void;
+  embedded?: boolean;
 }
 
 type TabType = "report" | "edit" | "password";
 
-export function UserProfileModal({ currentUser, onClose, onProfileUpdated }: UserProfileModalProps) {
+export function UserProfileModal({ currentUser, onClose, onProfileUpdated, embedded }: UserProfileModalProps) {
   const [activeTab, setActiveTab] = useState<TabType>("report");
   const [report, setReport] = useState<UserProfileReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -108,26 +109,26 @@ export function UserProfileModal({ currentUser, onClose, onProfileUpdated }: Use
     }
   }
 
-  return (
-    <div className="update-modal-backdrop" onClick={onClose} dir="rtl">
-      <div
-        className="glass update-modal profile-modal"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="update-modal-header">
-          <div className="profile-header-meta">
-            <span className="profile-avatar-large">
-              {currentUser.role === "superadmin" ? "👑" : "👤"}
-            </span>
-            <div>
-              <h3>پروفایل و گزارش عملکرد کاربری</h3>
-              <p className="profile-sub-title">
-                {currentUser.username} · {currentUser.role === "superadmin" ? "مدیر ارشد سازمان" : "کاربر سازمانی"}
-              </p>
-            </div>
+  const innerModal = (
+    <div
+      className={embedded ? "profile-embedded-wrap" : "glass update-modal profile-modal"}
+      onClick={embedded ? undefined : (e) => e.stopPropagation()}
+      role={embedded ? undefined : "dialog"}
+      aria-modal={embedded ? undefined : "true"}
+    >
+      <div className="update-modal-header">
+        <div className="profile-header-meta">
+          <span className="profile-avatar-large">
+            {currentUser.role === "superadmin" ? "👑" : "👤"}
+          </span>
+          <div>
+            <h3>پروفایل و گزارش عملکرد کاربری</h3>
+            <p className="profile-sub-title">
+              {currentUser.username} · {currentUser.role === "superadmin" ? "مدیر ارشد سازمان" : "کاربر سازمانی"}
+            </p>
           </div>
+        </div>
+        {!embedded && onClose && (
           <button
             type="button"
             className="update-dismiss-btn"
@@ -136,7 +137,8 @@ export function UserProfileModal({ currentUser, onClose, onProfileUpdated }: Use
           >
             ✕
           </button>
-        </div>
+        )}
+      </div>
 
         <div className="profile-tabs-nav" role="tablist">
           <button
@@ -340,6 +342,15 @@ export function UserProfileModal({ currentUser, onClose, onProfileUpdated }: Use
           )}
         </div>
       </div>
+    );
+
+  if (embedded) {
+    return <section className="glass admin-card user-profile-card-section" dir="rtl">{innerModal}</section>;
+  }
+
+  return (
+    <div className="update-modal-backdrop" onClick={onClose} dir="rtl">
+      {innerModal}
     </div>
   );
 }
