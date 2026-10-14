@@ -51,7 +51,7 @@ export type UserProfileReport = {
 export type ChatSession = { id: string; title: string; created_at: number; updated_at: number; message_count: number };
 export type ChatHistory = { id: string; prompt: string; reply: string; model: string; created_at: number; session_id?: string | null };
 export type MemoryNote = { id: string; content: string; created_at: number };
-export type WorkspaceProject = { id: string; name: string; created_at: number };
+export type WorkspaceProject = { id: string; name: string; created_at: number; root_path?: string };
 export type WorkspaceAttachment = { id: string; project_id: string; name: string; mime: string; size: number; created_at: number };
 export type TaskDraft = { id: string; project_id: string; description: string; status: "draft" | "cancelled"; created_at: number; updated_at: number };
 export type PendingUser = { id: string; username: string; mobile: string; created_at: number };
@@ -239,6 +239,35 @@ export type AttachedDoc = {
   path?: string;
 };
 
+export type ProjectInspection = {
+  project_id: string;
+  name: string;
+  root_path: string;
+  project_type: string;
+  framework: string;
+  total_entries: number;
+  top_entries: Array<{ name: string; is_dir: boolean; size?: number | null }>;
+  has_readme: boolean;
+  readme_preview: string;
+  tasks_context: string;
+};
+
+export type ProjectFileEntry = {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size?: number | null;
+};
+
+export type CommandExecutionResult = {
+  project_id: string;
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+  duration_ms: number;
+};
+
 export const api = {
   login: (username: string, password: string) => request<LoginResult>("/api/auth/login", "POST", { username, password }),
   register: (username: string, password: string, mobile: string) => request<{ status: string; message: string }>("/api/auth/register", "POST", { username, password, mobile }),
@@ -418,4 +447,19 @@ export const api = {
     request<{ status: string; message: string }>("/api/user/change-password", "POST", { old_password, new_password }),
   auditLogs: (limit = 100, event?: string) =>
     request<{ logs: AuditLog[] }>(`/api/admin/audit?limit=${limit}${event ? `&event=${encodeURIComponent(event)}` : ""}`),
+  workspaceProjects: () => request<{ projects: WorkspaceProject[] }>("/api/web/workspace/projects"),
+  createWorkspaceProject: (name: string, root_path?: string) =>
+    request<WorkspaceProject>("/api/web/workspace/projects", "POST", { name, root_path }),
+  bindProjectRoot: (project_id: string, root_path: string) =>
+    request<{ status: string; project_id: string; root_path: string }>("/api/web/workspace/projects/bind-root", "POST", { project_id, root_path }),
+  inspectWorkspaceProject: (project_id: string) =>
+    request<ProjectInspection>(`/api/web/workspace/project/inspect?project_id=${encodeURIComponent(project_id)}`),
+  listProjectFiles: (project_id: string, subpath?: string) =>
+    request<{ project_id: string; subpath: string; entries: ProjectFileEntry[] }>(`/api/web/workspace/project/files?project_id=${encodeURIComponent(project_id)}${subpath ? `&subpath=${encodeURIComponent(subpath)}` : ""}`),
+  readProjectFile: (project_id: string, path: string) =>
+    request<{ project_id: string; path: string; size: number; lines: number; content: string }>(`/api/web/workspace/project/file?project_id=${encodeURIComponent(project_id)}&path=${encodeURIComponent(path)}`),
+  writeProjectFile: (project_id: string, path: string, content: string) =>
+    request<{ status: string; project_id: string; path: string; bytes: number }>("/api/web/workspace/project/file", "POST", { project_id, path, content }),
+  executeProjectCommand: (project_id: string, command: string, timeout = 15) =>
+    request<CommandExecutionResult>("/api/web/workspace/project/command", "POST", { project_id, command, timeout }),
 };

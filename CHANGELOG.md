@@ -2,6 +2,39 @@
 
 تمامی تغییرات، تفاوت‌های فرآیند آپدیت و انتشارات رسمی پلتفرم OmniOps بر اساس استاندارد [Keep a Changelog](https://keepachangelog.com/) در این فایل آرشیو می‌شوند.
 
+## [v1.14.0] - 2026-10-14
+### 🛠️ ایمپورت پروژه‌های محلی و نیمه‌کاره، پویش هوشمند فریم‌ورک و تسک‌ها، ابزارهای فایل و مجری امن دستورات پروژه (Agentic Workspace Pilot):
+* **اتصال و ایمپورت پروژه‌های محلی و نیمه‌کاره (Local Project Workspace Ingestion & Inspection):**
+  - افزودن ستون `root_path` به جدول پروژه‌های ورک‌اسپیس با مدیریت مایگریشن خودکار در `omniops/workspace.py`.
+  - ثبت پروژه جدید یا اتصال دایرکتوری لوکال به پروژه‌های موجود از طریق `create_project` و `bind_project_root`.
+  - پویش خودکار متادیتا و فناوری‌های پروژه (`inspect_project`):
+    - شناسایی هوشمند فریم‌ورک‌ها و زبان‌های مورد استفاده (React, Vite, Fastify, FastAPI, Django, Flask, Express, Rust/Cargo, Go, Python).
+    - اسکن و استخراج خودکار تسک‌ها و الزامات ناتمام از فایل‌های `TODO.md` و بخش‌های `TODO` یا `Roadmap` در مستندات `README.md`.
+    - تهیه خلاصه شناسنامه و پیش‌نمایش مستندات پروژه برای تغذیه حافظه مدل.
+* **ابزارهای مدیریت فایل و ایمنی مسیر پروژه (Workspace File Tools & Path Traversal Guard):**
+  - توابع امن `list_project_files`، `read_project_file` و `write_project_file` با کنترل دقیق سقف حجم فایل.
+  - گارد امنیتی غیرقابل نفوذ در برابر Path Traversal (`_safe_resolve` با اعتبارسنجی `Path.resolve().relative_to()`).
+  - ممیزی و ثبت تمامی تغییرات فایل در لاگ امنیتی سرور با کد ممیزی `workspace_file_written`.
+* **مجری ساندباکس دستورات ترمینال در محیط پروژه (Project Command Runner):**
+  - تابع `execute_project_command` برای اجرای مستقیم ابزارها و اسکریپت‌ها در ریشه پروژه با تایم‌اوت و مهار دستورات مخرب.
+  - کنترل دسترسی سخت‌گیرانه RBAC: اعمال شرط مجوز «تایید اقدام» (`action.approve`) یا نقش مدیر ارشد (`superadmin`) با خطای ۴۰۳ برای کاربران فاقد مجوز.
+  - ثبت سابقه تمام دستورات اجرا شده در لاگ ممیزی با کد `workspace_command_executed`.
+* **رابط کاربری تعاملی هدایت پروژه (`AgenticWorkspaceCard.tsx` & `UserWorkspace.tsx`):**
+  - افزوده شدن تب جدید `🛠️ میز کار و هدایت پروژه` در فضای کاربری اعضای سازمان.
+  - فرم سریع اتصال به پوشه محلی پروژه روی رایانه یا سرور.
+  - نشانگرهای هوشمند فریم‌ورک، تعداد کل فایل‌ها و مسیر دایرکتوری.
+  - کلید طلایی **«🚀 بارگذاری کانتکست و تسک‌های پروژه در چت هوش مصنوعی»**: تبدیل خودکار متادیتا، ساختار پوشه‌ها و تسک‌های ناتمام به پرامپت منسجم و انتقال کاربر به چت روم جهت ادامه توسعه پروژه مانند یک دستیار عامل‌گرا (Agentic Pair Programmer).
+  - کاوشگر سریع فایل‌ها با چیپ‌های تعاملی، نمایشگر سریع محتوای فایل‌ها و شمارش سطرها.
+  - بخش اجرای دستورات ترمینال به همراه کپسول تأیید هوشمند انسانی (Human-in-the-Loop Approval Pill) قبل از اجرای دستور.
+* **اندپوینت‌های وب API (`omniops/server.py`):**
+  - مسیرهای POST: `/api/web/workspace/projects/bind-root`، `/api/web/workspace/project/file`، `/api/web/workspace/project/command`.
+  - مسیرهای GET: `/api/web/workspace/project/inspect`، `/api/web/workspace/project/files`، `/api/web/workspace/project/file`.
+* **پوشش تست‌ها:**
+  - ۶ تست تخصصی در `tests/test_workspace.py` و ۱۸ تست در `tests/test_identity_gateway.py`.
+  - موفقیت ۱۰۰٪ تمام ۱۲۹ تست کل سیستم بدون رگرسیون.
+
+---
+
 ## [v1.13.0] - 2026-10-14
 ### 📚 پایگاه دانش چندسندی (Multi-File Knowledge Binder)، نشان‌کردن پیام‌های برگزیده (Bookmarks) و داشبورد زنده تله‌متری منابع گره‌های Worker:
 * **پایگاه دانش اسناد همزمان و نوار ابزار تجمیعی در محیط کاربری (`ChatRoom.tsx` & `omniops/server.py`):**

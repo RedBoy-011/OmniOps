@@ -527,6 +527,9 @@ def make_server(
                 "/api/web/workspace/tasks/cancel", "/api/agent/workspace/tasks/cancel",
                 "/api/web/workspace/attachments", "/api/agent/workspace/attachments",
                 "/api/web/workspace/attachments/remove", "/api/agent/workspace/attachments/remove",
+                "/api/web/workspace/projects/bind-root", "/api/agent/workspace/projects/bind-root",
+                "/api/web/workspace/project/file", "/api/agent/workspace/project/file",
+                "/api/web/workspace/project/command", "/api/agent/workspace/project/command",
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/test-socks", "/api/admin/providers/enable", "/api/admin/providers/price",
                 "/api/admin/system/backups", "/api/admin/system/update",
@@ -645,7 +648,13 @@ def make_server(
                     memory.remove_note(principal, payload.get('id'))
                     self._send(200, {'status': 'removed'})
                 elif path in ('/api/web/workspace/projects', '/api/agent/workspace/projects'):
-                    self._send(201, workspace.create_project(principal, payload.get('name')))
+                    self._send(201, workspace.create_project(principal, payload.get('name'), payload.get('root_path', '')))
+                elif path in ('/api/web/workspace/projects/bind-root', '/api/agent/workspace/projects/bind-root'):
+                    self._send(200, workspace.bind_project_root(principal, payload.get('project_id'), payload.get('root_path', '')))
+                elif path in ('/api/web/workspace/project/file', '/api/agent/workspace/project/file'):
+                    self._send(200, workspace.write_project_file(principal, payload.get('project_id'), payload.get('path'), payload.get('content')))
+                elif path in ('/api/web/workspace/project/command', '/api/agent/workspace/project/command'):
+                    self._send(200, workspace.execute_project_command(principal, payload.get('project_id'), payload.get('command'), payload.get('timeout', 15)))
                 elif path in ('/api/web/workspace/tasks', '/api/agent/workspace/tasks'):
                     self._send(201, workspace.create_task(principal, payload.get('project_id'), payload.get('description')))
                 elif path in ('/api/web/workspace/tasks/cancel', '/api/agent/workspace/tasks/cancel'):
@@ -828,6 +837,26 @@ def make_server(
                         self._send(200, {'projects': workspace.list_projects(principal)})
                     else:
                         self._send(200, {'tasks': workspace.list_tasks(principal)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                return
+            if parsed.path in ('/api/web/workspace/project/inspect', '/api/agent/workspace/project/inspect',
+                              '/api/web/workspace/project/files', '/api/agent/workspace/project/files',
+                              '/api/web/workspace/project/file', '/api/agent/workspace/project/file'):
+                principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
+                if principal is None:
+                    return
+                try:
+                    q = parse_qs(parsed.query)
+                    p_id = q.get('project_id', [None])[0]
+                    if parsed.path.endswith('/inspect'):
+                        self._send(200, workspace.inspect_project(principal, p_id))
+                    elif parsed.path.endswith('/files'):
+                        sub = q.get('subpath', [''])[0]
+                        self._send(200, workspace.list_project_files(principal, p_id, sub))
+                    elif parsed.path.endswith('/file'):
+                        rel = q.get('path', [None])[0]
+                        self._send(200, workspace.read_project_file(principal, p_id, rel))
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 return

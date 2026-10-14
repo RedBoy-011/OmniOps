@@ -1,4 +1,4 @@
-﻿import base64
+import base64
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,3 +58,80 @@ class WorkspaceTests(unittest.TestCase):
             self.workspace.add_attachment(self.member, project['id'], 'bad.txt', 'text/plain', 'not-base64!')
         self.workspace.remove_attachment(self.member, item['id'])
         self.assertEqual(self.workspace.list_attachments(self.member, project['id']), [])
+
+    def test_workspace_project_root_binding_and_inspection(self):
+        proj_dir = Path(self.temp.name) / 'sample_project'
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        (proj_dir / 'package.json').write_text('{"name": "test-app", "dependencies": {"react": "^18.0.0", "vite": "^5.0.0"}}', encoding='utf-8')
+        (proj_dir / 'README.md').write_text('# Test Incomplete Project\nCreated with external AI assistance.\n\n## Tasks\n- [ ] Task 1', encoding='utf-8')
+        (proj_dir / 'TODO.md').write_text('- [ ] Finish Auth\n- [ ] Write Unit Tests', encoding='utf-8')
+        (proj_dir / 'src').mkdir(parents=True, exist_ok=True)
+        (proj_dir / 'src' / 'index.js').write_text('console.log("hello");', encoding='utf-8')
+
+        # Create project with root_path
+        proj = self.workspace.create_project(self.member, 'My React App', str(proj_dir))
+        self.assertEqual(proj['root_path'], str(proj_dir))
+
+        # Inspect project
+        info = self.workspace.inspect_project(self.member, proj['id'])
+        self.assertEqual(info['project_type'], 'nodejs')
+        self.assertIn('React', info['framework'])
+        self.assertTrue(info['has_readme'])
+        self.assertIn('Test Incomplete Project', info['readme_preview'])
+        self.assertIn('Finish Auth', info['tasks_context'])
+        self.assertGreaterEqual(info['total_entries'], 3)
+
+        # List files
+        files_info = self.workspace.list_project_files(self.member, proj['id'])
+        names = [e['name'] for e in files_info['entries']]
+        self.assertIn('package.json', names)
+        self.assertIn('README.md', names)
+        self.assertIn('src', names)
+
+    def test_workspace_file_read_write_and_path_traversal(self):
+        proj_dir = Path(self.temp.name) / 'fs_project'
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        (proj_dir / 'hello.txt').write_text('سلام از فایل محلی', encoding='utf-8')
+
+        proj = self.workspace.create_project(self.member, 'FS Project', str(proj_dir))
+
+        # Read file
+        res = self.workspace.read_project_file(self.member, proj['id'], 'hello.txt')
+        self.assertEqual(res['content'], 'سلام از فایل محلی')
+        self.assertEqual(res['lines'], 1)
+
+        # Write new file
+        write_res = self.workspace.write_project_file(self.member, proj['id'], 'sub/nested.py', 'print("created by agent")')
+        self.assertEqual(write_res['status'], 'written')
+        self.assertTrue((proj_dir / 'sub' / 'nested.py').is_file())
+
+        # Path traversal prevention
+        with self.assertRaises(IdentityError) as ctx:
+            self.workspace.read_project_file(self.member, proj['id'], '../../outside.txt')
+        self.assertEqual(ctx.exception.status, 403)
+
+        with self.assertRaises(IdentityError) as ctx:
+            self.workspace.write_project_file(self.member, proj['id'], '../bad.txt', 'danger')
+        self.assertEqual(ctx.exception.status, 403)
+
+    def test_workspace_command_execution_permissions_and_safety(self):
+        proj_dir = Path(self.temp.name) / 'cmd_project'
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        proj = self.workspace.create_project(self.member, 'Cmd Project', str(proj_dir))
+
+        # Member without action.approve fails with 403
+        with self.assertRaises(IdentityError) as ctx:
+            self.workspace.execute_project_command(self.member, proj['id'], 'echo test')
+        self.assertEqual(ctx.exception.status, 403)
+
+        # Owner (superadmin) succeeds
+        import sys
+        admin_proj = self.workspace.create_project(self.owner, 'Admin Cmd Project', str(proj_dir))
+        cmd_res = self.workspace.execute_project_command(self.owner, admin_proj['id'], f'"{sys.executable}" -c "print(10 + 20)"')
+        self.assertEqual(cmd_res['exit_code'], 0, f"Command failed with stderr: {cmd_res.get('stderr')}")
+        self.assertIn('30', cmd_res['stdout'])
+
+        # Dangerous command rejected with 400
+        with self.assertRaises(IdentityError) as ctx:
+            self.workspace.execute_project_command(self.owner, admin_proj['id'], 'format c: /q')
+        self.assertEqual(ctx.exception.status, 400)

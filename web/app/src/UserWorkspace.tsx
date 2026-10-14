@@ -5,6 +5,7 @@ import { WorkspaceTasks } from "./WorkspaceTasks";
 import { CustomizationsPanel } from "./CustomizationsPanel";
 import { ClientDownloadsCard } from "./components/ClientDownloadsCard";
 import { UserProfileModal } from "./components/UserProfileModal";
+import { AgenticWorkspaceCard } from "./components/AgenticWorkspaceCard";
 
 type Props = {
   user: Profile;
@@ -15,7 +16,8 @@ type Props = {
 export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
   const [currentUser, setCurrentUser] = useState<Profile>(user);
   const [showProfile, setShowProfile] = useState(false);
-  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "task" | "customizations" | "downloads">("chat");
+  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "pilot" | "task" | "customizations" | "downloads">("chat");
+  const [chatInitialPrompt, setChatInitialPrompt] = useState("");
 
   // Pair state for downloads / pairing
   const [pair, setPair] = useState<{ code: string; expires_at: number } | null>(null);
@@ -140,6 +142,16 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
               <button
                 type="button"
                 role="tab"
+                aria-selected={workspaceMode === "pilot"}
+                className={workspaceMode === "pilot" ? "active" : ""}
+                onClick={() => setWorkspaceMode("pilot")}
+              >
+                🛠️ میز کار و هدایت پروژه
+              </button>
+
+              <button
+                type="button"
+                role="tab"
                 aria-selected={workspaceMode === "task"}
                 className={workspaceMode === "task" ? "active" : ""}
                 onClick={() => setWorkspaceMode("task")}
@@ -174,7 +186,20 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
         {currentUser.capabilities.includes("chat") && (
           <>
             <div hidden={workspaceMode !== "chat"}>
-              <ChatRoom />
+              <ChatRoom
+                initialPrompt={chatInitialPrompt}
+                onClearInitialPrompt={() => setChatInitialPrompt("")}
+              />
+            </div>
+
+            <div hidden={workspaceMode !== "pilot"}>
+              <AgenticWorkspaceCard
+                canExecuteCommands={currentUser.capabilities.includes("action.approve") || currentUser.role === "superadmin"}
+                onLoadContextToChat={(prompt) => {
+                  setChatInitialPrompt(prompt);
+                  setWorkspaceMode("chat");
+                }}
+              />
             </div>
 
             <div hidden={workspaceMode !== "task"}>

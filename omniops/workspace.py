@@ -1,7 +1,11 @@
-﻿"""Owner-scoped project list and durable task drafts without tool execution."""
+"""Owner-scoped project list, local workspace root binding, and agentic tool execution."""
 
 import base64
 import binascii
+import json
+from pathlib import Path
+import subprocess
+import time
 import uuid
 
 from .identity import IdentityError
@@ -14,7 +18,8 @@ class WorkspaceStore:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS workspace_projects (
                     id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    name TEXT NOT NULL, created_at INTEGER NOT NULL
+                    name TEXT NOT NULL, created_at INTEGER NOT NULL,
+                    root_path TEXT DEFAULT ''
                 );
                 CREATE INDEX IF NOT EXISTS workspace_project_owner ON workspace_projects(owner_id, created_at);
                 CREATE TABLE IF NOT EXISTS workspace_tasks (
@@ -32,6 +37,10 @@ class WorkspaceStore:
                 );
                 CREATE INDEX IF NOT EXISTS workspace_attachment_owner ON workspace_attachments(owner_id, project_id);
             """)
+            try:
+                db.execute("ALTER TABLE workspace_projects ADD COLUMN root_path TEXT DEFAULT ''")
+            except Exception:
+                pass
 
     @staticmethod
     def _cap(principal, capability):
@@ -42,21 +51,280 @@ class WorkspaceStore:
         self._cap(principal, 'chat')
         with self.store._db() as db:
             return [dict(row) for row in db.execute(
-                'SELECT id,name,created_at FROM workspace_projects WHERE owner_id=? ORDER BY created_at DESC, rowid DESC LIMIT 30',
+                "SELECT id,name,created_at,COALESCE(root_path,'') as root_path FROM workspace_projects WHERE owner_id=? ORDER BY created_at DESC, rowid DESC LIMIT 30",
                 (principal['id'],))]
 
-    def create_project(self, principal, name):
+    def create_project(self, principal, name, root_path=""):
         self._cap(principal, 'chat')
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 100:
             raise IdentityError('Project name must contain 1-100 characters')
+        if not isinstance(root_path, str):
+            root_path = ""
+        clean_root = root_path.strip()[:500]
         with self.store._lock, self.store._db() as db:
             if db.execute('SELECT COUNT(*) FROM workspace_projects WHERE owner_id=?', (principal['id'],)).fetchone()[0] >= 30:
                 raise IdentityError('Project limit reached', 409)
             project_id = uuid.uuid4().hex
-            db.execute('INSERT INTO workspace_projects VALUES (?,?,?,?)',
-                       (project_id, principal['id'], name.strip(), int(self.store.clock())))
+            db.execute('INSERT INTO workspace_projects (id, owner_id, name, created_at, root_path) VALUES (?,?,?,?,?)',
+                       (project_id, principal['id'], name.strip(), int(self.store.clock()), clean_root))
             self.store._audit(db, principal['id'], 'workspace_project_created', project_id)
-        return {'id': project_id, 'name': name.strip()}
+        return {'id': project_id, 'name': name.strip(), 'root_path': clean_root}
+
+    def bind_project_root(self, principal, project_id, root_path):
+        self._cap(principal, 'chat')
+        if not isinstance(project_id, str) or len(project_id) != 32:
+            raise IdentityError('Invalid project ID')
+        if not isinstance(root_path, str):
+            raise IdentityError('Invalid root path')
+        clean_path = root_path.strip()[:500]
+        with self.store._lock, self.store._db() as db:
+            changed = db.execute('UPDATE workspace_projects SET root_path=? WHERE id=? AND owner_id=?',
+                                 (clean_path, project_id, principal['id'])).rowcount
+            if changed != 1:
+                raise IdentityError('Project not found', 404)
+            self.store._audit(db, principal['id'], 'workspace_project_root_updated', project_id)
+        return {'status': 'updated', 'project_id': project_id, 'root_path': clean_path}
+
+    def _resolve_project_root(self, principal, project_id):
+        with self.store._db() as db:
+            row = db.execute('SELECT root_path, name FROM workspace_projects WHERE id=? AND owner_id=?',
+                             (project_id, principal['id'])).fetchone()
+            if not row:
+                raise IdentityError('Project not found', 404)
+            root_str = (row['root_path'] or '').strip()
+            if not root_str:
+                raise IdentityError('Project does not have an anchored local directory root', 400)
+            target = Path(root_str).resolve()
+            if not target.exists() or not target.is_dir():
+                raise IdentityError(f'Anchored project directory does not exist: {root_str}', 404)
+            return target, row['name']
+
+    def _safe_resolve(self, root_dir: Path, rel_path: str) -> Path:
+        if not isinstance(rel_path, str):
+            raise IdentityError('Invalid relative path')
+        clean = rel_path.strip().replace('\\', '/').lstrip('/')
+        target = (root_dir / clean).resolve()
+        try:
+            target.relative_to(root_dir)
+        except ValueError:
+            raise IdentityError('Path traversal detected outside project root', 403)
+        return target
+
+    def inspect_project(self, principal, project_id):
+        self._cap(principal, 'chat')
+        root_dir, project_name = self._resolve_project_root(principal, project_id)
+
+        # Detect language and framework
+        p_type = 'generic'
+        framework = 'Unknown'
+
+        has_package_json = (root_dir / 'package.json').is_file()
+        has_requirements = (root_dir / 'requirements.txt').is_file() or (root_dir / 'pyproject.toml').is_file()
+        has_cargo = (root_dir / 'Cargo.toml').is_file()
+        has_go = (root_dir / 'go.mod').is_file()
+
+        if has_package_json:
+            p_type = 'nodejs'
+            framework = 'Node.js'
+            try:
+                pkg_data = json.loads((root_dir / 'package.json').read_text(encoding='utf-8', errors='ignore'))
+                deps = {**pkg_data.get('dependencies', {}), **pkg_data.get('devDependencies', {})}
+                if 'react' in deps:
+                    framework = 'React' + (' + Vite' if 'vite' in deps else '')
+                elif 'next' in deps:
+                    framework = 'Next.js'
+                elif 'vue' in deps:
+                    framework = 'Vue'
+                elif 'express' in deps:
+                    framework = 'Express'
+                elif 'fastify' in deps:
+                    framework = 'Fastify'
+            except Exception:
+                pass
+        elif has_requirements:
+            p_type = 'python'
+            framework = 'Python'
+            try:
+                content = ''
+                if (root_dir / 'requirements.txt').is_file():
+                    content = (root_dir / 'requirements.txt').read_text(encoding='utf-8', errors='ignore').lower()
+                elif (root_dir / 'pyproject.toml').is_file():
+                    content = (root_dir / 'pyproject.toml').read_text(encoding='utf-8', errors='ignore').lower()
+                if 'fastapi' in content:
+                    framework = 'FastAPI'
+                elif 'django' in content:
+                    framework = 'Django'
+                elif 'flask' in content:
+                    framework = 'Flask'
+                elif 'torch' in content or 'tensorflow' in content:
+                    framework = 'AI / PyTorch'
+            except Exception:
+                pass
+        elif has_cargo:
+            p_type = 'rust'
+            framework = 'Rust / Cargo'
+        elif has_go:
+            p_type = 'go'
+            framework = 'Go Module'
+
+        top_entries = []
+        ignore_names = {'.git', 'node_modules', '__pycache__', '.venv', 'venv', 'dist', 'build', '.idea', '.vscode'}
+        file_count = 0
+        readme_preview = ''
+        tasks_preview = ''
+
+        try:
+            for item in sorted(root_dir.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+                if item.name in ignore_names:
+                    continue
+                file_count += 1
+                if len(top_entries) < 35:
+                    top_entries.append({
+                        'name': item.name,
+                        'is_dir': item.is_dir(),
+                        'size': item.stat().st_size if item.is_file() else None,
+                    })
+                if not readme_preview and item.is_file() and item.name.lower() in ('readme.md', 'readme.txt'):
+                    try:
+                        readme_preview = item.read_text(encoding='utf-8', errors='ignore')[:1500]
+                    except Exception:
+                        pass
+                if not tasks_preview and item.is_file() and item.name.lower() in ('todo.md', 'tasks.md', 'roadmap.md'):
+                    try:
+                        tasks_preview = item.read_text(encoding='utf-8', errors='ignore')[:1500]
+                    except Exception:
+                        pass
+        except Exception as exc:
+            raise IdentityError(f'Cannot inspect project directory: {exc}', 500)
+
+        return {
+            'project_id': project_id,
+            'name': project_name,
+            'root_path': str(root_dir),
+            'project_type': p_type,
+            'framework': framework,
+            'total_entries': file_count,
+            'top_entries': top_entries,
+            'has_readme': bool(readme_preview),
+            'readme_preview': readme_preview,
+            'tasks_context': tasks_preview,
+        }
+
+    def list_project_files(self, principal, project_id, subpath=''):
+        self._cap(principal, 'chat')
+        root_dir, _ = self._resolve_project_root(principal, project_id)
+        target = self._safe_resolve(root_dir, subpath) if subpath else root_dir
+        if not target.is_dir():
+            raise IdentityError(f'Directory not found: {subpath}', 404)
+        ignore_names = {'.git', 'node_modules', '__pycache__', '.venv', 'venv', 'dist', 'build'}
+        items = []
+        for it in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+            if it.name in ignore_names:
+                continue
+            items.append({
+                'name': it.name,
+                'path': str(it.relative_to(root_dir)).replace('\\', '/'),
+                'is_dir': it.is_dir(),
+                'size': it.stat().st_size if it.is_file() else None,
+            })
+        return {
+            'project_id': project_id,
+            'subpath': subpath,
+            'entries': items[:100],
+        }
+
+    def read_project_file(self, principal, project_id, relative_path):
+        self._cap(principal, 'chat')
+        root_dir, _ = self._resolve_project_root(principal, project_id)
+        target = self._safe_resolve(root_dir, relative_path)
+        if not target.is_file():
+            raise IdentityError(f'File not found: {relative_path}', 404)
+        if target.stat().st_size > 256 * 1024:
+            raise IdentityError('File exceeds 256 KiB size limit', 413)
+        try:
+            content = target.read_text(encoding='utf-8', errors='ignore')
+        except Exception as exc:
+            raise IdentityError(f'Cannot read file: {exc}')
+        lines = len(content.splitlines())
+        return {
+            'project_id': project_id,
+            'path': relative_path,
+            'size': len(content.encode('utf-8')),
+            'lines': lines,
+            'content': content,
+        }
+
+    def write_project_file(self, principal, project_id, relative_path, content):
+        if 'action.request' not in principal.get('capabilities', []) and principal.get('role') != 'superadmin':
+            raise IdentityError('action.request permission required to modify files', 403)
+        if not isinstance(content, str):
+            raise IdentityError('File content must be a string')
+        if len(content.encode('utf-8')) > 256 * 1024:
+            raise IdentityError('File content exceeds 256 KiB limit', 413)
+
+        root_dir, _ = self._resolve_project_root(principal, project_id)
+        target = self._safe_resolve(root_dir, relative_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding='utf-8')
+
+        with self.store._lock, self.store._db() as db:
+            self.store._audit(db, principal['id'], 'workspace_file_written', f"{project_id}:{relative_path}")
+
+        return {
+            'status': 'written',
+            'project_id': project_id,
+            'path': relative_path,
+            'bytes': len(content.encode('utf-8')),
+        }
+
+    def execute_project_command(self, principal, project_id, command, timeout=15):
+        if 'action.approve' not in principal.get('capabilities', []) and principal.get('role') != 'superadmin':
+            raise IdentityError('action.approve capability or superadmin role required to execute workspace commands', 403)
+        if not isinstance(command, str) or not 1 <= len(command.strip()) <= 1000:
+            raise IdentityError('Command must contain 1-1000 characters')
+
+        root_dir, _ = self._resolve_project_root(principal, project_id)
+        clean_cmd = command.strip()
+
+        lower_cmd = clean_cmd.lower()
+        if any(bad in lower_cmd for bad in ('format ', 'rmdir /s /q c:', 'del /f /s /q c:', ':(){ :|:& };:')):
+            raise IdentityError('Prohibited dangerous command', 400)
+
+        t0 = time.time()
+        try:
+            res = subprocess.run(
+                clean_cmd,
+                shell=True,
+                cwd=str(root_dir),
+                capture_output=True,
+                text=True,
+                timeout=min(max(1, timeout), 30),
+            )
+            stdout = res.stdout[:32000] if res.stdout else ''
+            stderr = res.stderr[:32000] if res.stderr else ''
+            exit_code = res.returncode
+        except subprocess.TimeoutExpired:
+            stdout = ''
+            stderr = f'Command timed out after {timeout} seconds'
+            exit_code = 124
+        except Exception as exc:
+            stdout = ''
+            stderr = f'Execution error: {exc}'
+            exit_code = 1
+
+        duration_ms = int((time.time() - t0) * 1000)
+
+        with self.store._lock, self.store._db() as db:
+            self.store._audit(db, principal['id'], 'workspace_command_executed', f"{project_id}:{clean_cmd[:80]}")
+
+        return {
+            'project_id': project_id,
+            'command': clean_cmd,
+            'exit_code': exit_code,
+            'stdout': stdout,
+            'stderr': stderr,
+            'duration_ms': duration_ms,
+        }
 
     def list_tasks(self, principal):
         self._cap(principal, 'action.request')

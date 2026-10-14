@@ -8,7 +8,13 @@ type Entry = { id?: string; role: "user" | "assistant"; text: string; time: stri
 type QueuedMessage = { id: string; text: string; time: string };
 const suggestions = ["وضعیت امروز سیستم را خلاصه کن", "برای بررسی سرویس‌ها چه مراحلی پیشنهاد می‌کنی؟", "یک گزارش کوتاه فارسی بنویس"];
 
-export function ChatRoom() {
+export function ChatRoom({
+  initialPrompt,
+  onClearInitialPrompt,
+}: {
+  initialPrompt?: string;
+  onClearInitialPrompt?: () => void;
+} = {}) {
   const [models, setModels] = useState<string[]>([]);
   const [selected, setSelected] = useState("auto");
   const [externalConsent, setExternalConsent] = useState(false);
@@ -16,6 +22,20 @@ export function ChatRoom() {
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
   const [queueCollapsed, setQueueCollapsed] = useState(false);
   const [draft, setDraft] = useState("");
+
+  useEffect(() => {
+    if (initialPrompt) {
+      setDraft(initialPrompt);
+      if (onClearInitialPrompt) onClearInitialPrompt();
+      setTimeout(() => {
+        const el = document.getElementById("web-chat-input");
+        if (el) {
+          el.focus();
+          el.scrollTop = el.scrollHeight;
+        }
+      }, 50);
+    }
+  }, [initialPrompt]);
   const [busy, setBusy] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [saveHistory, setSaveHistory] = useState(true);

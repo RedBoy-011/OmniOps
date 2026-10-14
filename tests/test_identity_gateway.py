@@ -490,6 +490,58 @@ class WorkerEndpointTests(unittest.TestCase):
         self.assertIn("reply", answer)
         self.assertTrue(len(answer["reply"]) > 0)
 
+    def test_workspace_project_inspection_and_tools_endpoints(self):
+        admin = self.store.login("root-admin", "a very strong admin password")["token"]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            (tmp_path / "package.json").write_text('{"name": "demo-proj", "dependencies": {"fastify": "^4.0.0"}}', encoding="utf-8")
+            (tmp_path / "README.md").write_text("# Demo Incomplete App\nNeeds completion by agent.", encoding="utf-8")
+            (tmp_path / "app.js").write_text('console.log("running");', encoding="utf-8")
+
+            # 1. Create project with root_path
+            code, proj = self.call("POST", "/api/web/workspace/projects", {"name": "Demo Ingest", "root_path": str(tmp_path)}, admin)
+            self.assertEqual(code, 201)
+            p_id = proj["id"]
+
+            # 2. Inspect project
+            code, inspect_res = self.call("GET", f"/api/web/workspace/project/inspect?project_id={p_id}", token=admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(inspect_res["project_type"], "nodejs")
+            self.assertEqual(inspect_res["framework"], "Fastify")
+            self.assertTrue(inspect_res["has_readme"])
+            self.assertIn("Demo Incomplete App", inspect_res["readme_preview"])
+
+            # 3. List files
+            code, files_res = self.call("GET", f"/api/web/workspace/project/files?project_id={p_id}", token=admin)
+            self.assertEqual(code, 200)
+            names = [e["name"] for e in files_res["entries"]]
+            self.assertIn("package.json", names)
+            self.assertIn("app.js", names)
+
+            # 4. Read file
+            code, read_res = self.call("GET", f"/api/web/workspace/project/file?project_id={p_id}&path=app.js", token=admin)
+            self.assertEqual(code, 200)
+            self.assertIn('console.log("running");', read_res["content"])
+
+            # 5. Write file
+            code, write_res = self.call("POST", "/api/web/workspace/project/file", {
+                "project_id": p_id,
+                "path": "server.js",
+                "content": 'console.log("new server");',
+            }, token=admin)
+            self.assertEqual(code, 200)
+            self.assertTrue((tmp_path / "server.js").is_file())
+
+            # 6. Execute safe command
+            import sys
+            code, cmd_res = self.call("POST", "/api/web/workspace/project/command", {
+                "project_id": p_id,
+                "command": f'"{sys.executable}" -c "print(40 + 2)"',
+            }, token=admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(cmd_res["exit_code"], 0)
+            self.assertIn("42", cmd_res["stdout"])
+
 
 if __name__ == "__main__":
     unittest.main()
