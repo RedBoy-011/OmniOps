@@ -5,6 +5,7 @@ import {
   type AgentPlanStep,
   type AgentRunLog,
   type SubagentRun,
+  type GovernanceWebhook,
 } from "../api";
 
 export function AdminAgentGovernanceCard() {
@@ -27,6 +28,20 @@ export function AdminAgentGovernanceCard() {
   const [policyStrict, setPolicyStrict] = useState<boolean>(false);
   const [policyAllowed, setPolicyAllowed] = useState<string>("");
   const [policyBlocked, setPolicyBlocked] = useState<string>("");
+
+  // Webhooks state
+  const [showWebhooksConfig, setShowWebhooksConfig] = useState(false);
+  const [webhooks, setWebhooks] = useState<GovernanceWebhook[]>([]);
+  const [loadingWebhooks, setLoadingWebhooks] = useState(false);
+  const [savingWebhook, setSavingWebhook] = useState(false);
+  const [testingWebhookId, setTestingWebhookId] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{ id: string; status: string; message: string } | null>(null);
+
+  // New webhook form
+  const [whName, setWhName] = useState("");
+  const [whUrl, setWhUrl] = useState("");
+  const [whSecret, setWhSecret] = useState("");
+  const [whEvents, setWhEvents] = useState<string[]>(["emergency_stop", "sandbox_violation", "waiting_approval"]);
 
   async function loadRuns() {
     setLoading(true);
@@ -73,6 +88,67 @@ export function AdminAgentGovernanceCard() {
       setError(err instanceof Error ? err.message : "خطا در بروزرسانی سیاست‌های سندباکس");
     } finally {
       setSavingPolicy(false);
+    }
+  }
+
+  async function loadWebhooks() {
+    setLoadingWebhooks(true);
+    try {
+      const res = await api.listGovernanceWebhooks();
+      setWebhooks(res.webhooks || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطا در دریافت وب‌هوک‌ها");
+    } finally {
+      setLoadingWebhooks(false);
+    }
+  }
+
+  async function handleSaveWebhook(e: React.FormEvent) {
+    e.preventDefault();
+    if (!whName.trim() || !whUrl.trim()) return;
+    setSavingWebhook(true);
+    setError("");
+    setActionSuccess("");
+    try {
+      await api.saveGovernanceWebhook({
+        name: whName.trim(),
+        url: whUrl.trim(),
+        secret: whSecret.trim(),
+        events: whEvents,
+        enabled: true,
+      });
+      setActionSuccess("وب‌هوک با موفقیت ثبت شد.");
+      setWhName("");
+      setWhUrl("");
+      setWhSecret("");
+      await loadWebhooks();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطا در ذخیره وب‌هوک");
+    } finally {
+      setSavingWebhook(false);
+    }
+  }
+
+  async function handleDeleteWebhook(id: string) {
+    try {
+      await api.deleteGovernanceWebhook(id);
+      setActionSuccess("وب‌هوک حذف شد.");
+      await loadWebhooks();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطا در حذف وب‌هوک");
+    }
+  }
+
+  async function handleTestWebhook(id: string) {
+    setTestingWebhookId(id);
+    setTestResult(null);
+    try {
+      const res = await api.testGovernanceWebhook(id);
+      setTestResult({ id, status: res.status, message: res.message });
+    } catch (err) {
+      setTestResult({ id, status: "error", message: err instanceof Error ? err.message : "خطای تست" });
+    } finally {
+      setTestingWebhookId(null);
     }
   }
 
@@ -167,6 +243,16 @@ export function AdminAgentGovernanceCard() {
             }}
           >
             🛡️ تنظیمات سندباکس و سقف منابع
+          </button>
+          <button
+            type="button"
+            className="action-button secondary-btn"
+            onClick={() => {
+              void loadWebhooks();
+              setShowWebhooksConfig(true);
+            }}
+          >
+            🔔 وب‌هوک‌ها و هشدارهای حاکمیتی
           </button>
           <button
             type="button"
@@ -578,6 +664,179 @@ export function AdminAgentGovernanceCard() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* مدال وب‌هوک‌ها و هشدارهای حاکمیتی */}
+      {showWebhooksConfig && (
+        <div className="admin-modal-backdrop" onClick={() => setShowWebhooksConfig(false)}>
+          <div className="admin-modal-card large" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header-row">
+              <div>
+                <h4>🔔 وب‌هوک‌ها و هشدارهای حاکمیتی (Governance Webhooks & Alerting)</h4>
+                <small>ارسال برخط رویدادهای بحرانی ایجنت‌ها به سامانه‌های بیرونی سازمان نظیر دیسکورد، اسلک یا وب‌هوک اختصاصی</small>
+              </div>
+              <button type="button" className="close-btn" onClick={() => setShowWebhooksConfig(false)}>✕</button>
+            </div>
+
+            <div className="webhooks-modal-content">
+              {/* فهرست وب‌هوک‌های تعریف‌شده */}
+              <div className="webhooks-list-section">
+                <h5>فهرست مقاصد هشدار فعال:</h5>
+                {loadingWebhooks ? (
+                  <p className="loading-hint">⏳ در حال دریافت لیست وب‌هوک‌ها...</p>
+                ) : webhooks.length === 0 ? (
+                  <p className="empty-hint">هیچ وب‌هوکی تعریف نشده است. می‌توانید در فرم زیر وب‌هوک جدید ایجاد کنید.</p>
+                ) : (
+                  <div className="webhooks-grid">
+                    {webhooks.map((wh) => (
+                      <div key={wh.id} className="webhook-card">
+                        <div className="webhook-card-header">
+                          <strong>{wh.name}</strong>
+                          <span className="webhook-status-badge active">فعال</span>
+                        </div>
+                        <div className="webhook-url" dir="ltr">{wh.url}</div>
+                        <div className="webhook-events-row">
+                          {wh.events.map((ev) => (
+                            <span key={ev} className="event-badge">
+                              {ev === "emergency_stop" && "⛔ توقف اضطراری"}
+                              {ev === "sandbox_violation" && "🚫 نقض سندباکس"}
+                              {ev === "waiting_approval" && "⚠️ انتظار تأیید"}
+                              {!["emergency_stop", "sandbox_violation", "waiting_approval"].includes(ev) && ev}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="webhook-card-actions">
+                          <button
+                            type="button"
+                            className="quiet-button test-btn"
+                            disabled={testingWebhookId === wh.id}
+                            onClick={() => void handleTestWebhook(wh.id)}
+                          >
+                            {testingWebhookId === wh.id ? "⏳ در حال ارسال پینگ..." : "⚡ ارسال پینگ تستی"}
+                          </button>
+                          <button
+                            type="button"
+                            className="danger-button delete-btn"
+                            onClick={() => void handleDeleteWebhook(wh.id)}
+                          >
+                            🗑️ حذف
+                          </button>
+                        </div>
+                        {testResult && testResult.id === wh.id && (
+                          <div className={`webhook-test-result ${testResult.status}`}>
+                            {testResult.status === "success" ? "✅ پاسخ سرور مقصد: " : "❌ خطا در برقراری ارتباط: "}
+                            {testResult.message}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* فرم افزودن وب‌هوک جدید */}
+              <form onSubmit={handleSaveWebhook} className="new-webhook-form">
+                <h5>➕ ثبت مقصد وب‌هوک جدید:</h5>
+                <div className="form-row-grid">
+                  <div className="modal-form-field">
+                    <label htmlFor="wh-name-input">نام / عنوان وب‌هوک:</label>
+                    <input
+                      id="wh-name-input"
+                      type="text"
+                      placeholder="مثال: دیسکورد کانال هشدارهای امنیتی"
+                      value={whName}
+                      onChange={(e) => setWhName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="modal-form-field">
+                    <label htmlFor="wh-secret-input">رمز امضای محرمانه (HMAC Secret - اختیاری):</label>
+                    <input
+                      id="wh-secret-input"
+                      type="password"
+                      dir="ltr"
+                      placeholder="کلید اختیاری جهت اعتبارسنجی X-OmniOps-Signature"
+                      value={whSecret}
+                      onChange={(e) => setWhSecret(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="modal-form-field">
+                  <label htmlFor="wh-url-input">آدرس Endpoint مقصد (URL):</label>
+                  <input
+                    id="wh-url-input"
+                    type="url"
+                    dir="ltr"
+                    placeholder="https://hooks.slack.com/services/... یا https://api.mycorp.internal/webhook"
+                    value={whUrl}
+                    onChange={(e) => setWhUrl(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="modal-form-field">
+                  <label>اشتراک در رویدادهای حاکمیتی:</label>
+                  <div className="events-checkbox-group">
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={whEvents.includes("emergency_stop")}
+                        onChange={(e) => {
+                          setWhEvents((prev) =>
+                            e.target.checked ? [...prev, "emergency_stop"] : prev.filter((x) => x !== "emergency_stop")
+                          );
+                        }}
+                      />
+                      <span>⛔ توقف اضطراری ایجنت (Emergency Kill Switch)</span>
+                    </label>
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={whEvents.includes("sandbox_violation")}
+                        onChange={(e) => {
+                          setWhEvents((prev) =>
+                            e.target.checked ? [...prev, "sandbox_violation"] : prev.filter((x) => x !== "sandbox_violation")
+                          );
+                        }}
+                      />
+                      <span>🚫 نقض قوانین سندباکس یا دستور ممنوعه (Sandbox Violation)</span>
+                    </label>
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={whEvents.includes("waiting_approval")}
+                        onChange={(e) => {
+                          setWhEvents((prev) =>
+                            e.target.checked ? [...prev, "waiting_approval"] : prev.filter((x) => x !== "waiting_approval")
+                          );
+                        }}
+                      />
+                      <span>⚠️ توقف ایجنت در انتظار تأیید انسانی (Waiting Human Approval)</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="modal-actions-row">
+                  <button
+                    type="submit"
+                    className="action-button primary-accent"
+                    disabled={savingWebhook || !whName.trim() || !whUrl.trim()}
+                  >
+                    {savingWebhook ? "⏳ در حال ثبت..." : "💾 ذخیره و فعال‌سازی وب‌هوک"}
+                  </button>
+                  <button
+                    type="button"
+                    className="quiet-button"
+                    onClick={() => setShowWebhooksConfig(false)}
+                  >
+                    بستن
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}

@@ -9,6 +9,7 @@ import {
   type AgentRole,
   type AgentMode,
   type FilePatchProposal,
+  type FilePatchRecord,
 } from "../api";
 
 interface AgenticWorkspaceCardProps {
@@ -34,6 +35,12 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
   const [patchDiffResult, setPatchDiffResult] = useState<FilePatchProposal | null>(null);
   const [calculatingDiff, setCalculatingDiff] = useState(false);
   const [applyingPatch, setApplyingPatch] = useState(false);
+
+  // Patch history and rollback state
+  const [patches, setPatches] = useState<FilePatchRecord[]>([]);
+  const [loadingPatches, setLoadingPatches] = useState(false);
+  const [selectedPatchForDiff, setSelectedPatchForDiff] = useState<FilePatchRecord | null>(null);
+  const [rollingBackPatchId, setRollingBackPatchId] = useState<string | null>(null);
 
   // Create / Bind state
   const [showNewModal, setShowNewModal] = useState(false);
@@ -99,7 +106,39 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
 
     void handleInspectProject(selectedProjectId);
     void loadAgentRuns(selectedProjectId);
+    void loadProjectPatches(selectedProjectId);
   }, [selectedProjectId, projects]);
+
+  async function loadProjectPatches(projectId: string) {
+    if (!projectId) return;
+    try {
+      setLoadingPatches(true);
+      const res = await api.listProjectPatches(projectId);
+      setPatches(res.patches || []);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingPatches(false);
+    }
+  }
+
+  async function handleRollbackPatch(patchId: string) {
+    if (!selectedProjectId) return;
+    setRollingBackPatchId(patchId);
+    setError("");
+    setSuccessMsg("");
+    try {
+      const res = await api.rollbackProjectPatch(patchId);
+      setSuccessMsg(`وصله فایل «${res.patch.path}» با موفقیت بازگردانی (Rollback) شد.`);
+      await loadProjectPatches(selectedProjectId);
+      const filesRes = await api.listProjectFiles(selectedProjectId);
+      setFiles(filesRes.entries || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "بازگردانی وصله با خطا مواجه شد.");
+    } finally {
+      setRollingBackPatchId(null);
+    }
+  }
 
   async function loadAgentRuns(projectId: string) {
     if (!projectId) return;
@@ -269,6 +308,7 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
       setEditedFileContent(detail.content);
       const filesRes = await api.listProjectFiles(selectedProjectId);
       setFiles(filesRes.entries || []);
+      void loadProjectPatches(selectedProjectId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "اعمال پچ با خطا مواجه شد.");
     } finally {
@@ -935,6 +975,114 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
               </div>
             )}
           </div>
+
+          {/* بخش تاریخچه پچ‌ها و بازگردانی سریع (Patch History & Rollback) */}
+          <div className="agentic-patch-history-section">
+            <div className="runner-header">
+              <div className="header-title-group">
+                <strong>📜 تاریخچه پچ‌های اعمال‌شده بر پروژه (Patch History & Rollback):</strong>
+                <span className="count-badge">{patches.length} وصله</span>
+              </div>
+              <button
+                type="button"
+                className="quiet-button"
+                onClick={() => selectedProjectId && void loadProjectPatches(selectedProjectId)}
+                disabled={loadingPatches}
+              >
+                {loadingPatches ? "⏳ در حال بروزرسانی..." : "🔄 بازخوانی تاریخچه"}
+              </button>
+            </div>
+
+            {patches.length === 0 ? (
+              <p className="no-perm-hint">هنوز هیچ پچی روی فایل‌های این پروژه اعمال نشده است.</p>
+            ) : (
+              <div className="patch-history-list">
+                {patches.map((p) => (
+                  <div key={p.id} className={`patch-history-item ${p.status}`}>
+                    <div className="patch-info">
+                      <div className="patch-title-row">
+                        <span className="file-path" dir="ltr">📄 {p.path}</span>
+                        <span className={`patch-status-badge ${p.status}`}>
+                          {p.status === "applied" ? "✅ اعمال‌شده روی فایل" : "↩️ بازگردانی‌شده (Reverted)"}
+                        </span>
+                      </div>
+                      <div className="patch-meta-row">
+                        <span className="patch-stats">
+                          <span className="additions">+{p.additions}</span> / <span className="deletions">-{p.deletions}</span> سطر
+                        </span>
+                        <span>توسط: <strong>{p.applied_by_username || "کاربر"}</strong></span>
+                        <span>زمان ثبت: {new Date(p.created_at * 1000).toLocaleString("fa-IR")}</span>
+                        {p.reverted_at && (
+                          <span className="reverted-time">· بازگردانی در: {new Date(p.reverted_at * 1000).toLocaleString("fa-IR")}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="patch-item-actions">
+                      <button
+                        type="button"
+                        className="quiet-button"
+                        onClick={() => setSelectedPatchForDiff(p)}
+                        title="مشاهده تفاوت‌های خط‌به‌خط"
+                      >
+                        👁️ مشاهده Diff
+                      </button>
+                      {p.status === "applied" && (
+                        <button
+                          type="button"
+                          className="action-button rollback-btn"
+                          disabled={rollingBackPatchId === p.id}
+                          onClick={() => void handleRollbackPatch(p.id)}
+                          title="بازگردانی فایل به محتوای قبل از اعمال پچ"
+                        >
+                          {rollingBackPatchId === p.id ? "⏳ در حال بازگردانی..." : "↩️ بازگردانی ۱-کلیک (Rollback)"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* مدال بازبینی اختلاف پچ تاریخچه */}
+          {selectedPatchForDiff && (
+            <div className="agent-modal-overlay">
+              <div className="agent-modal-card patch-diff-modal">
+                <div className="modal-header">
+                  <h3>🔍 بازبینی پچ: <code dir="ltr">{selectedPatchForDiff.path}</code></h3>
+                  <button type="button" className="close-btn" onClick={() => setSelectedPatchForDiff(null)}>✕</button>
+                </div>
+                <div className="modal-body">
+                  <div className="diff-meta-bar">
+                    <span>وضعیت: <strong>{selectedPatchForDiff.status === "applied" ? "اعمال‌شده" : "بازگردانی‌شده"}</strong></span>
+                    <span className="additions">+{selectedPatchForDiff.additions} سطر اضافه</span>
+                    <span className="deletions">-{selectedPatchForDiff.deletions} سطر حذف</span>
+                  </div>
+                  <pre className="diff-content" dir="ltr">
+                    {selectedPatchForDiff.diff_text || "بدون اختلاف."}
+                  </pre>
+                </div>
+                <div className="modal-footer">
+                  {selectedPatchForDiff.status === "applied" && (
+                    <button
+                      type="button"
+                      className="action-button rollback-btn"
+                      disabled={rollingBackPatchId === selectedPatchForDiff.id}
+                      onClick={async () => {
+                        await handleRollbackPatch(selectedPatchForDiff.id);
+                        setSelectedPatchForDiff(null);
+                      }}
+                    >
+                      ↩️ بازگردانی این وصله
+                    </button>
+                  )}
+                  <button type="button" className="quiet-button" onClick={() => setSelectedPatchForDiff(null)}>
+                    بستن
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

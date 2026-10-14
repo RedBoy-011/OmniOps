@@ -2,6 +2,30 @@
 
 تمامی تغییرات، تفاوت‌های فرآیند آپدیت و انتشارات رسمی پلتفرم OmniOps بر اساس استاندارد [Keep a Changelog](https://keepachangelog.com/) در این فایل آرشیو می‌شوند.
 
+## [v1.18.0] - 2026-10-14
+### 📜 ثبت تاریخچه نسخه‌های پچ و بازگردانی خودکار ۱-کلیک (Patch Versioning & Rollback) و سامانه وب‌هوک‌های حاکمیتی و هشدارها (Governance Webhooks & Alerting):
+* **ثبت تاریخچه نسخه‌های پچ و بازگردانی سریع ۱-کلیک (Patch Versioning, History & 1-Click Rollback Engine):**
+  - جدول دیتابیس اختصاصی `workspace_file_patches` جهت ذخیره اسنپ‌شات تغییرات (`old_content`, `new_content`, `diff_text`, `additions`, `deletions`, `is_new_file`, `status: applied|reverted`, `applied_by`, `created_at`, `reverted_at`).
+  - متدهای هسته `list_project_patches` و `rollback_file_patch` با قابلیت بازگردانی دقیق محتوای قبلی فایل یا حذف خودکار فایل‌های ایجادشده در وصله‌های جدید، تغییر وضعیت به `'reverted'` و درج رویداد ممیزی امنیتی `workspace_file_patch_reverted`.
+  - اندپوینت‌های API جدید: `GET /api/web/workspace/project/patches?project_id=...` و `POST /api/web/workspace/project/patches/rollback` با پشتیبانی از کلاینت‌های وب و ایجنت ویندوز.
+* **سامانه وب‌هوک‌های حاکمیتی و هشدارهای امنیتی سازمان (Admin Governance Webhooks & Real-time Alerting):**
+  - جدول دیتابیس `workspace_governance_webhooks` برای ثبت و مدیریت مقاصد وب‌هوک (`name`, `url`, `secret`, `events`, `enabled`, `created_at`, `updated_at`).
+  - امضای دیجیتال ایمن بر بستر استاندارد `HMAC-SHA256` با هدر `X-OmniOps-Signature` برای اطمینان از اصالت پیام‌ها در سرور یا بات‌های مقصد (مانند دیسکورد و اسلک).
+  - توزیع‌کننده رویدادهای بحرانی بدون مسدودسازی (Non-blocking Asynchronous Dispatcher) برای سه سناریوی حساس:
+    - ⛔ `emergency_stop`: توقف اضطراری ایجنت یا سوارم توسط مدیر ارشد.
+    - 🚫 `sandbox_violation`: تلاش برای اجرای دستور ممنوعه، نقض سقف منابع یا پیشوندهای غیرمجاز.
+    - ⚠️ `waiting_approval`: توقف ایجنت در انتظار تأیید انسانی اقدام حساس (`action.approve`).
+  - اندپوینت‌های مدیریتی جامع: `GET /api/admin/workspace/webhooks`, `POST /api/admin/workspace/webhooks`, `POST /api/admin/workspace/webhooks/test`, `POST /api/admin/workspace/webhooks/delete` با محدودسازی دقیق سطح دسترسی سوپرادمین (۴۰۳ برای کاربران غیرمجاز).
+* **رابط کاربری وب پرتال و داشبورد حاکمیت اداری (`AgenticWorkspaceCard.tsx` & `AdminAgentGovernanceCard.tsx`):**
+  - بخش جدید «📜 تاریخچه پچ‌های اعمال‌شده بر پروژه» با نمایش آمار تغییرات سطرها (`+` و `-`)، کاربر اعمال‌کننده، زمان ثبت، دکمه مشاهده تفاوت خط‌به‌خط (Unified Diff Viewer) و کلید بازگردانی سریع ۱-کلیک (Rollback).
+  - کلید و مدال تعاملی «🔔 وب‌هوک‌ها و هشدارهای حاکمیتی» در پنل مدیریت اداری برای پیکربندی اندپوینت‌ها، اشتراک رویدادها، ارسال پینگ تستی زنده و حذف مقاصد.
+* **پوشش تست‌های خودکار:**
+  - افزوده شدن تست‌های کامل ثبت و بازگردانی پچ و مدیریت وب‌هوک در `tests/test_workspace.py` (۱۴ تست).
+  - تست اندپوینت‌های وب‌هوک و رول‌بک پچ در `tests/test_identity_gateway.py` (۱۹ تست).
+  - پاس شدن ۱۰۰٪ تمامی ۱۳۸ آزمون تست‌سوئیت جامع سیستم.
+
+---
+
 ## [v1.17.0] - 2026-10-14
 ### 🐝 ارکستراسیون گروهی ایجنت‌ها (Multi-Agent Swarm) و سندباکس منابع و امنیت پروژه (Workspace Sandbox Guardrails):
 * **ارکستراسیون گروهی زیرایجنت‌های تخصصی (Hierarchical Multi-Agent Swarm Mode):**

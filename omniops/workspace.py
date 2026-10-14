@@ -3,10 +3,15 @@
 import base64
 import binascii
 import difflib
+import hashlib
+import hmac
 import json
 from pathlib import Path
 import subprocess
+import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 
 from .identity import IdentityError
@@ -74,6 +79,33 @@ class WorkspaceStore:
                     blocked_commands TEXT NOT NULL,
                     updated_at INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS workspace_file_patches (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES workspace_projects(id) ON DELETE CASCADE,
+                    path TEXT NOT NULL,
+                    old_content TEXT NOT NULL,
+                    new_content TEXT NOT NULL,
+                    diff_text TEXT NOT NULL,
+                    additions INTEGER NOT NULL,
+                    deletions INTEGER NOT NULL,
+                    is_new_file INTEGER NOT NULL,
+                    applied_by TEXT NOT NULL REFERENCES users(id),
+                    status TEXT NOT NULL DEFAULT 'applied' CHECK(status IN ('applied', 'reverted')),
+                    created_at INTEGER NOT NULL,
+                    reverted_at INTEGER
+                );
+                CREATE INDEX IF NOT EXISTS idx_workspace_file_patches_proj ON workspace_file_patches(project_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS workspace_governance_webhooks (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    secret TEXT NOT NULL DEFAULT '',
+                    events TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_workspace_webhooks_enabled ON workspace_governance_webhooks(enabled);
             """)
             try:
                 db.execute("ALTER TABLE workspace_projects ADD COLUMN root_path TEXT DEFAULT ''")
@@ -369,16 +401,25 @@ class WorkspaceStore:
         deletions = sum(1 for line in diff_lines if line.startswith('-') and not line.startswith('---'))
 
         applied = False
+        patch_id = None
         if apply:
             if 'action.request' not in principal.get('capabilities', []) and principal.get('role') != 'superadmin':
                 raise IdentityError('action.request permission required to apply patch', 403)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(new_content, encoding='utf-8')
             applied = True
+            patch_id = uuid.uuid4().hex
+            now = int(self.store.clock())
             with self.store._lock, self.store._db() as db:
-                self.store._audit(db, principal['id'], 'workspace_file_patch_applied', f"{project_id}:{relative_path}")
+                db.execute("""
+                    INSERT INTO workspace_file_patches
+                    (id, project_id, path, old_content, new_content, diff_text, additions, deletions, is_new_file, applied_by, status, created_at, reverted_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'applied', ?, NULL)
+                """, (patch_id, project_id, relative_path, old_content, new_content, diff_text, additions, deletions, 1 if is_new_file else 0, principal['id'], now))
+                self.store._audit(db, principal['id'], 'workspace_file_patch_applied', f"{project_id}:{relative_path}:{patch_id}")
 
         return {
+            'patch_id': patch_id,
             'project_id': project_id,
             'path': relative_path,
             'is_new_file': is_new_file,
@@ -390,6 +431,72 @@ class WorkspaceStore:
             'has_changes': bool(diff_lines),
             'applied': applied,
         }
+
+    def list_project_patches(self, principal, project_id, limit=30):
+        self._cap(principal, 'chat')
+        if not isinstance(project_id, str) or len(project_id) != 32:
+            raise IdentityError('Invalid project ID')
+        self._resolve_project_root(principal, project_id)
+        limit = max(1, min(int(limit), 100))
+        with self.store._db() as db:
+            rows = db.execute("""
+                SELECT p.id, p.project_id, p.path, p.diff_text, p.additions, p.deletions, p.is_new_file,
+                       p.applied_by, p.status, p.created_at, p.reverted_at,
+                       u.username as applied_by_username
+                FROM workspace_file_patches p
+                LEFT JOIN users u ON p.applied_by = u.id
+                WHERE p.project_id=?
+                ORDER BY p.created_at DESC, p.rowid DESC
+                LIMIT ?
+            """, (project_id, limit)).fetchall()
+            return [dict(r) for r in rows]
+
+    def rollback_file_patch(self, principal, patch_id):
+        if 'action.request' not in principal.get('capabilities', []) and principal.get('role') != 'superadmin':
+            raise IdentityError('action.request permission required to rollback patch', 403)
+        if not isinstance(patch_id, str) or len(patch_id) != 32:
+            raise IdentityError('Invalid patch ID')
+
+        with self.store._lock, self.store._db() as db:
+            row = db.execute("SELECT * FROM workspace_file_patches WHERE id=?", (patch_id,)).fetchone()
+            if not row:
+                raise IdentityError('Patch record not found', 404)
+            patch = dict(row)
+            if patch['status'] != 'applied':
+                raise IdentityError('Patch has already been reverted', 400)
+
+            root_dir, _ = self._resolve_project_root(principal, patch['project_id'])
+            target = self._safe_resolve(root_dir, patch['path'])
+
+            if patch['is_new_file']:
+                if target.is_file():
+                    target.unlink()
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(patch['old_content'], encoding='utf-8')
+
+            now = int(self.store.clock())
+            db.execute("""
+                UPDATE workspace_file_patches
+                SET status='reverted', reverted_at=?
+                WHERE id=?
+            """, (now, patch_id))
+            self.store._audit(db, principal['id'], 'workspace_file_patch_reverted', f"{patch['project_id']}:{patch['path']}:{patch_id}")
+
+            patch['status'] = 'reverted'
+            patch['reverted_at'] = now
+            return {
+                'id': patch['id'],
+                'project_id': patch['project_id'],
+                'path': patch['path'],
+                'diff_text': patch['diff_text'],
+                'additions': patch['additions'],
+                'deletions': patch['deletions'],
+                'is_new_file': patch['is_new_file'],
+                'status': 'reverted',
+                'created_at': patch['created_at'],
+                'reverted_at': now
+            }
 
     def get_sandbox_policy(self, principal):
         if principal.get('role') != 'superadmin':
@@ -457,6 +564,151 @@ class WorkspaceStore:
 
         return self._get_effective_sandbox_policy()
 
+    def dispatch_governance_webhook(self, event_type, details):
+        try:
+            with self.store._db() as db:
+                rows = db.execute("SELECT * FROM workspace_governance_webhooks WHERE enabled=1").fetchall()
+                if not rows:
+                    return
+                webhooks = [dict(r) for r in rows]
+        except Exception:
+            return
+
+        def _worker(active_webhooks):
+            for wh in active_webhooks:
+                try:
+                    events = json.loads(wh.get('events') or '[]')
+                except Exception:
+                    events = []
+                if event_type in events or '*' in events:
+                    try:
+                        payload = {
+                            'event': event_type,
+                            'timestamp': int(time.time()),
+                            'data': details,
+                            'source': 'OmniOps Governance Engine'
+                        }
+                        data_bytes = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+                        headers = {
+                            'Content-Type': 'application/json',
+                            'User-Agent': 'OmniOps-Governance-Webhook/1.18.0'
+                        }
+                        if wh.get('secret'):
+                            sig = hmac.new(wh['secret'].encode('utf-8'), data_bytes, hashlib.sha256).hexdigest()
+                            headers['X-OmniOps-Signature'] = f"sha256={sig}"
+                        req = urllib.request.Request(wh['url'], data=data_bytes, headers=headers, method='POST')
+                        urllib.request.urlopen(req, timeout=5)
+                    except Exception:
+                        pass
+        threading.Thread(target=_worker, args=(webhooks,), daemon=True).start()
+
+    def list_governance_webhooks(self, principal):
+        if principal.get('role') != 'superadmin':
+            raise IdentityError('Superadmin role required', 403)
+        with self.store._db() as db:
+            rows = db.execute("SELECT * FROM workspace_governance_webhooks ORDER BY created_at DESC, rowid DESC").fetchall()
+            res = []
+            for r in rows:
+                d = dict(r)
+                try:
+                    d['events'] = json.loads(d.get('events') or '[]')
+                except Exception:
+                    d['events'] = []
+                d['enabled'] = bool(d.get('enabled', 1))
+                res.append(d)
+            return res
+
+    def save_governance_webhook(self, principal, payload):
+        if principal.get('role') != 'superadmin':
+            raise IdentityError('Superadmin role required', 403)
+        if not isinstance(payload, dict):
+            raise IdentityError('Invalid payload', 400)
+        name = str(payload.get('name') or '').strip()
+        url = str(payload.get('url') or '').strip()
+        if not name or len(name) > 100:
+            raise IdentityError('Webhook name must be 1-100 characters', 400)
+        if not url.startswith(('http://', 'https://')) or len(url) > 500:
+            raise IdentityError('Webhook URL must be a valid http(s) URL', 400)
+        secret = str(payload.get('secret') or '').strip()[:100]
+        events = payload.get('events') or ['emergency_stop', 'sandbox_violation', 'waiting_approval']
+        if not isinstance(events, list):
+            events = ['emergency_stop', 'sandbox_violation', 'waiting_approval']
+        enabled = 1 if payload.get('enabled', True) else 0
+
+        now = int(self.store.clock())
+        wh_id = payload.get('id')
+        with self.store._lock, self.store._db() as db:
+            if wh_id and isinstance(wh_id, str) and len(wh_id) == 32:
+                db.execute("""
+                    UPDATE workspace_governance_webhooks
+                    SET name=?, url=?, secret=?, events=?, enabled=?, updated_at=?
+                    WHERE id=?
+                """, (name, url, secret, json.dumps(events), enabled, now, wh_id))
+            else:
+                wh_id = uuid.uuid4().hex
+                db.execute("""
+                    INSERT INTO workspace_governance_webhooks
+                    (id, name, url, secret, events, enabled, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (wh_id, name, url, secret, json.dumps(events), enabled, now, now))
+            self.store._audit(db, principal['id'], 'workspace_governance_webhook_saved', f"{wh_id}:{name}")
+
+        return {
+            'id': wh_id,
+            'name': name,
+            'url': url,
+            'secret': secret,
+            'events': events,
+            'enabled': bool(enabled),
+            'updated_at': now
+        }
+
+    def delete_governance_webhook(self, principal, webhook_id):
+        if principal.get('role') != 'superadmin':
+            raise IdentityError('Superadmin role required', 403)
+        if not isinstance(webhook_id, str) or len(webhook_id) != 32:
+            raise IdentityError('Invalid webhook ID')
+        with self.store._lock, self.store._db() as db:
+            deleted = db.execute("DELETE FROM workspace_governance_webhooks WHERE id=?", (webhook_id,)).rowcount
+            if not deleted:
+                raise IdentityError('Webhook not found', 404)
+            self.store._audit(db, principal['id'], 'workspace_governance_webhook_deleted', webhook_id)
+        return {'status': 'deleted', 'id': webhook_id}
+
+    def test_governance_webhook(self, principal, webhook_id):
+        if principal.get('role') != 'superadmin':
+            raise IdentityError('Superadmin role required', 403)
+        if not isinstance(webhook_id, str) or len(webhook_id) != 32:
+            raise IdentityError('Invalid webhook ID')
+        with self.store._db() as db:
+            row = db.execute("SELECT * FROM workspace_governance_webhooks WHERE id=?", (webhook_id,)).fetchone()
+            if not row:
+                raise IdentityError('Webhook not found', 404)
+            wh = dict(row)
+
+        payload = {
+            'event': 'ping',
+            'timestamp': int(self.store.clock()),
+            'data': {'message': 'OmniOps Governance Webhook Test Ping', 'webhook_name': wh['name']},
+            'source': 'OmniOps Governance Engine'
+        }
+        data_bytes = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        headers = {
+            'Content-Type': 'application/json',
+            'User-Agent': 'OmniOps-Governance-Webhook/1.18.0'
+        }
+        if wh.get('secret'):
+            sig = hmac.new(wh['secret'].encode('utf-8'), data_bytes, hashlib.sha256).hexdigest()
+            headers['X-OmniOps-Signature'] = f"sha256={sig}"
+        req = urllib.request.Request(wh['url'], data=data_bytes, headers=headers, method='POST')
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return {'status': 'success', 'code': resp.status, 'message': f'HTTP {resp.status}'}
+        except urllib.error.HTTPError as err:
+            return {'status': 'error', 'code': err.code, 'message': f'HTTP Error {err.code}: {err.reason}'}
+        except Exception as exc:
+            return {'status': 'error', 'code': 0, 'message': str(exc)}
+
     def execute_project_command(self, principal, project_id, command, timeout=15):
         if 'action.approve' not in principal.get('capabilities', []) and principal.get('role') != 'superadmin':
             raise IdentityError('action.approve capability or superadmin role required to execute workspace commands', 403)
@@ -472,6 +724,12 @@ class WorkspaceStore:
         # Check blocked commands from policy
         for bad in policy.get('blocked_commands', []):
             if bad and bad in lower_cmd:
+                self.dispatch_governance_webhook('sandbox_violation', {
+                    'project_id': project_id,
+                    'actor': principal.get('username', principal.get('id')),
+                    'command': clean_cmd[:100],
+                    'reason': f"Blocked pattern '{bad}'"
+                })
                 raise IdentityError(f"Prohibited dangerous command: matches blocked pattern '{bad}'", 400)
 
         # Check strict mode allowed prefixes
@@ -483,6 +741,12 @@ class WorkspaceStore:
                 first_name = first_name[:-4]
             allowed_list = policy.get('allowed_prefixes', [])
             if not any(first_name == p.lower() or first_raw == p.lower() for p in allowed_list):
+                self.dispatch_governance_webhook('sandbox_violation', {
+                    'project_id': project_id,
+                    'actor': principal.get('username', principal.get('id')),
+                    'command': clean_cmd[:100],
+                    'reason': f"Disallowed command prefix in strict mode"
+                })
                 raise IdentityError(f"Command '{tokens[0]}' is disallowed by workspace sandbox policy", 403)
 
         effective_timeout = min(max(1, timeout), policy.get('max_timeout_seconds', 30))
@@ -973,6 +1237,15 @@ class WorkspaceStore:
                 """, (sub['id'], sub['parent_run_id'], sub['role'], sub['title'], sub['status'], sub['prompt'], sub['summary'], sub['logs'], sub['created_at'], sub['updated_at']))
             self.store._audit(db, principal['id'], 'workspace_agent_run_started', f"{run_id}:{project_id}:{clean_role}:{clean_mode}")
 
+        if run_status == 'waiting_approval':
+            self.dispatch_governance_webhook('waiting_approval', {
+                'run_id': run_id,
+                'project_id': project_id,
+                'prompt': prompt.strip()[:100],
+                'role': clean_role,
+                'mode': clean_mode
+            })
+
         return self.get_agent_run(principal, run_id)
 
     def advance_agent_run(self, principal, run_id):
@@ -1005,6 +1278,13 @@ class WorkspaceStore:
                     new_status = 'waiting_approval'
                     plan_steps[2]['status'] = 'waiting_approval'
                     plan_steps[2]['summary'] = 'نیازمند تأیید اقدام (action.approve)'
+                    self.dispatch_governance_webhook('waiting_approval', {
+                        'run_id': run_id,
+                        'project_id': run['project_id'],
+                        'prompt': run['prompt'][:100],
+                        'role': run.get('role', 'general'),
+                        'mode': run.get('mode', 'single')
+                    })
                 else:
                     cmd = plan_steps[2].get('command', 'git status')
                     try:
@@ -1224,6 +1504,13 @@ class WorkspaceStore:
                 WHERE parent_run_id=? AND status IN ('pending', 'in_progress', 'waiting_approval')
             """, (now, run_id))
             self.store._audit(db, principal['id'], 'workspace_admin_agent_run_stopped', f"{run_id}:{str(reason)[:60]}")
+            self.dispatch_governance_webhook('emergency_stop', {
+                'run_id': run_id,
+                'project_id': run['project_id'],
+                'prompt': run['prompt'][:100],
+                'reason': str(reason),
+                'admin': principal.get('username', 'superadmin')
+            })
             run['status'] = 'cancelled'
             run['logs'] = json.dumps(logs)
             run['updated_at'] = now

@@ -400,5 +400,89 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn('مهندس کدنویس', approved_swarm['result_summary'])
         self.assertIn('تضمین کیفیت', approved_swarm['result_summary'])
 
+    def test_workspace_patch_history_and_rollback(self):
+        proj_dir = Path(self.temp.name) / 'patch_test_proj'
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        target_file = proj_dir / 'app.py'
+        target_file.write_text('def main():\n    print("v1")\n', encoding='utf-8')
+
+        proj = self.workspace.create_project(self.member, 'Patch Project', str(proj_dir))
+
+        # Propose and apply patch modifying existing file
+        patch_prop = self.workspace.propose_file_patch(
+            self.member,
+            proj['id'],
+            'app.py',
+            'def main():\n    print("v2")\n',
+            apply=True
+        )
+        self.assertTrue(patch_prop['applied'])
+        self.assertIsNotNone(patch_prop.get('patch_id'))
+        patch_id = patch_prop['patch_id']
+
+        # List patches
+        patches = self.workspace.list_project_patches(self.member, proj['id'])
+        self.assertEqual(len(patches), 1)
+        self.assertEqual(patches[0]['id'], patch_id)
+        self.assertEqual(patches[0]['status'], 'applied')
+        self.assertEqual(patches[0]['path'], 'app.py')
+        self.assertGreater(patches[0]['additions'], 0)
+
+        # Rollback the patch
+        rb_res = self.workspace.rollback_file_patch(self.member, patch_id)
+        self.assertEqual(rb_res['status'], 'reverted')
+        self.assertIsNotNone(rb_res['reverted_at'])
+
+        # Verify content on disk was reverted to v1
+        self.assertEqual(target_file.read_text(encoding='utf-8'), 'def main():\n    print("v1")\n')
+
+        # Test patch creation of a brand new file
+        new_patch = self.workspace.propose_file_patch(
+            self.member,
+            proj['id'],
+            'new_module.py',
+            '# brand new file\n',
+            apply=True
+        )
+        self.assertTrue((proj_dir / 'new_module.py').exists())
+
+        # Rollback new file patch -> should delete the created file
+        rb_new = self.workspace.rollback_file_patch(self.member, new_patch['patch_id'])
+        self.assertEqual(rb_new['status'], 'reverted')
+        self.assertFalse((proj_dir / 'new_module.py').exists())
+
+    def test_workspace_governance_webhooks_and_alerting(self):
+        # Only superadmin can manage webhooks
+        with self.assertRaises(IdentityError):
+            self.workspace.list_governance_webhooks(self.member)
+        with self.assertRaises(IdentityError):
+            self.workspace.save_governance_webhook(self.member, {'name': 'Test', 'url': 'http://127.0.0.1:9999/wh'})
+
+        # Superadmin creates webhook
+        wh = self.workspace.save_governance_webhook(self.owner, {
+            'name': 'Corp Discord Alerts',
+            'url': 'http://127.0.0.1:9999/test-webhook',
+            'secret': 'super-secret-key-123',
+            'events': ['emergency_stop', 'sandbox_violation', 'waiting_approval']
+        })
+        self.assertIn('id', wh)
+        self.assertEqual(wh['name'], 'Corp Discord Alerts')
+        self.assertEqual(wh['events'], ['emergency_stop', 'sandbox_violation', 'waiting_approval'])
+
+        # Superadmin lists webhooks
+        listed = self.workspace.list_governance_webhooks(self.owner)
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]['id'], wh['id'])
+
+        # Superadmin tests webhook (points to closed port so returns error code 0, gracefully handled)
+        test_res = self.workspace.test_governance_webhook(self.owner, wh['id'])
+        self.assertEqual(test_res['status'], 'error')
+
+        # Superadmin deletes webhook
+        del_res = self.workspace.delete_governance_webhook(self.owner, wh['id'])
+        self.assertEqual(del_res['status'], 'deleted')
+        self.assertEqual(self.workspace.list_governance_webhooks(self.owner), [])
+
+
 
 

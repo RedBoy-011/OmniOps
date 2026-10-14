@@ -312,6 +312,7 @@ export type SandboxPolicy = {
 };
 
 export type FilePatchProposal = {
+  patch_id?: string;
   project_id: string;
   path: string;
   is_new_file: boolean;
@@ -322,6 +323,32 @@ export type FilePatchProposal = {
   diff: string;
   has_changes: boolean;
   applied: boolean;
+};
+
+export type FilePatchRecord = {
+  id: string;
+  project_id: string;
+  path: string;
+  diff_text: string;
+  additions: number;
+  deletions: number;
+  is_new_file: number;
+  applied_by: string;
+  applied_by_username?: string;
+  status: "applied" | "reverted";
+  created_at: number;
+  reverted_at?: number | null;
+};
+
+export type GovernanceWebhook = {
+  id: string;
+  name: string;
+  url: string;
+  secret?: string;
+  events: string[];
+  enabled: boolean;
+  created_at: number;
+  updated_at: number;
 };
 
 export type AgentRun = {
@@ -561,4 +588,16 @@ export const api = {
     request<{ policy: SandboxPolicy }>("/api/admin/workspace/sandbox/policy"),
   updateSandboxPolicy: (payload: Partial<SandboxPolicy>) =>
     request<{ policy: SandboxPolicy }>("/api/admin/workspace/sandbox/policy", "POST", payload),
+  listProjectPatches: (project_id: string) =>
+    request<{ patches: FilePatchRecord[] }>(`/api/web/workspace/project/patches?project_id=${encodeURIComponent(project_id)}`),
+  rollbackProjectPatch: (patch_id: string) =>
+    request<{ patch: FilePatchRecord }>("/api/web/workspace/project/patches/rollback", "POST", { patch_id }),
+  listGovernanceWebhooks: () =>
+    request<{ webhooks: GovernanceWebhook[] }>("/api/admin/workspace/webhooks"),
+  saveGovernanceWebhook: (payload: Partial<GovernanceWebhook>) =>
+    request<{ webhook: GovernanceWebhook }>("/api/admin/workspace/webhooks", "POST", payload),
+  deleteGovernanceWebhook: (webhook_id: string) =>
+    request<{ status: string; id: string }>("/api/admin/workspace/webhooks/delete", "POST", { webhook_id }),
+  testGovernanceWebhook: (webhook_id: string) =>
+    request<{ status: string; code: number; message: string }>("/api/admin/workspace/webhooks/test", "POST", { webhook_id }),
 };

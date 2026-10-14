@@ -648,6 +648,48 @@ class WorkerEndpointTests(unittest.TestCase):
             self.assertIn("subagents", swarm_res["run"])
             self.assertEqual(len(swarm_res["run"]["subagents"]), 3)
 
+            # Patch history listing and 1-click rollback via API
+            code, patches_res = self.call("GET", f"/api/web/workspace/project/patches?project_id={p_id}", None, admin)
+            self.assertEqual(code, 200)
+            self.assertGreaterEqual(len(patches_res["patches"]), 1)
+            applied_patch = patches_res["patches"][0]
+            self.assertEqual(applied_patch["status"], "applied")
+            self.assertEqual(applied_patch["path"], "package.json")
+
+            code, rb_res = self.call("POST", "/api/web/workspace/project/patches/rollback", {
+                "patch_id": applied_patch["id"]
+            }, admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(rb_res["patch"]["status"], "reverted")
+            self.assertIsNotNone(rb_res["patch"]["reverted_at"])
+
+            # Governance Webhooks API (Superadmin CRUD and test ping)
+            code, wh_create = self.call("POST", "/api/admin/workspace/webhooks", {
+                "name": "Integration Webhook Destination",
+                "url": "http://127.0.0.1:9191/webhook-sink",
+                "secret": "my-secret-token",
+                "events": ["emergency_stop", "sandbox_violation", "waiting_approval"]
+            }, admin)
+            self.assertEqual(code, 200)
+            self.assertIn("webhook", wh_create)
+            wh_id = wh_create["webhook"]["id"]
+
+            code, wh_list = self.call("GET", "/api/admin/workspace/webhooks", None, admin)
+            self.assertEqual(code, 200)
+            self.assertTrue(any(w["id"] == wh_id for w in wh_list["webhooks"]))
+
+            code, test_res = self.call("POST", "/api/admin/workspace/webhooks/test", {
+                "webhook_id": wh_id
+            }, admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(test_res["status"], "error")
+
+            code, del_res = self.call("POST", "/api/admin/workspace/webhooks/delete", {
+                "webhook_id": wh_id
+            }, admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(del_res["status"], "deleted")
+
 
 if __name__ == "__main__":
     unittest.main()

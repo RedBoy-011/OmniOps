@@ -537,6 +537,8 @@ def make_server(
                 "/api/web/workspace/task/run/cancel", "/api/agent/workspace/task/run/cancel",
                 "/api/admin/workspace/agent/runs/stop", "/api/admin/workspace/agent/runs/approve",
                 "/api/admin/workspace/sandbox/policy",
+                "/api/web/workspace/project/patches/rollback", "/api/agent/workspace/project/patches/rollback",
+                "/api/admin/workspace/webhooks", "/api/admin/workspace/webhooks/test", "/api/admin/workspace/webhooks/delete",
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/test-socks", "/api/admin/providers/enable", "/api/admin/providers/price",
                 "/api/admin/system/backups", "/api/admin/system/update",
@@ -688,6 +690,14 @@ def make_server(
                     self._send(200, {'run': workspace.admin_approve_agent_run_step(principal, payload.get('run_id'))})
                 elif path == '/api/admin/workspace/sandbox/policy':
                     self._send(200, {'policy': workspace.update_sandbox_policy(principal, payload)})
+                elif path in ('/api/web/workspace/project/patches/rollback', '/api/agent/workspace/project/patches/rollback'):
+                    self._send(200, {'patch': workspace.rollback_file_patch(principal, payload.get('patch_id'))})
+                elif path == '/api/admin/workspace/webhooks':
+                    self._send(200, {'webhook': workspace.save_governance_webhook(principal, payload)})
+                elif path == '/api/admin/workspace/webhooks/test':
+                    self._send(200, workspace.test_governance_webhook(principal, payload.get('webhook_id')))
+                elif path == '/api/admin/workspace/webhooks/delete':
+                    self._send(200, workspace.delete_governance_webhook(principal, payload.get('webhook_id')))
                 elif path in ('/api/web/workspace/attachments', '/api/agent/workspace/attachments'):
                     self._send(201, workspace.add_attachment(principal, payload.get('project_id'),
                                                               payload.get('name'), payload.get('mime'), payload.get('content_base64')))
@@ -905,6 +915,17 @@ def make_server(
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 return
+            if parsed.path in ('/api/web/workspace/project/patches', '/api/agent/workspace/project/patches'):
+                principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
+                if principal is None:
+                    return
+                try:
+                    q = parse_qs(parsed.query)
+                    p_id = q.get('project_id', [None])[0]
+                    self._send(200, {'patches': workspace.list_project_patches(principal, p_id)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                return
             if parsed.path == '/api/admin/workspace/agent/runs':
                 principal = self._principal('web') or self._principal('agent')
                 if principal is None:
@@ -923,6 +944,17 @@ def make_server(
                     return
                 try:
                     self._send(200, {'policy': workspace.get_sandbox_policy(principal)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                except Exception as exc:
+                    self._send(400, {'error': {'message': f'Invalid request: {exc}'}})
+                return
+            if parsed.path == '/api/admin/workspace/webhooks':
+                principal = self._principal('web') or self._principal('agent')
+                if principal is None:
+                    return
+                try:
+                    self._send(200, {'webhooks': workspace.list_governance_webhooks(principal)})
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 except Exception as exc:
