@@ -182,6 +182,44 @@ button:focus-visible, input:focus-visible { outline: 2px solid #84f2d2; outline-
   box-shadow: 0 0 0 4px #81edb320, 0 0 12px #81edb3;
 }
 
+.compact-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+}
+
+.compact-sm-btn {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-control);
+  border-radius: 8px;
+  background: var(--bg-control);
+  color: var(--text-main);
+  font-size: 11px;
+  opacity: 0.6;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.compact-sm-btn:hover:not(:disabled) {
+  opacity: 1;
+  background: rgba(64, 217, 161, 0.15);
+  border-color: rgba(64, 217, 161, 0.4);
+  color: #5eead4;
+}
+
+.compact-sm-btn.pinned {
+  opacity: 1;
+  background: rgba(64, 217, 161, 0.25);
+  border-color: #40d9a1;
+  color: #5eead4;
+  box-shadow: 0 0 10px rgba(64, 217, 161, 0.35);
+}
+
 .compact-open-btn {
   flex: none;
   width: 28px;

@@ -359,7 +359,12 @@ export default function App() {
   };
 
   return (
-    <main className={`agent-frame ${compact && phase === "chat" ? "agent-frame--compact" : ""}`} dir="rtl">
+    <main
+      className={`agent-frame ${compact && phase === "chat" ? "agent-frame--compact" : ""}`}
+      data-tauri-drag-region={compact && phase === "chat" ? "" : undefined}
+      onMouseDown={compact && phase === "chat" ? handleStartDrag : undefined}
+      dir="rtl"
+    >
       {compact && phase === "chat" ? (
         <div
           className="compact-island"
@@ -387,18 +392,33 @@ export default function App() {
             </div>
             <span className="compact-pulse" data-tauri-drag-region aria-hidden="true" />
           </div>
-          <button
-            className="compact-open-btn"
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              setCompact(false);
-            }}
-            title="بزرگ کردن پنجره OmniOps"
-            aria-label="باز کردن پنجرهٔ OmniOps"
-          >
-            <span className="compact-open" aria-hidden="true">↗</span>
-          </button>
+          <div className="compact-actions">
+            <button
+              className={`compact-sm-btn ${alwaysOnTop ? "pinned" : ""}`}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                void toggleAlwaysOnTop();
+              }}
+              title={alwaysOnTop ? "حذف سنجاق (رفتار عادی ویندوز)" : "سنجاق کردن روی همه پنجره‌ها (Always on Top)"}
+              aria-label="تغییر وضعیت سنجاق پنجره"
+              disabled={!isTauri()}
+            >
+              📌
+            </button>
+            <button
+              className="compact-open-btn"
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setCompact(false);
+              }}
+              title="بزرگ کردن پنجره OmniOps"
+              aria-label="باز کردن پنجرهٔ OmniOps"
+            >
+              <span className="compact-open" aria-hidden="true">↗</span>
+            </button>
+          </div>
         </div>
       ) : <>
       <div className="agent-header" data-tauri-drag-region><div className="agent-heading" data-tauri-drag-region><div className="agent-orb" data-tauri-drag-region aria-hidden="true">✦</div><span data-tauri-drag-region><strong data-tauri-drag-region>OmniOps</strong><small data-tauri-drag-region>بازوی امن ویندوز</small></span></div><div className="agent-window-controls"><span className={`state-dot ${phase === "chat" ? "on" : ""}`} aria-label={phase === "chat" ? "متصل" : "قفل"} /><button className={`agent-close agent-pin-btn ${alwaysOnTop ? "pinned" : ""}`} type="button" title={alwaysOnTop ? "حذف سنجاق (بازگشت به ترتیب استاندارد پنجره‌های ویندوز)" : "سنجاق کردن پنجره روی همهٔ پنجره‌ها (Always on Top)"} aria-label="تغییر وضعیت سنجاق پنجره" disabled={!isTauri()} onClick={() => void toggleAlwaysOnTop()}>📌</button><button className="agent-close agent-theme-btn" type="button" title={theme === "dark" ? "تغییر به تم روشن شیشه‌ای (Light Mica)" : "تغییر به تم تیره نئونی (Dark Acrylic)"} aria-label="تغییر تم ظاهری" onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}>{theme === "dark" ? "☀️" : "🌙"}</button><button className="agent-close" type="button" title="پنهان کردن کنار ساعت" aria-label="پنهان کردن کنار ساعت" disabled={!isTauri()} onClick={() => void hideToTray()}>−</button><button className="agent-close" type="button" title="انتخاب پنهان‌کردن یا خروج کامل" aria-label="انتخاب پنهان‌کردن یا خروج کامل" disabled={!isTauri()} onClick={requestExit}>×</button></div></div>
