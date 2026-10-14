@@ -29,6 +29,7 @@ from .workspace import WorkspaceStore
 from .mobile_orchestrator import MobileApprovalStore
 from . import telemetry
 from . import updater
+from . import playwright_worker
 
 MAX_BODY_BYTES = 384 * 1024
 LAN_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
@@ -447,6 +448,7 @@ def make_server(
                             "/api/admin/nodes/revoke", "/api/admin/nodes/delete", "/api/admin/nodes/token",
                             "/api/admin/nodes/model-pulls", "/api/admin/nodes/model-pulls/cancel", "/api/admin/nodes/model-delete",
                             "/api/admin/nodes/clean-disk", "/api/admin/nodes/optimize-resources",
+                            "/api/nodes/browser/execute", "/api/admin/nodes/browser/execute",
                             "/api/nodes/model-pulls/claim", "/api/nodes/model-pulls/report"}:
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
@@ -477,6 +479,43 @@ def make_server(
                     self._send(200, nodes.clean_node_disk(principal, body.get("node_id"), body.get("targets")))
                 elif path == "/api/admin/nodes/optimize-resources":
                     self._send(200, nodes.optimize_worker_resources(principal, body.get("node_id")))
+                elif path == "/api/nodes/browser/execute":
+                    auth = nodes.authenticate_node(body.get("id"), body.get("credential"))
+                    if auth.get("role") != "worker":
+                        raise IdentityError(f"اجرای ماژول Playwright فقط بر روی گره‌های Worker مجاز است (نقش فعلی: {auth.get('role')})", 403)
+                    res = playwright_worker.execute_browser_scenario(
+                        scenario_input=body.get("scenario"),
+                        node_id=auth["id"],
+                        node_role=auth["role"],
+                        allowlist=body.get("allowed_domains"),
+                        identity=store,
+                        approval_store=mobile_store,
+                        actor_id=auth["id"],
+                    )
+                    self._send(200, res)
+                elif path == "/api/admin/nodes/browser/execute":
+                    target_id = body.get("node_id")
+                    target_node = None
+                    if target_id:
+                        target_node = nodes.get_node(principal, target_id)
+                        if target_node.get("role") != "worker":
+                            raise IdentityError(f"گره انتخاب‌شده نقش '{target_node.get('role')}' دارد. اجرای ماژول Playwright فقط بر روی Worker مجاز است.", 403)
+                    else:
+                        worker_nodes = [n for n in nodes.list_nodes(principal) if n.get("role") == "worker" and not n.get("revoked_at")]
+                        if not worker_nodes:
+                            raise IdentityError("هیچ گره فعالی با نقش Worker برای اجرای Playwright یافت نشد. اجرای Playwright فقط روی Worker مجاز است.", 403)
+                        target_node = worker_nodes[0]
+
+                    res = playwright_worker.execute_browser_scenario(
+                        scenario_input=body.get("scenario"),
+                        node_id=target_node["id"],
+                        node_role="worker",
+                        allowlist=body.get("allowed_domains"),
+                        identity=store,
+                        approval_store=mobile_store,
+                        actor_id=principal["id"],
+                    )
+                    self._send(200, res)
                 elif path == "/api/nodes/model-pulls/claim":
                     self._send(200, {"job": nodes.claim_model_pull(body.get("id"), body.get("credential"))})
                 elif path == "/api/nodes/model-pulls/report":
@@ -1268,6 +1307,17 @@ def make_server(
                     self._send(200, {"breakdown": nodes.get_node_disk_diagnostics(principal, node_id)})
                 except IdentityError as exc:
                     self._send(exc.status, {"error": {"message": str(exc)}})
+                return
+            if self.path == "/api/admin/nodes/browser/allowlist":
+                if not self._node_channel():
+                    return
+                principal = self._principal()
+                if principal is None:
+                    return
+                self._send(200, {
+                    "allowed_domains": playwright_worker.DEFAULT_ALLOWED_DOMAINS,
+                    "worker_only": True,
+                })
                 return
             if self._static():
                 return

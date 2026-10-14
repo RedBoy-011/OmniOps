@@ -226,6 +226,25 @@ class NodeRegistry:
                 nodes.append(item)
             return nodes
 
+    def get_node(self, principal, node_id):
+        self._admin(principal)
+        if not isinstance(node_id, str) or not re.fullmatch(r"[0-9a-f]{32}", node_id):
+            raise IdentityError("Invalid node ID")
+        with self.identity._lock, self.identity._db() as db:
+            row = db.execute("SELECT * FROM managed_nodes WHERE id=?", (node_id,)).fetchone()
+            if row is None:
+                raise IdentityError("Node not found", 404)
+            item = {key: row[key] for key in row.keys() if key != "metrics"}
+            item["metrics"] = json.loads(row["metrics"]) if row["metrics"] else None
+            return item
+
+    def authenticate_node(self, node_id, credential):
+        with self.identity._lock, self.identity._db() as db:
+            row = self._authenticated(db, node_id, credential)
+            item = {key: row[key] for key in row.keys() if key != "metrics"}
+            item["metrics"] = json.loads(row["metrics"]) if row["metrics"] else None
+            return item
+
     def clean_node_disk(self, principal, node_id, targets=None):
         self._admin(principal)
         if not isinstance(node_id, str) or not re.fullmatch(r"[0-9a-f]{32}", node_id):
