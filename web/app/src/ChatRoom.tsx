@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { api, type MemoryNote, type ChatSession, type AttachedDoc } from "./api";
+import { api, type MemoryNote, type ChatSession, type AttachedDoc, type TaskNotification } from "./api";
 import { FilePreviewPanel } from "./components/FilePreviewPanel";
 import { MarkdownMessage } from "./components/MarkdownMessage";
 
@@ -22,6 +22,11 @@ export function ChatRoom({
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
   const [queueCollapsed, setQueueCollapsed] = useState(false);
   const [draft, setDraft] = useState("");
+
+  const [activeTaskNotif, setActiveTaskNotif] = useState<TaskNotification | null>(null);
+  const [dismissedNotifId, setDismissedNotifId] = useState<string | null>(null);
+  const [approvingStepRunId, setApprovingStepRunId] = useState<string | null>(null);
+  const lastSeenNotifIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (initialPrompt) {
@@ -144,6 +149,58 @@ export function ChatRoom({
       }
     } catch {
       // ignore session loading error
+    }
+  }
+
+  useEffect(() => {
+    let isMounted = true;
+    async function checkNotifications() {
+      try {
+        const res = await api.getTaskNotifications(3, false);
+        if (!isMounted || !res.notifications || res.notifications.length === 0) return;
+        const latest = res.notifications[0];
+        const nowSec = Math.floor(Date.now() / 1000);
+        if (latest.id !== dismissedNotifId && (nowSec - latest.created_at) < 900) {
+          setActiveTaskNotif(latest);
+        }
+      } catch {
+        // quiet ignore
+      }
+    }
+
+    void checkNotifications();
+    const interval = setInterval(() => {
+      void checkNotifications();
+    }, 4000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [dismissedNotifId]);
+
+  useEffect(() => {
+    if (activeTaskNotif && activeTaskNotif.id !== lastSeenNotifIdRef.current) {
+      lastSeenNotifIdRef.current = activeTaskNotif.id;
+      if (currentSessionId) {
+        void loadHistory(currentSessionId);
+      }
+    }
+  }, [activeTaskNotif, currentSessionId]);
+
+  async function handleApproveTaskStep(runId: string) {
+    setApprovingStepRunId(runId);
+    try {
+      await api.approveAgentRunStep(runId);
+      if (activeTaskNotif?.run_id === runId) {
+        setActiveTaskNotif(null);
+      }
+      if (currentSessionId) {
+        await loadHistory(currentSessionId);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطا در تأیید اقدام وظیفه");
+    } finally {
+      setApprovingStepRunId(null);
     }
   }
 
@@ -548,6 +605,60 @@ export function ChatRoom({
           </div>
         </div>
 
+        {/* بنر اعلان زنده وضعیت اجرای وظیفه در چت */}
+        <AnimatePresence>
+          {activeTaskNotif && activeTaskNotif.id !== dismissedNotifId && (
+            <motion.div
+              initial={{ opacity: 0, y: -12, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -12, scale: 0.98 }}
+              className={`chat-task-live-banner ${activeTaskNotif.status === "waiting_approval" ? "urgent" : ""}`}
+              role="status"
+              aria-live="polite"
+            >
+              <div className="task-banner-main">
+                <span className={`task-banner-icon ${activeTaskNotif.status === "waiting_approval" ? "pulse" : ""}`}>
+                  {activeTaskNotif.status === "waiting_approval" ? "⚠️" : activeTaskNotif.status === "completed" ? "✅" : "⚡"}
+                </span>
+                <div className="task-banner-text">
+                  <div className="task-banner-title">
+                    <strong>اعلان پیشرفت وظیفه: {activeTaskNotif.step_title}</strong>
+                    <span className={`task-banner-status-tag ${activeTaskNotif.status}`}>
+                      {activeTaskNotif.status === "waiting_approval" ? "نیازمند تأیید انسانی" : activeTaskNotif.status === "completed" ? "تکمیل شد" : "در حال اجرا"}
+                    </span>
+                  </div>
+                  <p className="task-banner-desc">{activeTaskNotif.summary || "تغییر وضعیت در گام‌های اجرایی ایجنت"}</p>
+                </div>
+              </div>
+
+              <div className="task-banner-actions">
+                {activeTaskNotif.status === "waiting_approval" && (
+                  <button
+                    type="button"
+                    className="task-banner-btn approve"
+                    onClick={() => void handleApproveTaskStep(activeTaskNotif.run_id)}
+                    disabled={approvingStepRunId === activeTaskNotif.run_id}
+                    title="تأیید اقدام و ادامه مأموریت ایجنت"
+                  >
+                    {approvingStepRunId === activeTaskNotif.run_id ? "⏳ در حال ارسال تأیید..." : "✅ تأیید اقدام (Human-in-the-Loop)"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="task-banner-btn dismiss"
+                  onClick={() => {
+                    setDismissedNotifId(activeTaskNotif.id);
+                    void api.markTaskNotificationsRead([activeTaskNotif.id]);
+                  }}
+                  title="بستن این اعلان"
+                >
+                  ✕
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* نوار مدیریت تاپیک‌ها و گفتگوهای چندگانه */}
         <div className="chat-sessions-bar" aria-label="موضوعات گفتگو">
           <button
@@ -772,16 +883,24 @@ export function ChatRoom({
       <AnimatePresence initial={false}>
         {(showOnlyBookmarks ? entries.filter((e) => e.id && bookmarkedIds.includes(e.id)) : entries).map((entry, index) => {
           const isBookmarked = entry.id ? bookmarkedIds.includes(entry.id) : false;
+          const isTaskReport = Boolean(entry.model?.startsWith("agent-task") || entry.text.includes("گزارش اجرای مرحله وظیفه ایجنت"));
           return (
             <motion.article
-              className={`web-chat-entry ${entry.role} ${isBookmarked ? "bookmarked-entry" : ""}`}
+              className={`web-chat-entry ${entry.role} ${isBookmarked ? "bookmarked-entry" : ""} ${isTaskReport ? "task-report-entry" : ""}`}
               key={entry.id || index}
               initial={{ opacity: 0, y: 12, scale: .98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ duration: .25 }}
             >
               <div className="chat-entry-header-row">
-                <span className="chat-entry-label">{entry.role === "user" ? "شما" : "OmniOps AI"}</span>
+                <span className="chat-entry-label">
+                  {isTaskReport ? "🤖 اعلان مرحله وظیفه ایجنت" : entry.role === "user" ? "شما" : "OmniOps AI"}
+                </span>
+                {isTaskReport && (
+                  <span className={`task-entry-status-badge ${entry.text.includes("نیازمند تأیید") ? "waiting" : entry.text.includes("با موفقیت") || entry.text.includes("تکمیل شد") ? "completed" : "active"}`}>
+                    {entry.text.includes("نیازمند تأیید") ? "⚠️ نیازمند تأیید اقدام" : entry.text.includes("با موفقیت") || entry.text.includes("تکمیل شد") ? "✅ مرحله انجام شد" : "⏳ در حال پیشروی"}
+                  </span>
+                )}
                 {isBookmarked && <span className="entry-bookmark-badge">⭐ برگزیده</span>}
               </div>
               {entry.role === "assistant" ? (
@@ -794,7 +913,7 @@ export function ChatRoom({
               ) : (
                 <p style={{ whiteSpace: "pre-wrap" }}>{entry.text}</p>
               )}
-              {entry.role === "assistant" && (
+              {entry.role === "assistant" && !isTaskReport && (
                 <div className="antigravity-chat-file-card">
                   <div className="file-card-info">
                     <span className="file-card-icon">📄</span>

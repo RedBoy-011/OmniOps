@@ -406,6 +406,19 @@ export type SubagentRun = {
   updated_at: number;
 };
 
+export type TaskNotification = {
+  id: string;
+  run_id: string;
+  owner_id: string;
+  step_index: number;
+  step_title: string;
+  status: string;
+  summary: string;
+  message: string;
+  read: number;
+  created_at: number;
+};
+
 export type SandboxPolicy = {
   max_timeout_seconds: number;
   strict_mode: boolean;
@@ -920,6 +933,10 @@ export const api = {
     request<{ run: AgentRun }>("/api/admin/workspace/agent/runs/stop", "POST", { run_id, reason }),
   adminApproveAgentRun: (run_id: string) =>
     request<{ run: AgentRun }>("/api/admin/workspace/agent/runs/approve", "POST", { run_id }),
+  getTaskNotifications: (limit = 50, unreadOnly = false) =>
+    request<{ notifications: TaskNotification[] }>(`/api/workspace/agent/notifications?limit=${limit}&unread_only=${unreadOnly ? 1 : 0}`),
+  markTaskNotificationsRead: (notification_ids?: string[]) =>
+    request<{ status: string }>("/api/workspace/agent/notifications/read", "POST", { notification_ids }),
   getSandboxPolicy: () =>
     request<{ policy: SandboxPolicy }>("/api/admin/workspace/sandbox/policy"),
   updateSandboxPolicy: (payload: Partial<SandboxPolicy>) =>

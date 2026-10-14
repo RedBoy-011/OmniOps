@@ -617,6 +617,7 @@ def make_server(
                 "/api/web/workspace/task/run/debug/step", "/api/agent/workspace/task/run/debug/step",
                 "/api/web/workspace/task/run/debug/toggle", "/api/agent/workspace/task/run/debug/toggle",
                 "/api/admin/workspace/agent/runs/stop", "/api/admin/workspace/agent/runs/approve",
+                "/api/workspace/agent/notifications/read", "/api/web/workspace/agent/notifications/read",
                 "/api/admin/workspace/sandbox/policy",
                 "/api/web/workspace/project/patches/rollback", "/api/agent/workspace/project/patches/rollback",
                 "/api/web/workspace/project/search", "/api/agent/workspace/project/search",
@@ -793,6 +794,8 @@ def make_server(
                     self._send(200, {'run': workspace.admin_stop_agent_run(principal, payload.get('run_id'), payload.get('reason', 'Admin emergency stop'))})
                 elif path == '/api/admin/workspace/agent/runs/approve':
                     self._send(200, {'run': workspace.admin_approve_agent_run_step(principal, payload.get('run_id'))})
+                elif path in ('/api/workspace/agent/notifications/read', '/api/web/workspace/agent/notifications/read'):
+                    self._send(200, workspace.mark_task_notifications_read(principal, payload.get('notification_ids')))
                 elif path == '/api/admin/workspace/sandbox/policy':
                     self._send(200, {'policy': workspace.update_sandbox_policy(principal, payload)})
                 elif path in ('/api/web/workspace/project/patches/rollback', '/api/agent/workspace/project/patches/rollback'):
@@ -1283,6 +1286,20 @@ def make_server(
                     return
                 try:
                     self._send(200, {'webhooks': workspace.list_governance_webhooks(principal)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                except Exception as exc:
+                    self._send(400, {'error': {'message': f'Invalid request: {exc}'}})
+                return
+            if parsed.path in ('/api/workspace/agent/notifications', '/api/web/workspace/agent/notifications'):
+                principal = self._principal('web') or self._principal('agent')
+                if principal is None:
+                    return
+                try:
+                    q = parse_qs(parsed.query)
+                    limit = int(q.get('limit', ['50'])[0])
+                    unread_only = q.get('unread_only', ['0'])[0] in ('1', 'true', 'True')
+                    self._send(200, {'notifications': workspace.list_task_notifications(principal, limit=limit, unread_only=unread_only)})
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 except Exception as exc:

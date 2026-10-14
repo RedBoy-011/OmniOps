@@ -15,6 +15,10 @@ export function AdminAgentGovernanceCard() {
   const [actionSuccess, setActionSuccess] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [inspectRun, setInspectRun] = useState<AgentRun | null>(null);
+  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [advancingRunId, setAdvancingRunId] = useState<string | null>(null);
+  const [inspectModalTab, setInspectModalTab] = useState<"plan" | "logs" | "subagents" | "result">("plan");
 
   // Emergency stop modal
   const [stoppingRunId, setStoppingRunId] = useState<string | null>(null);
@@ -178,6 +182,24 @@ export function AdminAgentGovernanceCard() {
     }
   }
 
+  async function handleAdvanceRun(runId: string) {
+    setAdvancingRunId(runId);
+    setError("");
+    setActionSuccess("");
+    try {
+      const res = await api.advanceAgentRun(runId);
+      setActionSuccess(`گام تسک «${res.run.id.slice(0, 8)}» با موفقیت اجرا شد و به گام بعدی منتقل گردید.`);
+      await loadRuns();
+      if (inspectRun?.id === runId) {
+        setInspectRun(res.run);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطا در پیشبرد گام تسک ایجنت");
+    } finally {
+      setAdvancingRunId(null);
+    }
+  }
+
   async function handleConfirmEmergencyStop() {
     if (!stoppingRunId) return;
     setActionBusy(true);
@@ -219,8 +241,16 @@ export function AdminAgentGovernanceCard() {
   const completedCount = runs.filter((r) => r.status === "completed").length;
 
   const filteredRuns = runs.filter((r) => {
-    if (filterStatus === "all") return true;
-    return r.status === filterStatus;
+    if (filterStatus !== "all" && r.status !== filterStatus) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const promptMatch = r.prompt?.toLowerCase().includes(q);
+      const idMatch = r.id?.toLowerCase().includes(q);
+      const projectMatch = r.project_name?.toLowerCase().includes(q);
+      const ownerMatch = r.owner_username?.toLowerCase().includes(q);
+      return Boolean(promptMatch || idMatch || projectMatch || ownerMatch);
+    }
+    return true;
   });
 
   return (
@@ -288,46 +318,256 @@ export function AdminAgentGovernanceCard() {
         </div>
       </div>
 
-      {/* فیلترهای وضعیت */}
-      <div className="governance-filter-row">
-        <span className="filter-title">فیلتر وضعیت:</span>
-        <button
-          type="button"
-          className={`filter-btn ${filterStatus === "all" ? "active" : ""}`}
-          onClick={() => setFilterStatus("all")}
-        >
-          همه ({runs.length})
-        </button>
-        <button
-          type="button"
-          className={`filter-btn ${filterStatus === "waiting_approval" ? "active" : ""}`}
-          onClick={() => setFilterStatus("waiting_approval")}
-        >
-          ⚠️ در انتظار تأیید ({waitingCount})
-        </button>
-        <button
-          type="button"
-          className={`filter-btn ${filterStatus === "in_progress" ? "active" : ""}`}
-          onClick={() => setFilterStatus("in_progress")}
-        >
-          ⏳ در حال اجرا ({inProgressCount})
-        </button>
-        <button
-          type="button"
-          className={`filter-btn ${filterStatus === "completed" ? "active" : ""}`}
-          onClick={() => setFilterStatus("completed")}
-        >
-          ✅ تکمیل‌شده ({completedCount})
-        </button>
+      {/* تولبار حاکمیتی، فیلترها، جستجو و تغییر نمای کارت/جدول */}
+      <div className="governance-toolbar-row">
+        <div className="governance-filter-row">
+          <span className="filter-title">فیلتر وضعیت:</span>
+          <button
+            type="button"
+            className={`filter-btn ${filterStatus === "all" ? "active" : ""}`}
+            onClick={() => setFilterStatus("all")}
+          >
+            همه ({runs.length})
+          </button>
+          <button
+            type="button"
+            className={`filter-btn ${filterStatus === "waiting_approval" ? "active" : ""}`}
+            onClick={() => setFilterStatus("waiting_approval")}
+          >
+            ⚠️ در انتظار تأیید ({waitingCount})
+          </button>
+          <button
+            type="button"
+            className={`filter-btn ${filterStatus === "in_progress" ? "active" : ""}`}
+            onClick={() => setFilterStatus("in_progress")}
+          >
+            ⏳ در حال اجرا ({inProgressCount})
+          </button>
+          <button
+            type="button"
+            className={`filter-btn ${filterStatus === "completed" ? "active" : ""}`}
+            onClick={() => setFilterStatus("completed")}
+          >
+            ✅ تکمیل‌شده ({completedCount})
+          </button>
+        </div>
+
+        <div className="governance-search-and-view">
+          <div className="gov-search-wrap">
+            <input
+              type="text"
+              className="gov-search-input"
+              placeholder="🔍 جستجو بر اساس هدف، شناسه، پروژه یا کاربر..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                className="gov-clear-search-btn"
+                onClick={() => setSearchQuery("")}
+                title="پاکسازی جستجو"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          <div className="view-mode-toggle" role="group" aria-label="انتخاب نحوه نمایش تسک‌ها">
+            <button
+              type="button"
+              className={`view-mode-btn ${viewMode === "cards" ? "active" : ""}`}
+              onClick={() => setViewMode("cards")}
+              title="نمای کارت‌های تعاملی با پایپ‌لاین و استپر"
+            >
+              🎴 کارت‌های هوشمند
+            </button>
+            <button
+              type="button"
+              className={`view-mode-btn ${viewMode === "table" ? "active" : ""}`}
+              onClick={() => setViewMode("table")}
+              title="نمای فشرده جدولی"
+            >
+              📊 جدول کلاسیک
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* جدول تسک‌های ایجنت */}
-      <div className="governance-table-container">
-        {filteredRuns.length === 0 ? (
-          <div className="empty-runs-state">
-            <p>هیچ مأموریت یا تسکی در این وضعیت یافت نشد.</p>
-          </div>
-        ) : (
+      {/* نمایش تسک‌ها بر اساس نمای انتخاب‌شده */}
+      {filteredRuns.length === 0 ? (
+        <div className="empty-runs-state">
+          <p>
+            {searchQuery
+              ? `هیچ مأموریت یا تسکی با مشخصات «${searchQuery}» یافت نشد.`
+              : "هیچ مأموریت یا تسکی در این وضعیت یافت نشد."}
+          </p>
+        </div>
+      ) : viewMode === "cards" ? (
+        <div className="governance-tasks-grid">
+          {filteredRuns.map((r) => {
+            const roleMeta = roleLabels[r.role] || roleLabels.general;
+            const statusMeta = statusLabels[r.status] || { text: r.status, cls: "unknown" };
+            const isWaiting = r.status === "waiting_approval";
+            const isActive = r.status === "in_progress" || isWaiting;
+            const totalSteps = Math.max(r.plan_steps.length, 1);
+            const progressPercent = Math.min(
+              100,
+              Math.round(((r.current_step_index + (r.status === "completed" ? 1 : 0)) / totalSteps) * 100)
+            );
+            const currentStep = r.plan_steps[r.current_step_index] || r.plan_steps[r.plan_steps.length - 1];
+
+            return (
+              <div
+                key={r.id}
+                className={`gov-task-card ${isWaiting ? "waiting-approval" : ""} ${r.status}`}
+              >
+                {/* Header: Role + Swarm & Status */}
+                <div className="gov-task-card-header">
+                  <div className="task-role-cluster">
+                    <span className={`role-badge ${roleMeta.cls}`}>
+                      {roleMeta.icon} {roleMeta.label}
+                    </span>
+                    {r.mode === "swarm" || (r.subagents && r.subagents.length > 0) ? (
+                      <span className="swarm-indicator-badge">🐝 سوارم</span>
+                    ) : (
+                      <span className="single-indicator-badge">👤 تک‌ایـجنت</span>
+                    )}
+                  </div>
+                  <div className="task-status-cluster">
+                    <span className={`run-status-pill ${statusMeta.cls}`}>
+                      <span className="status-dot"></span>
+                      {statusMeta.text}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Prompt & Metadata */}
+                <div>
+                  <h4 className="task-prompt-heading" title={r.prompt}>
+                    {r.prompt}
+                  </h4>
+                  <div className="task-card-meta-row">
+                    <span className="meta-tag id">#{r.id.slice(0, 8)}</span>
+                    <span className="meta-tag">📁 {r.project_name || "پروژه محلی"}</span>
+                    <span className="meta-tag">👤 {r.owner_username || "نامشخص"}</span>
+                    <span className="meta-tag">🕒 {new Date(r.created_at * 1000).toLocaleTimeString("fa-IR")}</span>
+                  </div>
+                </div>
+
+                {/* Stepper Pipeline */}
+                <div className="gov-task-stepper-box">
+                  <div className="stepper-header-row">
+                    <span>
+                      پیشرفت پایپ‌لاین ({Math.min(r.current_step_index + 1, totalSteps)} از {totalSteps})
+                    </span>
+                    <span className="stepper-percent">{progressPercent}%</span>
+                  </div>
+                  <div className="gov-stepper-track">
+                    <div
+                      className="gov-stepper-progress-bar"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                  <div className="gov-stepper-nodes">
+                    {r.plan_steps.map((st, sIdx) => {
+                      let nodeCls = "pending";
+                      if (r.status === "completed" || sIdx < r.current_step_index) {
+                        nodeCls = "completed";
+                      } else if (sIdx === r.current_step_index) {
+                        nodeCls = isWaiting ? "waiting" : "active";
+                      }
+                      return (
+                        <div
+                          key={sIdx}
+                          className={`stepper-node-item ${nodeCls}`}
+                          title={`گام ${sIdx + 1}: ${st.title} (${st.status})`}
+                        >
+                          <span className="node-circle">{nodeCls === "completed" ? "✓" : sIdx + 1}</span>
+                          <span className="node-title-snippet">
+                            {st.title.length > 12 ? st.title.slice(0, 10) + "..." : st.title}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Current Active Step Callout */}
+                {currentStep && (
+                  <div className={`gov-current-step-callout ${isWaiting ? "waiting_approval" : r.status}`}>
+                    <div className="callout-title">
+                      <strong>📌 {isWaiting ? "اقدام معلق نیازمند تأیید:" : "گام فعال:"}</strong> {currentStep.title}
+                    </div>
+                    {currentStep.command && (
+                      <code dir="ltr" className="callout-cmd">
+                        $ {currentStep.command}
+                      </code>
+                    )}
+                    {currentStep.summary && (
+                      <p className="callout-summary">{currentStep.summary}</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Actions Footer */}
+                <div className="gov-task-card-footer">
+                  <div className="card-actions-row">
+                    {isWaiting && (
+                      <button
+                        type="button"
+                        className="action-button approve-btn"
+                        onClick={() => void handleAdminApprove(r.id)}
+                        disabled={actionBusy}
+                        title="تأیید اقدام حساس و ادامه پیشروی ایجنت (Human-in-the-Loop)"
+                      >
+                        ✅ تأیید اقدام
+                      </button>
+                    )}
+                    {r.status === "in_progress" && (
+                      <button
+                        type="button"
+                        className="action-button advance-btn"
+                        onClick={() => void handleAdvanceRun(r.id)}
+                        disabled={actionBusy || advancingRunId === r.id}
+                        title="هدایت و پیشبرد دستی به گام بعدی چرخه"
+                      >
+                        {advancingRunId === r.id ? "⏳ در حال پیشروی..." : "⚡ گام بعد"}
+                      </button>
+                    )}
+                    {isActive && (
+                      <button
+                        type="button"
+                        className="danger-button stop-btn"
+                        onClick={() => {
+                          setStoppingRunId(r.id);
+                          setStopReason("توقف اضطراری توسط مدیریت ارشد سیستم");
+                        }}
+                        disabled={actionBusy}
+                        title="توقف اضطراری فوری (Kill-Switch)"
+                      >
+                        ⛔ توقف فوری
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="quiet-button inspect-btn"
+                      onClick={() => {
+                        setInspectRun(r);
+                        setInspectModalTab("plan");
+                      }}
+                      title="مشاهده و پایش جزئیات تسک"
+                    >
+                      👁️ بازرسی جامع
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="governance-table-container">
           <table className="governance-table">
             <thead>
               <tr>
@@ -335,7 +575,7 @@ export function AdminAgentGovernanceCard() {
                 <th>پروژه</th>
                 <th>کاربر آغازگر</th>
                 <th>نقش تخصصی</th>
-                <th>پیشرفت</th>
+                <th>پیشرفت و استپر</th>
                 <th>وضعیت</th>
                 <th>عملیات حاکمیتی مدیر</th>
               </tr>
@@ -346,6 +586,11 @@ export function AdminAgentGovernanceCard() {
                 const statusMeta = statusLabels[r.status] || { text: r.status, cls: "unknown" };
                 const isWaiting = r.status === "waiting_approval";
                 const isActive = r.status === "in_progress" || isWaiting;
+                const totalSteps = Math.max(r.plan_steps.length, 1);
+                const progressPercent = Math.min(
+                  100,
+                  Math.round(((r.current_step_index + (r.status === "completed" ? 1 : 0)) / totalSteps) * 100)
+                );
 
                 return (
                   <tr key={r.id} className={isWaiting ? "row-waiting" : ""}>
@@ -373,11 +618,20 @@ export function AdminAgentGovernanceCard() {
                         )}
                       </div>
                     </td>
-                    <td className="col-progress">
-                      <span className="step-counter">گام {r.current_step_index + 1} از {r.plan_steps.length}</span>
+                    <td className="col-progress" style={{ minWidth: "140px" }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px" }}>
+                          <span className="step-counter">گام {r.current_step_index + 1} از {totalSteps}</span>
+                          <span style={{ color: "#00ffaa", fontFamily: "monospace", fontWeight: 700 }}>{progressPercent}%</span>
+                        </div>
+                        <div className="gov-stepper-track" style={{ marginBottom: 0, height: "4px" }}>
+                          <div className="gov-stepper-progress-bar" style={{ width: `${progressPercent}%` }} />
+                        </div>
+                      </div>
                     </td>
                     <td>
                       <span className={`run-status-pill ${statusMeta.cls}`}>
+                        <span className="status-dot"></span>
                         {statusMeta.text}
                       </span>
                     </td>
@@ -391,7 +645,18 @@ export function AdminAgentGovernanceCard() {
                             disabled={actionBusy}
                             title="تأیید اقدام حساس و ادامه پیشروی ایجنت"
                           >
-                            ✅ تأیید اقدام
+                            ✅ تأیید
+                          </button>
+                        )}
+                        {r.status === "in_progress" && (
+                          <button
+                            type="button"
+                            className="action-button advance-btn"
+                            onClick={() => void handleAdvanceRun(r.id)}
+                            disabled={actionBusy || advancingRunId === r.id}
+                            title="پیشبرد دستی به گام بعدی"
+                          >
+                            ⚡ گام بعد
                           </button>
                         )}
                         {isActive && (
@@ -405,13 +670,16 @@ export function AdminAgentGovernanceCard() {
                             disabled={actionBusy}
                             title="توقف اضطراری فوری (Emergency Kill-Switch)"
                           >
-                            ⛔ توقف فوری
+                            ⛔ توقف
                           </button>
                         )}
                         <button
                           type="button"
                           className="quiet-button inspect-btn"
-                          onClick={() => setInspectRun(r)}
+                          onClick={() => {
+                            setInspectRun(r);
+                            setInspectModalTab("plan");
+                          }}
                         >
                           👁️ مشاهده
                         </button>
@@ -422,8 +690,8 @@ export function AdminAgentGovernanceCard() {
               })}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* مدال توقف اضطراری */}
       {stoppingRunId && (
@@ -479,45 +747,89 @@ export function AdminAgentGovernanceCard() {
               </button>
             </div>
 
-            {/* گام‌های طرح */}
-            <div className="inspect-plan-section">
-              <h5>طرح گام‌به‌گام هوش مصنوعی:</h5>
-              <div className="inspect-steps-list">
-                {inspectRun.plan_steps.map((st: AgentPlanStep) => (
-                  <div key={st.index} className={`step-item ${st.status}`}>
-                    <span className="step-num">گام {st.index + 1}</span>
-                    <div className="step-info">
-                      <strong>{st.title}</strong>
-                      <small>{st.summary}</small>
-                      {st.command && <code dir="ltr" className="step-cmd">{st.command}</code>}
-                    </div>
-                    <span className={`step-pill ${st.status}`}>
-                      {statusLabels[st.status]?.text || st.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
+            {/* تب‌های بازرسی جامع */}
+            <div className="modal-tabs-header">
+              <button
+                type="button"
+                className={`modal-tab-btn ${inspectModalTab === "plan" ? "active" : ""}`}
+                onClick={() => setInspectModalTab("plan")}
+              >
+                📋 طرح گام‌ها ({inspectRun.plan_steps.length})
+              </button>
+              <button
+                type="button"
+                className={`modal-tab-btn ${inspectModalTab === "logs" ? "active" : ""}`}
+                onClick={() => setInspectModalTab("logs")}
+              >
+                📜 لاگ‌های رویداد ({inspectRun.logs.length})
+              </button>
+              {inspectRun.subagents && inspectRun.subagents.length > 0 && (
+                <button
+                  type="button"
+                  className={`modal-tab-btn ${inspectModalTab === "subagents" ? "active" : ""}`}
+                  onClick={() => setInspectModalTab("subagents")}
+                >
+                  🐝 سوارم و ساب‌ایـجنت‌ها ({inspectRun.subagents.length})
+                </button>
+              )}
+              {inspectRun.result_summary && (
+                <button
+                  type="button"
+                  className={`modal-tab-btn ${inspectModalTab === "result" ? "active" : ""}`}
+                  onClick={() => setInspectModalTab("result")}
+                >
+                  🎯 جمع‌بندی نهایی
+                </button>
+              )}
             </div>
+
+            {/* گام‌های طرح */}
+            {inspectModalTab === "plan" && (
+              <div className="inspect-plan-section">
+                <h5>طرح گام‌به‌گام هوش مصنوعی:</h5>
+                <div className="inspect-steps-list">
+                  {inspectRun.plan_steps.map((st: AgentPlanStep) => (
+                    <div key={st.index} className={`step-item ${st.status}`}>
+                      <span className="step-num">گام {st.index + 1}</span>
+                      <div className="step-info">
+                        <strong>{st.title}</strong>
+                        <small>{st.summary}</small>
+                        {st.command && <code dir="ltr" className="step-cmd">{st.command}</code>}
+                      </div>
+                      <span className={`step-pill ${st.status}`}>
+                        {statusLabels[st.status]?.text || st.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* لاگ‌های اجرای زنده */}
-            <div className="inspect-logs-section">
-              <h5>لاگ‌ها و خروجی‌های گام‌ها ({inspectRun.logs.length} رویداد):</h5>
-              <div className="inspect-logs-container">
-                {inspectRun.logs.map((log: AgentRunLog, idx: number) => (
-                  <div key={idx} className={`log-entry ${log.type}`}>
-                    <div className="log-top">
-                      <span className="log-type-tag">{log.type}</span>
-                      <span className="log-title">{log.title}</span>
-                      <small className="log-time">{new Date(log.timestamp * 1000).toLocaleTimeString("fa-IR")}</small>
-                    </div>
-                    <pre className="log-content">{log.content}</pre>
+            {inspectModalTab === "logs" && (
+              <div className="inspect-logs-section">
+                <h5>لاگ‌ها و خروجی‌های گام‌ها ({inspectRun.logs.length} رویداد):</h5>
+                {inspectRun.logs.length === 0 ? (
+                  <p className="empty-hint">هنوز لاگی برای این تسک ثبت نشده است.</p>
+                ) : (
+                  <div className="inspect-logs-container">
+                    {inspectRun.logs.map((log: AgentRunLog, idx: number) => (
+                      <div key={idx} className={`log-entry ${log.type}`}>
+                        <div className="log-top">
+                          <span className="log-type-tag">{log.type}</span>
+                          <span className="log-title">{log.title}</span>
+                          <small className="log-time">{new Date(log.timestamp * 1000).toLocaleTimeString("fa-IR")}</small>
+                        </div>
+                        <pre className="log-content">{log.content}</pre>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
-            </div>
+            )}
 
             {/* زیرایجنت‌های سوارم */}
-            {inspectRun.subagents && inspectRun.subagents.length > 0 && (
+            {inspectModalTab === "subagents" && inspectRun.subagents && inspectRun.subagents.length > 0 && (
               <div className="inspect-subagents-section">
                 <h5>🐝 زیرایجنت‌های هماهنگ سوارم ({inspectRun.subagents.length} عامل):</h5>
                 <div className="inspect-subagents-grid">
@@ -535,7 +847,8 @@ export function AdminAgentGovernanceCard() {
               </div>
             )}
 
-            {inspectRun.result_summary && (
+            {/* جمع‌بندی نهایی */}
+            {inspectModalTab === "result" && inspectRun.result_summary && (
               <div className="inspect-result-summary">
                 <h5>🎯 جمع‌بندی نهایی ایجنت:</h5>
                 <pre>{inspectRun.result_summary}</pre>
@@ -551,6 +864,16 @@ export function AdminAgentGovernanceCard() {
                   disabled={actionBusy}
                 >
                   ✅ تأیید اقدام حساس
+                </button>
+              )}
+              {inspectRun.status === "in_progress" && (
+                <button
+                  type="button"
+                  className="action-button advance-btn"
+                  onClick={() => void handleAdvanceRun(inspectRun.id)}
+                  disabled={actionBusy || advancingRunId === inspectRun.id}
+                >
+                  {advancingRunId === inspectRun.id ? "⏳ در حال پیشروی..." : "⚡ پیشبرد به گام بعد"}
                 </button>
               )}
               {inspectRun.status === "in_progress" && (

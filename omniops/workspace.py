@@ -154,6 +154,20 @@ class WorkspaceStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_workspace_specs_proj ON workspace_specs(project_id, created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_workspace_specs_owner ON workspace_specs(owner_id, status);
+                CREATE TABLE IF NOT EXISTS workspace_task_notifications (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES workspace_agent_runs(id) ON DELETE CASCADE,
+                    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    step_index INTEGER NOT NULL,
+                    step_title TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    summary TEXT NOT NULL DEFAULT '',
+                    message TEXT NOT NULL,
+                    read INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_workspace_task_notif_owner ON workspace_task_notifications(owner_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_workspace_task_notif_run ON workspace_task_notifications(run_id, created_at DESC);
             """)
             try:
                 db.execute("ALTER TABLE workspace_projects ADD COLUMN root_path TEXT DEFAULT ''")
@@ -1299,6 +1313,93 @@ class WorkspaceStore:
 
         return res
 
+    def _record_task_chat_notification(self, db, run, step_idx, step_title, step_status, summary='', command=None, result_summary=None):
+        try:
+            now = int(self.store.clock())
+            owner_id = run['owner_id']
+            run_id = run['id']
+            role = run.get('role', 'general')
+            mode = run.get('mode', 'single')
+            prompt = run.get('prompt', '')
+
+            role_fa = {'general': 'عمومی', 'coder': 'برنامه‌نویس', 'tester': 'تست و ارزیابی', 'architect': 'معمار سیستم', 'swarm': 'سوارم چندعاملی'}.get(role, role)
+            status_fa = {
+                'in_progress': '⏳ در حال اجرا',
+                'waiting_approval': '⚠️ نیازمند تأیید ناظر / مدیر (Human-in-the-Loop)',
+                'completed': '✅ با موفقیت پایان یافت',
+                'failed': '❌ با خطا مواجه شد',
+                'warning': '⚠️ پایان با هشدار',
+                'cancelled': '⛔ متوقف‌شده',
+                'paused_debug': '⏸️ توقف دیباگ'
+            }.get(step_status, step_status)
+
+            lines = [
+                f"⚡ **گزارش اجرای مرحله وظیفه ایجنت (Agent Task Step Report)**",
+                f"🎯 **هدف وظیفه:** «{prompt}»",
+                f"🤖 **عامل فعال:** ایجنت {role_fa} ({'سوارم چندعاملی' if mode == 'swarm' else 'تک‌ایـجنت'})",
+                f"📍 **گام {step_idx + 1}:** {step_title}",
+                f"📊 **وضعیت:** {status_fa}",
+            ]
+            if command:
+                lines.append(f"💻 **دستور ساندباکس:** `{command}`")
+            if summary:
+                lines.append(f"📝 **توضیحات و خروجی:** {summary}")
+            if result_summary:
+                lines.append(f"\n🎉 **جمع‌بندی نهایی تسک:**\n{result_summary}")
+
+            reply_text = "\n".join(lines)
+            prompt_text = f"🔔 [اعلان پیشرفت وظیفه: {prompt[:40]}]"
+            model_tag = f"agent-task:{role}"
+
+            # Ensure chat_sessions and chat_history exist if ProfileMemoryStore hasn't run yet
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS chat_sessions (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS chat_sessions_owner ON chat_sessions(user_id, updated_at);
+                CREATE TABLE IF NOT EXISTS chat_history (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    prompt TEXT NOT NULL,
+                    reply TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    session_id TEXT NOT NULL
+                );
+            """)
+
+            # 1. Update or create chat_session
+            active = db.execute(
+                "SELECT id, title FROM chat_sessions WHERE user_id=? ORDER BY updated_at DESC LIMIT 1",
+                (owner_id,)
+            ).fetchone()
+            if active:
+                target_sess_id = active["id"]
+                db.execute("UPDATE chat_sessions SET updated_at=? WHERE id=?", (now, target_sess_id))
+            else:
+                target_sess_id = uuid.uuid4().hex
+                db.execute("INSERT INTO chat_sessions VALUES (?, ?, ?, ?, ?)",
+                           (target_sess_id, owner_id, "گفتگوی وظایف هوشمند (Agent Tasks)", now, now))
+
+            # 2. Insert into chat_history
+            db.execute(
+                "INSERT INTO chat_history VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (uuid.uuid4().hex, owner_id, prompt_text, reply_text, model_tag, now, target_sess_id)
+            )
+
+            # 3. Insert into workspace_task_notifications
+            notif_id = uuid.uuid4().hex
+            db.execute("""
+                INSERT INTO workspace_task_notifications (id, run_id, owner_id, step_index, step_title, status, summary, message, read, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+            """, (notif_id, run_id, owner_id, step_idx, step_title, step_status, summary or "", reply_text, now))
+        except Exception:
+            pass
+
     def start_agent_run(self, principal, project_id, prompt, role='general', mode='single', debug_mode=False, custom_plan_steps=None):
         self._cap(principal, 'chat')
         if not isinstance(project_id, str) or len(project_id) != 32:
@@ -1621,6 +1722,18 @@ class WorkspaceStore:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (sub['id'], sub['parent_run_id'], sub['role'], sub['title'], sub['status'], sub['prompt'], sub['summary'], sub['logs'], sub['created_at'], sub['updated_at']))
             self.store._audit(db, principal['id'], 'workspace_agent_run_started', f"{run_id}:{project_id}:{clean_role}:{clean_mode}")
+            run_dict = {'id': run_id, 'owner_id': principal['id'], 'prompt': prompt.strip(), 'role': clean_role, 'mode': clean_mode}
+            self._record_task_chat_notification(
+                db, run_dict, 0, plan_steps[0]['title'], plan_steps[0]['status'], summary=plan_steps[0].get('summary', '')
+            )
+            if len(plan_steps) > 1 and plan_steps[1]['status'] in ('completed', 'failed', 'paused_debug'):
+                self._record_task_chat_notification(
+                    db, run_dict, 1, plan_steps[1]['title'], plan_steps[1]['status'], summary=plan_steps[1].get('summary', '')
+                )
+            if len(plan_steps) > 2 and plan_steps[2]['status'] == 'waiting_approval':
+                self._record_task_chat_notification(
+                    db, run_dict, 2, plan_steps[2]['title'], 'waiting_approval', summary=plan_steps[2].get('summary', ''), command=plan_steps[2].get('command')
+                )
 
         if run_status == 'waiting_approval':
             self.dispatch_governance_webhook('waiting_approval', {
@@ -1657,12 +1770,32 @@ class WorkspaceStore:
             result_summary = run['result_summary']
             is_swarm = run.get('mode') == 'swarm'
 
+            if current_idx in (0, 1):
+                target_file = plan_steps[1].get('target', 'README.md')
+                plan_steps[1]['status'] = 'completed'
+                plan_steps[1]['summary'] = f"ممیزی و ارزیابی فایل کلیدی {target_file} با موفقیت پایان یافت."
+                logs.append({
+                    'timestamp': now,
+                    'step': 1,
+                    'type': 'code_audit',
+                    'title': f"ممیزی فایل: {target_file}",
+                    'content': f"ساختار و نیازمندی‌های ویرایش در {target_file} تحلیل گردید."
+                })
+                self._record_task_chat_notification(
+                    db, run, 1, plan_steps[1]['title'], 'completed', summary=plan_steps[1]['summary']
+                )
+                current_idx = 2
+                plan_steps[2]['status'] = 'in_progress'
+
             if current_idx == 2:
                 can_exec = 'action.approve' in principal.get('capabilities', []) or principal.get('role') == 'superadmin'
                 if not can_exec:
                     new_status = 'waiting_approval'
                     plan_steps[2]['status'] = 'waiting_approval'
                     plan_steps[2]['summary'] = 'نیازمند تأیید اقدام (action.approve)'
+                    self._record_task_chat_notification(
+                        db, run, 2, plan_steps[2]['title'], 'waiting_approval', summary=plan_steps[2]['summary'], command=plan_steps[2].get('command')
+                    )
                     self.dispatch_governance_webhook('waiting_approval', {
                         'run_id': run_id,
                         'project_id': run['project_id'],
@@ -1685,6 +1818,9 @@ class WorkspaceStore:
                             'exit_code': res['exit_code']
                         }
                         logs.append(log_entry)
+                        self._record_task_chat_notification(
+                            db, run, 2, plan_steps[2]['title'], plan_steps[2]['status'], summary=plan_steps[2]['summary'], command=cmd
+                        )
 
                         if is_swarm:
                             tester_summary = f"دستور راستی‌آزمایی با کد {res['exit_code']} در {res['duration_ms']}ms اجرا شد."
@@ -1706,6 +1842,9 @@ class WorkspaceStore:
                             'exit_code': 1
                         }
                         logs.append(log_entry)
+                        self._record_task_chat_notification(
+                            db, run, 2, plan_steps[2]['title'], 'failed', summary=plan_steps[2]['summary'], command=cmd
+                        )
 
                         if is_swarm:
                             db.execute("""
@@ -1745,6 +1884,9 @@ class WorkspaceStore:
                     'title': 'گزارش نهایی ایجنت',
                     'content': result_summary
                 })
+                self._record_task_chat_notification(
+                    db, run, 3, plan_steps[3]['title'], 'completed', summary=plan_steps[3]['summary'], result_summary=result_summary
+                )
 
             db.execute("""
                 UPDATE workspace_agent_runs
@@ -1792,6 +1934,9 @@ class WorkspaceStore:
             db.execute("UPDATE workspace_agent_runs SET status='in_progress', updated_at=? WHERE id=?", (now, run_id))
             db.execute("UPDATE workspace_subagent_runs SET status='in_progress', updated_at=? WHERE parent_run_id=? AND status IN ('waiting_approval', 'paused_debug')", (now, run_id))
             self.store._audit(db, principal['id'], 'workspace_agent_run_step_approved', run_id)
+            self._record_task_chat_notification(
+                db, run, run.get('current_step_index', 2), 'تأیید اقدام انسانی (Human-in-the-Loop)', 'in_progress', summary='مجوز ادامه و اجرای دستور توسط ناظر صادر شد.'
+            )
 
         return self.advance_agent_run(principal, run_id)
 
@@ -1806,10 +1951,14 @@ class WorkspaceStore:
                 row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
             if not row:
                 raise IdentityError('Agent run not found', 404)
+            run = dict(row)
             now = int(self.store.clock())
             db.execute("UPDATE workspace_agent_runs SET status='cancelled', updated_at=? WHERE id=?", (now, run_id))
             db.execute("UPDATE workspace_subagent_runs SET status='cancelled', updated_at=? WHERE parent_run_id=? AND status IN ('pending', 'in_progress', 'waiting_approval', 'paused_debug')", (now, run_id))
             self.store._audit(db, principal['id'], 'workspace_agent_run_cancelled', run_id)
+            self._record_task_chat_notification(
+                db, run, run.get('current_step_index', 0), 'لغو وظیفه ایجنت', 'cancelled', summary='وظیفه توسط کاربر لغو گردید.'
+            )
         return self.get_agent_run(principal, run_id)
 
     def _create_auto_run_artifact(self, db, run, result_summary, now):
@@ -2247,6 +2396,9 @@ class WorkspaceStore:
                 WHERE parent_run_id=? AND status IN ('pending', 'in_progress', 'waiting_approval')
             """, (now, run_id))
             self.store._audit(db, principal['id'], 'workspace_admin_agent_run_stopped', f"{run_id}:{str(reason)[:60]}")
+            self._record_task_chat_notification(
+                db, run, run.get('current_step_index', 0), 'توقف اضطراری وظیفه ایجنت (Kill-Switch)', 'cancelled', summary=f"توقف اضطراری توسط مدیریت ارشد اعمال شد. علت: {reason}"
+            )
             self.dispatch_governance_webhook('emergency_stop', {
                 'run_id': run_id,
                 'project_id': run['project_id'],
@@ -2277,8 +2429,50 @@ class WorkspaceStore:
             db.execute("UPDATE workspace_agent_runs SET status='in_progress', updated_at=? WHERE id=?", (now, run_id))
             db.execute("UPDATE workspace_subagent_runs SET status='in_progress', updated_at=? WHERE parent_run_id=? AND status='waiting_approval'", (now, run_id))
             self.store._audit(db, principal['id'], 'workspace_admin_agent_run_approved', run_id)
+            self._record_task_chat_notification(
+                db, run, run.get('current_step_index', 2), 'تأیید اقدام اداری (Human-in-the-Loop)', 'in_progress', summary='مجوز ادامه و اجرای دستور توسط مدیر ارشد سامانه صادر شد.'
+            )
 
         return self.advance_agent_run(principal, run_id)
+
+    def list_task_notifications(self, principal, limit=50, unread_only=False):
+        self._cap(principal, 'chat')
+        limit = max(1, min(int(limit or 50), 200))
+        with self.store._db() as db:
+            if principal.get('role') == 'superadmin':
+                sql = "SELECT * FROM workspace_task_notifications"
+                params = []
+                if unread_only:
+                    sql += " WHERE read=0"
+                sql += " ORDER BY created_at DESC LIMIT ?"
+                params.append(limit)
+                rows = db.execute(sql, tuple(params)).fetchall()
+            else:
+                sql = "SELECT * FROM workspace_task_notifications WHERE owner_id=?"
+                params = [principal['id']]
+                if unread_only:
+                    sql += " AND read=0"
+                sql += " ORDER BY created_at DESC LIMIT ?"
+                params.append(limit)
+                rows = db.execute(sql, tuple(params)).fetchall()
+
+            return [dict(r) for r in rows]
+
+    def mark_task_notifications_read(self, principal, notification_ids=None):
+        self._cap(principal, 'chat')
+        with self.store._lock, self.store._db() as db:
+            if notification_ids and isinstance(notification_ids, list):
+                q = ",".join("?" for _ in notification_ids)
+                if principal.get('role') == 'superadmin':
+                    db.execute(f"UPDATE workspace_task_notifications SET read=1 WHERE id IN ({q})", tuple(notification_ids))
+                else:
+                    db.execute(f"UPDATE workspace_task_notifications SET read=1 WHERE owner_id=? AND id IN ({q})", (principal['id'], *notification_ids))
+            else:
+                if principal.get('role') == 'superadmin':
+                    db.execute("UPDATE workspace_task_notifications SET read=1")
+                else:
+                    db.execute("UPDATE workspace_task_notifications SET read=1 WHERE owner_id=?", (principal['id'],))
+        return {'status': 'ok'}
 
     def get_project_git_status(self, principal, project_id):
         if not isinstance(project_id, str) or len(project_id) != 32:
@@ -2695,6 +2889,44 @@ class WorkspaceStore:
         })
 
         return self.get_spec(principal, spec_id)
+
+    def list_task_notifications(self, principal, limit=50, unread_only=False):
+        self._cap(principal, 'chat')
+        clean_limit = max(1, min(int(limit or 50), 200))
+        with self.store._db() as db:
+            query = "SELECT id, run_id, owner_id, step_index, step_title, status, summary, message, read, created_at FROM workspace_task_notifications WHERE owner_id=?"
+            params = [principal['id']]
+            if unread_only:
+                query += " AND read=0"
+            query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+            params.append(clean_limit)
+            rows = db.execute(query, params).fetchall()
+            return [
+                {
+                    'id': row['id'],
+                    'run_id': row['run_id'],
+                    'step_index': row['step_index'],
+                    'step_title': row['step_title'],
+                    'status': row['status'],
+                    'summary': row['summary'],
+                    'message': row['message'],
+                    'is_read': bool(row['read']),
+                    'created_at': row['created_at'],
+                }
+                for row in rows
+            ]
+
+    def mark_task_notifications_read(self, principal, notification_ids=None):
+        self._cap(principal, 'chat')
+        with self.store._lock, self.store._db() as db:
+            if notification_ids and isinstance(notification_ids, list):
+                valid_ids = [str(nid) for nid in notification_ids if isinstance(nid, str) and nid.strip()]
+                if valid_ids:
+                    placeholders = ','.join('?' for _ in valid_ids)
+                    db.execute(f"UPDATE workspace_task_notifications SET read=1 WHERE owner_id=? AND id IN ({placeholders})", [principal['id']] + valid_ids)
+            else:
+                db.execute("UPDATE workspace_task_notifications SET read=1 WHERE owner_id=?", (principal['id'],))
+        return {'ok': True}
 
 
 
