@@ -642,10 +642,25 @@ fn set_compact(app: AppHandle, compact: bool) -> Result<(), String> {
         .map_err(|_| "تغییر اندازهٔ پنجره ممکن نشد".to_string())?;
     if let Some(monitor) = monitor {
         let scale = monitor.scale_factor();
-        let x = monitor.position().x + ((monitor.size().width as f64 - width * scale) / 2.0) as i32;
-        let y = monitor.position().y + (if compact { 0.0 } else { 16.0 } * scale) as i32;
+        let phys_width = (width * scale) as i32;
+        let phys_height = (height * scale) as i32;
+        let mon_x = monitor.position().x;
+        let mon_y = monitor.position().y;
+        let mon_w = monitor.size().width as i32;
+        let mon_h = monitor.size().height as i32;
+
+        let max_x = (mon_x + mon_w - phys_width).max(mon_x);
+        let max_y = (mon_y + mon_h - phys_height).max(mon_y);
+
+        let (new_x, new_y) = if let Ok(current_pos) = window.outer_position() {
+            (current_pos.x.clamp(mon_x, max_x), current_pos.y.clamp(mon_y, max_y))
+        } else {
+            let x = mon_x + ((mon_w - phys_width) / 2).max(0);
+            let y = mon_y + ((if compact { 24.0 } else { 16.0 } * scale) as i32).min(max_y);
+            (x, y)
+        };
         window
-            .set_position(PhysicalPosition::new(x, y))
+            .set_position(PhysicalPosition::new(new_x, new_y))
             .map_err(|_| "جابه‌جایی پنجره ممکن نشد".to_string())?;
     }
     Ok(())

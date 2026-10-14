@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { AnimatePresence, motion } from "motion/react";
 import { AgentTasks } from "./AgentTasks";
@@ -333,14 +334,59 @@ export default function App() {
     } catch { if (generation === sessionGeneration.current) setError("حذف تاریخچه ممکن نشد."); }
     finally { if (generation === sessionGeneration.current) setMemoryBusy(false); }
   }
+  const handleStartDrag = async (event: React.MouseEvent) => {
+    if (event.button !== 0) return;
+    if (isTauri()) {
+      try {
+        await getCurrentWindow().startDragging();
+      } catch {
+        // Fallback to data-tauri-drag-region
+      }
+    }
+  };
+
   return (
     <main className={`agent-frame ${compact && phase === "chat" ? "agent-frame--compact" : ""}`} dir="rtl">
       {compact && phase === "chat" ? (
-        <button className="compact-island" type="button" onClick={() => setCompact(false)} aria-label="باز کردن پنجرهٔ OmniOps">
-          <motion.span className="compact-emblem" animate={{ scale: [1, 1.09, 1] }} transition={{ duration: 3, repeat: Infinity }} aria-hidden="true">✦</motion.span>
-          <span className="compact-copy"><strong>OmniOps</strong><small>{profile?.username} · {profile?.capabilities.includes("chat") ? "گفت‌وگو آماده" : "متصل"}</small></span>
-          <span className="compact-pulse" aria-hidden="true" /><span className="compact-open" aria-hidden="true">↗</span>
-        </button>
+        <div
+          className="compact-island"
+          data-tauri-drag-region
+          onMouseDown={handleStartDrag}
+          onDoubleClick={() => setCompact(false)}
+          title="برای جابه‌جایی آزاد روی صفحه بکشید | دوبار کلیک برای بازگشت به پنجرهٔ اصلی"
+        >
+          <div className="compact-drag-handle" data-tauri-drag-region title="برای جابه‌جایی آزاد روی صفحه بکشید">
+            <span className="compact-drag-dots" data-tauri-drag-region aria-hidden="true">⠿</span>
+          </div>
+          <div className="compact-info" data-tauri-drag-region>
+            <motion.span
+              className="compact-emblem"
+              animate={{ scale: [1, 1.09, 1] }}
+              transition={{ duration: 3, repeat: Infinity }}
+              data-tauri-drag-region
+              aria-hidden="true"
+            >
+              ✦
+            </motion.span>
+            <div className="compact-copy" data-tauri-drag-region>
+              <strong data-tauri-drag-region>OmniOps</strong>
+              <small data-tauri-drag-region>{profile?.username} · {profile?.capabilities.includes("chat") ? "گفت‌وگو آماده" : "متصل"}</small>
+            </div>
+            <span className="compact-pulse" data-tauri-drag-region aria-hidden="true" />
+          </div>
+          <button
+            className="compact-open-btn"
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setCompact(false);
+            }}
+            title="بزرگ کردن پنجره OmniOps"
+            aria-label="باز کردن پنجرهٔ OmniOps"
+          >
+            <span className="compact-open" aria-hidden="true">↗</span>
+          </button>
+        </div>
       ) : <>
       <div className="agent-header" data-tauri-drag-region><div className="agent-heading" data-tauri-drag-region><div className="agent-orb" data-tauri-drag-region aria-hidden="true">✦</div><span data-tauri-drag-region><strong data-tauri-drag-region>OmniOps</strong><small data-tauri-drag-region>بازوی امن ویندوز</small></span></div><div className="agent-window-controls"><span className={`state-dot ${phase === "chat" ? "on" : ""}`} aria-label={phase === "chat" ? "متصل" : "قفل"} /><button className="agent-close agent-theme-btn" type="button" title={theme === "dark" ? "تغییر به تم روشن شیشه‌ای (Light Mica)" : "تغییر به تم تیره نئونی (Dark Acrylic)"} aria-label="تغییر تم ظاهری" onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}>{theme === "dark" ? "☀️" : "🌙"}</button><button className="agent-close" type="button" title="پنهان کردن کنار ساعت" aria-label="پنهان کردن کنار ساعت" disabled={!isTauri()} onClick={() => void hideToTray()}>−</button><button className="agent-close" type="button" title="انتخاب پنهان‌کردن یا خروج کامل" aria-label="انتخاب پنهان‌کردن یا خروج کامل" disabled={!isTauri()} onClick={requestExit}>×</button></div></div>
       <AnimatePresence mode="wait">

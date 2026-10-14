@@ -54,15 +54,157 @@ button:focus-visible, input:focus-visible { outline: 2px solid #84f2d2; outline-
 .agent-close:hover:not(:disabled) { background: #b9435938; border-color: #e899a9; color: #ffe0e5; }
 .agent-theme-btn:hover:not(:disabled) { background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.4); color: #38bdf8; }
 .agent-close:disabled { opacity: .5; }
-.agent-frame--compact { border-radius: 0 0 19px 19px; background: radial-gradient(circle at 16% 0%, #27483d 0%, #191d1c 52%, #101212 100%); }
-.compact-island { border: 0; color: #f1fff9; background: transparent; width: 100%; height: 100%; min-width: 0; display: flex; align-items: center; text-align: right; gap: 9px; padding: 8px 13px; overflow: hidden; }
-.compact-island:hover { background: #8ef6c111; }
-.compact-emblem { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 13px; color: #a3f5d6; background: linear-gradient(145deg, #326a58, #16342d); box-shadow: 0 0 18px #40d9a144; font-size: 23px; }
-.compact-copy { display: grid; gap: 4px; min-width: 0; flex: 1; }
-.compact-copy strong { font-size: 13px; }
-.compact-copy small { font-size: 10px; color: #a8c3b7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.compact-pulse { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #81edb3; box-shadow: 0 0 0 5px #81edb320, 0 0 15px #81edb3; }
-.compact-open { font-size: 17px; color: #abbdba; margin-right: 4px; }
+.agent-frame--compact {
+  border-radius: 20px;
+  background: radial-gradient(circle at 16% 0%, #27483d 0%, #191d1c 52%, #101212 100%);
+  border: 1px solid rgba(64, 217, 161, 0.35);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.6), 0 0 16px rgba(64, 217, 161, 0.2);
+  user-select: none;
+}
+
+[data-theme="light"] .agent-frame--compact {
+  background: radial-gradient(circle at 16% 0%, rgba(200, 240, 230, 0.95) 0%, rgba(241, 245, 249, 0.95) 100%);
+  border: 1px solid rgba(13, 148, 136, 0.35);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.18), 0 0 16px rgba(13, 148, 136, 0.15);
+}
+
+.compact-island {
+  border: 0;
+  color: #f1fff9;
+  background: transparent;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  text-align: right;
+  gap: 8px;
+  padding: 6px 12px;
+  overflow: hidden;
+  cursor: grab;
+}
+
+.compact-island:active {
+  cursor: grabbing;
+}
+
+[data-theme="light"] .compact-island {
+  color: #0f172a;
+}
+
+.compact-drag-handle {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 36px;
+  color: rgba(255, 255, 255, 0.35);
+  cursor: grab;
+  transition: color 0.15s;
+}
+
+.compact-drag-handle:hover, .compact-island:hover .compact-drag-handle {
+  color: #84f2d2;
+}
+
+[data-theme="light"] .compact-drag-handle {
+  color: rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="light"] .compact-drag-handle:hover, [data-theme="light"] .compact-island:hover .compact-drag-handle {
+  color: #0d9488;
+}
+
+.compact-drag-dots {
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: -1px;
+}
+
+.compact-info {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  cursor: grab;
+}
+
+.compact-emblem {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  color: #a3f5d6;
+  background: linear-gradient(145deg, #326a58, #16342d);
+  box-shadow: 0 0 18px #40d9a144;
+  font-size: 21px;
+  cursor: grab;
+}
+
+.compact-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+  cursor: grab;
+}
+
+.compact-copy strong {
+  font-size: 12.5px;
+  color: inherit;
+}
+
+.compact-copy small {
+  font-size: 9.5px;
+  color: #a8c3b7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-theme="light"] .compact-copy small {
+  color: #475569;
+}
+
+.compact-pulse {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #81edb3;
+  box-shadow: 0 0 0 4px #81edb320, 0 0 12px #81edb3;
+}
+
+.compact-open-btn {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-control);
+  border-radius: 8px;
+  background: var(--bg-control);
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.compact-open-btn:hover {
+  background: rgba(64, 217, 161, 0.2);
+  border-color: #40d9a1;
+  color: #5eead4;
+  transform: scale(1.08);
+}
+
+.compact-open {
+  font-size: 15px;
+  line-height: 1;
+}
 .agent-heading { display: flex; align-items: center; gap: 10px; }
 .agent-heading strong, .agent-heading small { display: block; }
 .agent-heading strong { font-size: 14px; letter-spacing: .4px; }
