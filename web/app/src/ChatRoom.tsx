@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { api, type MemoryNote, type ChatSession } from "./api";
+import { api, type MemoryNote, type ChatSession, type AttachedDoc } from "./api";
 import { FilePreviewPanel } from "./components/FilePreviewPanel";
 import { MarkdownMessage } from "./components/MarkdownMessage";
 
-type Entry = { role: "user" | "assistant"; text: string; time: string; model?: string };
+type Entry = { id?: string; role: "user" | "assistant"; text: string; time: string; model?: string };
 type QueuedMessage = { id: string; text: string; time: string };
 const suggestions = ["وضعیت امروز سیستم را خلاصه کن", "برای بررسی سرویس‌ها چه مراحلی پیشنهاد می‌کنی؟", "یک گزارش کوتاه فارسی بنویس"];
 
@@ -21,6 +21,8 @@ export function ChatRoom() {
   const [saveHistory, setSaveHistory] = useState(true);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [bookmarkedIds, setBookmarkedIds] = useState<string[]>([]);
+  const [showOnlyBookmarks, setShowOnlyBookmarks] = useState(false);
   const [notes, setNotes] = useState<MemoryNote[]>([]);
   const [noteDraft, setNoteDraft] = useState("");
   const [memoryBusy, setMemoryBusy] = useState(false);
@@ -28,7 +30,7 @@ export function ChatRoom() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState("README.md");
   const [previewTab, setPreviewTab] = useState<"review" | "preview" | "raw" | "terminal">("preview");
-  const [attachedFile, setAttachedFile] = useState<{ path: string; name: string; content?: string } | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedDoc[]>([]);
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [projectFiles, setProjectFiles] = useState<{ path: string; name: string; type: string }[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
@@ -125,12 +127,37 @@ export function ChatRoom() {
     }
   }
 
+  useEffect(() => {
+    if (!currentSessionId) {
+      setBookmarkedIds([]);
+      return;
+    }
+    try {
+      const saved = localStorage.getItem(`omniops_bookmarks_${currentSessionId}`);
+      setBookmarkedIds(saved ? JSON.parse(saved) : []);
+    } catch {
+      setBookmarkedIds([]);
+    }
+  }, [currentSessionId]);
+
+  function toggleBookmark(msgId: string) {
+    setBookmarkedIds((prev) => {
+      const next = prev.includes(msgId) ? prev.filter((id) => id !== msgId) : [...prev, msgId];
+      if (currentSessionId) {
+        try {
+          localStorage.setItem(`omniops_bookmarks_${currentSessionId}`, JSON.stringify(next));
+        } catch {}
+      }
+      return next;
+    });
+  }
+
   async function loadHistory(sessionId?: string | null) {
     try {
       const result = await api.chatHistory(sessionId || undefined);
       setEntries(result.entries.flatMap(item => [
-        { role: "user" as const, text: item.prompt, time: new Date(item.created_at * 1000).toLocaleString("fa-IR") },
-        { role: "assistant" as const, text: item.reply, model: item.model, time: new Date(item.created_at * 1000).toLocaleString("fa-IR") },
+        { id: `hist-${item.id}-user`, role: "user" as const, text: item.prompt, time: new Date(item.created_at * 1000).toLocaleString("fa-IR") },
+        { id: `hist-${item.id}-assistant`, role: "assistant" as const, text: item.reply, model: item.model, time: new Date(item.created_at * 1000).toLocaleString("fa-IR") },
       ]));
       setError("");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "تاریخچه بارگذاری نشد."); }
@@ -226,43 +253,74 @@ export function ChatRoom() {
     setShowAttachMenu(false);
     try {
       const res = await api.projectFile(file.path);
-      setAttachedFile({ path: file.path, name: file.name, content: res.content });
+      setAttachedFiles((prev) => {
+        if (prev.length >= 5 || prev.some((f) => f.path === file.path)) return prev;
+        return [
+          ...prev,
+          {
+            id: `proj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            path: file.path,
+            name: file.name,
+            content: res.content,
+          },
+        ];
+      });
     } catch {
-      setAttachedFile({ path: file.path, name: file.name, content: "" });
+      setAttachedFiles((prev) => {
+        if (prev.length >= 5 || prev.some((f) => f.path === file.path)) return prev;
+        return [
+          ...prev,
+          {
+            id: `proj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            path: file.path,
+            name: file.name,
+            content: "",
+          },
+        ];
+      });
     }
   }
 
-  function processUploadedFile(file: File) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const rawContent = (e.target?.result as string) || "";
-      const content = rawContent.slice(0, 48000);
-      setAttachedFile({
-        path: file.name,
-        name: file.name,
-        content,
-      });
-      setShowAttachMenu(false);
-    };
-    reader.onerror = () => {
-      setError("خطا در خواندن فایل محلی.");
-    };
-    reader.readAsText(file);
+  function processUploadedFiles(files: FileList | File[]) {
+    const fileArray = Array.from(files).slice(0, 5 - attachedFiles.length);
+    for (const file of fileArray) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const rawContent = (e.target?.result as string) || "";
+        const content = rawContent.slice(0, 48000);
+        setAttachedFiles((prev) => {
+          if (prev.length >= 5) return prev;
+          return [
+            ...prev,
+            {
+              id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              path: file.name,
+              name: file.name,
+              content,
+            },
+          ];
+        });
+        setShowAttachMenu(false);
+      };
+      reader.onerror = () => {
+        setError("خطا در خواندن فایل محلی.");
+      };
+      reader.readAsText(file);
+    }
   }
 
   function handleLocalFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    processUploadedFile(file);
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    processUploadedFiles(files);
     e.target.value = "";
   }
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      processUploadedFile(file);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processUploadedFiles(e.dataTransfer.files);
     }
   }
 
@@ -288,22 +346,29 @@ export function ChatRoom() {
   async function executePrompt(message: string) {
     setBusy(true);
     setError("");
-    const fileToAttach = attachedFile;
+    const filesToSend = [...attachedFiles];
     const systemContextToAttach = includeSystemContext;
-    setAttachedFile(null);
+    setAttachedFiles([]);
     setIncludeSystemContext(false);
 
     const userTime = new Date().toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
     const badges: string[] = [];
-    if (fileToAttach) badges.push(`📎 [فایل پیوست: ${fileToAttach.name}]`);
+    if (filesToSend.length === 1) {
+      badges.push(`📎 [فایل پیوست: ${filesToSend[0].name}]`);
+    } else if (filesToSend.length > 1) {
+      badges.push(`📎 [${filesToSend.length.toLocaleString("fa-IR")} سند پیوست: ${filesToSend.map((f) => f.name).join(", ")}]`);
+    }
     if (systemContextToAttach) badges.push(`📊 [تله‌متری زنده سرور ضمیمه شد]`);
     const prefix = badges.length ? `${badges.join(" ")}\n` : "";
     const userDisplayMessage = `${prefix}${message}`;
 
+    const userMsgId = `live-${Date.now()}-user`;
+    const asstMsgId = `live-${Date.now()}-assistant`;
+
     setEntries((before) => [
       ...before,
-      { role: "user", text: userDisplayMessage, time: userTime },
-      { role: "assistant", text: "", model: selected === "auto" ? "هوشمند خودکار" : selected, time: userTime },
+      { id: userMsgId, role: "user", text: userDisplayMessage, time: userTime },
+      { id: asstMsgId, role: "assistant", text: "", model: selected === "auto" ? "هوشمند خودکار" : selected, time: userTime },
     ]);
 
     await api.webChatStream(
@@ -311,7 +376,7 @@ export function ChatRoom() {
       selected,
       externalConsent,
       saveHistory,
-      fileToAttach ? { name: fileToAttach.name, content: fileToAttach.content || "" } : null,
+      filesToSend[0] ? { name: filesToSend[0].name, content: filesToSend[0].content || "" } : null,
       currentSessionId,
       systemContextToAttach,
       (chunk, model) => {
@@ -360,7 +425,8 @@ export function ChatRoom() {
           return next;
         });
         setBusy(false);
-      }
+      },
+      filesToSend
     );
   }
 
@@ -601,6 +667,14 @@ export function ChatRoom() {
         <button type="button" className="quiet-button" onClick={() => void loadHistory(currentSessionId)}>
           نمایش تاریخچه
         </button>
+        <button
+          type="button"
+          className={`quiet-button bookmark-filter-toggle ${showOnlyBookmarks ? "active" : ""}`}
+          onClick={() => setShowOnlyBookmarks(!showOnlyBookmarks)}
+          title="فیلتر پیام‌های برگزیده"
+        >
+          {showOnlyBookmarks ? "نمایش همه پیام‌ها" : `⭐ پیام‌های برگزیده (${bookmarkedIds.length.toLocaleString("fa-IR")})`}
+        </button>
         <button type="button" className="quiet-button danger" onClick={() => void clearHistory()}>
           پاک‌کردن تاریخچه
         </button>
@@ -676,56 +750,77 @@ export function ChatRoom() {
         </div>
       )}
       <AnimatePresence initial={false}>
-        {entries.map((entry, index) => (
-          <motion.article
-            className={`web-chat-entry ${entry.role}`}
-            key={index}
-            initial={{ opacity: 0, y: 12, scale: .98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: .25 }}
-          >
-            <span className="chat-entry-label">{entry.role === "user" ? "شما" : "OmniOps AI"}</span>
-            {entry.role === "assistant" ? (
-              <div className="chat-message-bubble-content">
-                <MarkdownMessage content={entry.text} />
-                {busy && index === entries.length - 1 && (
-                  <span className="chat-streaming-cursor" aria-hidden="true">▍</span>
+        {(showOnlyBookmarks ? entries.filter((e) => e.id && bookmarkedIds.includes(e.id)) : entries).map((entry, index) => {
+          const isBookmarked = entry.id ? bookmarkedIds.includes(entry.id) : false;
+          return (
+            <motion.article
+              className={`web-chat-entry ${entry.role} ${isBookmarked ? "bookmarked-entry" : ""}`}
+              key={entry.id || index}
+              initial={{ opacity: 0, y: 12, scale: .98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: .25 }}
+            >
+              <div className="chat-entry-header-row">
+                <span className="chat-entry-label">{entry.role === "user" ? "شما" : "OmniOps AI"}</span>
+                {isBookmarked && <span className="entry-bookmark-badge">⭐ برگزیده</span>}
+              </div>
+              {entry.role === "assistant" ? (
+                <div className="chat-message-bubble-content">
+                  <MarkdownMessage content={entry.text} />
+                  {busy && index === entries.length - 1 && (
+                    <span className="chat-streaming-cursor" aria-hidden="true">▍</span>
+                  )}
+                </div>
+              ) : (
+                <p style={{ whiteSpace: "pre-wrap" }}>{entry.text}</p>
+              )}
+              {entry.role === "assistant" && (
+                <div className="antigravity-chat-file-card">
+                  <div className="file-card-info">
+                    <span className="file-card-icon">📄</span>
+                    <span className="file-card-name">
+                      {entry.text.includes("CHANGELOG") ? "CHANGELOG.md" : entry.text.includes("update-ubuntu") ? "scripts/update-ubuntu.sh" : entry.text.includes("PROJECT_RULES") ? "docs/PROJECT_RULES.fa.md" : "README.md"}
+                    </span>
+                    <span className="file-card-diff">+15 -15</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="file-card-action-btn"
+                    onClick={() => {
+                      const target = entry.text.includes("CHANGELOG") ? "CHANGELOG.md" : entry.text.includes("update-ubuntu") ? "scripts/update-ubuntu.sh" : entry.text.includes("PROJECT_RULES") ? "docs/PROJECT_RULES.fa.md" : "README.md";
+                      setPreviewFile(target);
+                      setPreviewTab(entry.text.includes("CHANGELOG") ? "preview" : "review");
+                      setPreviewOpen(true);
+                    }}
+                    title="پیش‌نمایش این فایل در پنل بغل"
+                  >
+                    Review / پیش‌نمایش ↗
+                  </button>
+                </div>
+              )}
+              <div className="chat-entry-meta">
+                <time>{entry.time}</time>
+                {entry.model && <bdi dir="ltr">{entry.model}</bdi>}
+                {entry.role === "assistant" && entry.id && (
+                  <button
+                    type="button"
+                    className={`msg-bookmark-pill-btn ${isBookmarked ? "bookmarked" : ""}`}
+                    onClick={() => toggleBookmark(entry.id!)}
+                    title={isBookmarked ? "حذف از برگزیده‌ها" : "نشان کردن این پاسخ به عنوان برگزیده"}
+                  >
+                    {isBookmarked ? "★ برگزیده" : "☆ نشان کردن"}
+                  </button>
                 )}
               </div>
-            ) : (
-              <p style={{ whiteSpace: "pre-wrap" }}>{entry.text}</p>
-            )}
-            {entry.role === "assistant" && (
-              <div className="antigravity-chat-file-card">
-                <div className="file-card-info">
-                  <span className="file-card-icon">📄</span>
-                  <span className="file-card-name">
-                    {entry.text.includes("CHANGELOG") ? "CHANGELOG.md" : entry.text.includes("update-ubuntu") ? "scripts/update-ubuntu.sh" : entry.text.includes("PROJECT_RULES") ? "docs/PROJECT_RULES.fa.md" : "README.md"}
-                  </span>
-                  <span className="file-card-diff">+15 -15</span>
-                </div>
-                <button
-                  type="button"
-                  className="file-card-action-btn"
-                  onClick={() => {
-                    const target = entry.text.includes("CHANGELOG") ? "CHANGELOG.md" : entry.text.includes("update-ubuntu") ? "scripts/update-ubuntu.sh" : entry.text.includes("PROJECT_RULES") ? "docs/PROJECT_RULES.fa.md" : "README.md";
-                    setPreviewFile(target);
-                    setPreviewTab(entry.text.includes("CHANGELOG") ? "preview" : "review");
-                    setPreviewOpen(true);
-                  }}
-                  title="پیش‌نمایش این فایل در پنل بغل"
-                >
-                  Review / پیش‌نمایش ↗
-                </button>
-              </div>
-            )}
-            <div className="chat-entry-meta">
-              <time>{entry.time}</time>
-              {entry.model && <bdi dir="ltr">{entry.model}</bdi>}
-            </div>
-          </motion.article>
-        ))}
+            </motion.article>
+          );
+        })}
       </AnimatePresence>
+      {showOnlyBookmarks && entries.filter((e) => e.id && bookmarkedIds.includes(e.id)).length === 0 && (
+        <div className="empty-bookmark-notice">
+          ⭐ هنوز پاسخی در این گفتگو نشان نشده است. با کلیک بر روی «☆ نشان کردن» در زیر هر پاسخ، می‌توانید آن را به برگزیده‌ها اضافه کنید.
+        </div>
+      )}
       {busy && (
         <div className="web-chat-entry assistant chat-thinking" role="status">
           <span className="chat-entry-label">OmniOps</span>
@@ -787,6 +882,7 @@ export function ChatRoom() {
         type="file"
         ref={localFileInputRef}
         style={{ display: "none" }}
+        multiple
         onChange={handleLocalFileChange}
         accept=".txt,.md,.markdown,.json,.csv,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.sql,.yaml,.yml,.sh,.bat,.xml,.ini,.env"
       />
@@ -798,39 +894,64 @@ export function ChatRoom() {
       >
         {isDragging && (
           <div className="chat-dropzone-overlay">
-            <span>📂 فایل را اینجا رها کنید تا به چت پیوست شود</span>
+            <span>📂 فایل‌ها را اینجا رها کنید تا به چت پیوست شوند (تا ۵ فایل)</span>
           </div>
         )}
-        {attachedFile && (
-          <div className="chat-attached-file-wrapper">
-            <div className="chat-attached-file-pill">
-              <span
-                className="attached-file-clickable"
-                onClick={() => setPreviewModalFile({ name: attachedFile.name, content: attachedFile.content || "" })}
-                title="کلیک برای مشاهده پیش‌نمایش محتوای فایل"
-              >
-                📄 <strong>{attachedFile.name}</strong>
-                {attachedFile.content && (
-                  <>
-                    <small className="attached-file-size">
-                      ({(attachedFile.content.length / 1024).toFixed(1)} KB)
-                    </small>
-                    <span className="attached-file-metrics" title="آمار و تخمین توکن سند">
-                      <span>📑 {attachedFile.content.split("\n").length.toLocaleString("fa-IR")} سطر</span>
-                      <span>📝 {attachedFile.content.trim().split(/\s+/).filter(Boolean).length.toLocaleString("fa-IR")} کلمه</span>
-                      <span>⚡ ~{Math.ceil(attachedFile.content.length / 3.5).toLocaleString("fa-IR")} توکن</span>
-                    </span>
-                  </>
-                )}
-                <span className="file-preview-hint">👁️ پیش‌نمایش</span>
+        {attachedFiles.length > 0 && (
+          <div className="chat-attached-files-container">
+            <div className="chat-attached-summary-bar">
+              <span className="summary-title">
+                📎 <strong>{attachedFiles.length.toLocaleString("fa-IR")} سند در پایگاه دانش پیام</strong>
+                <small>
+                  ({(attachedFiles.reduce((acc, f) => acc + (f.content?.length || 0), 0) / 1024).toFixed(1)} KB ·
+                  ~{Math.ceil(attachedFiles.reduce((acc, f) => acc + (f.content?.length || 0), 0) / 3.5).toLocaleString("fa-IR")} توکن تخمینی)
+                </small>
               </span>
-              <button
-                type="button"
-                onClick={() => setAttachedFile(null)}
-                title="حذف پیوست"
-              >
-                ✕
-              </button>
+              {attachedFiles.length > 1 && (
+                <button
+                  type="button"
+                  className="clear-all-attachments-btn"
+                  onClick={() => setAttachedFiles([])}
+                  title="حذف تمام فایل‌های پیوست‌شده"
+                >
+                  🗑️ حذف همه ({attachedFiles.length.toLocaleString("fa-IR")})
+                </button>
+              )}
+            </div>
+
+            <div className="chat-attached-files-grid">
+              {attachedFiles.map((file) => {
+                const lines = file.content ? file.content.split("\n").length : 0;
+                const words = file.content ? file.content.trim().split(/\s+/).filter(Boolean).length : 0;
+                const tokens = file.content ? Math.ceil(file.content.length / 3.5) : 0;
+                return (
+                  <div className="chat-attached-file-pill" key={file.id || file.name}>
+                    <span
+                      className="attached-file-clickable"
+                      onClick={() => setPreviewModalFile({ name: file.name, content: file.content || "" })}
+                      title="کلیک برای مشاهده پیش‌نمایش محتوای فایل"
+                    >
+                      📄 <strong>{file.name}</strong>
+                      <small className="attached-file-size">
+                        ({(file.content.length / 1024).toFixed(1)} KB)
+                      </small>
+                      <span className="attached-file-metrics" title="آمار و تخمین توکن سند">
+                        <span>📑 {lines.toLocaleString("fa-IR")} سطر</span>
+                        <span>📝 {words.toLocaleString("fa-IR")} کلمه</span>
+                        <span>⚡ ~{tokens.toLocaleString("fa-IR")} توکن</span>
+                      </span>
+                      <span className="file-preview-hint">👁️ پیش‌نمایش</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setAttachedFiles((prev) => prev.filter((f) => (f.id ? f.id !== file.id : f.name !== file.name)))}
+                      title="حذف این پیوست"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
             </div>
 
             {/* نوار اقدامات هوشمند دستیار سند */}
@@ -840,7 +961,7 @@ export function ChatRoom() {
                 type="button"
                 className="doc-quick-action-btn"
                 onClick={() => {
-                  setDraft("لطفاً این سند پیوست‌شده را به صورت ساختاریافته، عمیق و همراه با خلاصه اجرایی و دستاوردهای اصلی تحلیل و خلاصه کن.");
+                  setDraft("لطفاً این اسناد پیوست‌شده را به صورت ساختاریافته، عمیق و همراه با خلاصه اجرایی و دستاوردهای اصلی تحلیل و خلاصه کن.");
                   document.getElementById("web-chat-input")?.focus();
                 }}
               >
@@ -850,7 +971,7 @@ export function ChatRoom() {
                 type="button"
                 className="doc-quick-action-btn"
                 onClick={() => {
-                  setDraft("تمام نکات کلیدی، الزامات فنی، تصمیمات مهم و یافته‌های اساسی این سند را استخراج و در قالب لیست تفکیک‌شده ارائه کن.");
+                  setDraft("تمام نکات کلیدی، الزامات فنی، تصمیمات مهم و یافته‌های اساسی این اسناد را استخراج و در قالب لیست تفکیک‌شده ارائه کن.");
                   document.getElementById("web-chat-input")?.focus();
                 }}
               >
@@ -860,7 +981,7 @@ export function ChatRoom() {
                 type="button"
                 className="doc-quick-action-btn"
                 onClick={() => {
-                  setDraft("براساس محتوای این سند، ۵ پرسش و پاسخ اساسی (Q&A) در رابطه با جزئیات و چالش‌های احتمالی آن تدوین و به تفصیل پاسخ بده.");
+                  setDraft("براساس محتوای این اسناد، ۵ پرسش و پاسخ اساسی (Q&A) در رابطه با جزئیات و چالش‌های احتمالی آن‌ها تدوین و به تفصیل پاسخ بده.");
                   document.getElementById("web-chat-input")?.focus();
                 }}
               >
@@ -870,7 +991,7 @@ export function ChatRoom() {
                 type="button"
                 className="doc-quick-action-btn"
                 onClick={() => {
-                  setDraft("سرفصل‌ها، ساختار درختی و معماری بخش‌های مختلف این سند را همراه با خلاصه کوتاه برای هر بخش مشخص کن.");
+                  setDraft("سرفصل‌ها، ساختار درختی و مقایسه بخش‌های مختلف این اسناد را همراه با خلاصه کوتاه برای هر بخش مشخص کن.");
                   document.getElementById("web-chat-input")?.focus();
                 }}
               >
@@ -894,12 +1015,18 @@ export function ChatRoom() {
           <div style={{ position: "relative" }}>
             <button
               type="button"
-              className={`chat-attach-file-btn ${attachedFile ? "active" : ""}`}
+              className={`chat-attach-file-btn ${attachedFiles.length > 0 ? "active" : ""}`}
               onClick={() => setShowAttachMenu(!showAttachMenu)}
               title="پیوست فایل محلی یا فایل‌های پروژه سرور"
             >
               <span>📎</span>
-              <span>{attachedFile ? attachedFile.name : "پیوست فایل"}</span>
+              <span>
+                {attachedFiles.length === 1
+                  ? attachedFiles[0].name
+                  : attachedFiles.length > 1
+                  ? `${attachedFiles.length} سند پیوست`
+                  : "پیوست فایل"}
+              </span>
             </button>
 
             {showAttachMenu && (

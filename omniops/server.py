@@ -109,8 +109,18 @@ def make_server(
                 raise IdentityError('History choice must be a boolean')
 
             attached = payload.get('attached_file')
+            attached_files = payload.get('attached_files')
             effective_prompt = prompt.strip()
-            if isinstance(attached, dict) and isinstance(attached.get('name'), str) and isinstance(attached.get('content'), str):
+            if isinstance(attached_files, list) and attached_files:
+                doc_blocks = []
+                for idx, item in enumerate(attached_files[:5], 1):
+                    if isinstance(item, dict) and isinstance(item.get('name'), str) and isinstance(item.get('content'), str):
+                        fn = item.get('name')[:120]
+                        fc = item.get('content')[:48000]
+                        doc_blocks.append(f"--- پیوست سند [{idx}]: {fn} ---\n```\n{fc}\n```")
+                if doc_blocks:
+                    effective_prompt = f"{'\n\n'.join(doc_blocks)}\n\n{prompt.strip()}"
+            elif isinstance(attached, dict) and isinstance(attached.get('name'), str) and isinstance(attached.get('content'), str):
                 fname = attached.get('name')[:120]
                 fcontent = attached.get('content')[:48000]
                 effective_prompt = f"[پیوست فایل پروژه: {fname}]\n```\n{fcontent}\n```\n\n{prompt.strip()}"
@@ -201,8 +211,18 @@ def make_server(
                 raise IdentityError('History choice must be a boolean')
 
             attached = payload.get('attached_file')
+            attached_files = payload.get('attached_files')
             effective_prompt = prompt.strip()
-            if isinstance(attached, dict) and isinstance(attached.get('name'), str) and isinstance(attached.get('content'), str):
+            if isinstance(attached_files, list) and attached_files:
+                doc_blocks = []
+                for idx, item in enumerate(attached_files[:5], 1):
+                    if isinstance(item, dict) and isinstance(item.get('name'), str) and isinstance(item.get('content'), str):
+                        fn = item.get('name')[:120]
+                        fc = item.get('content')[:48000]
+                        doc_blocks.append(f"--- پیوست سند [{idx}]: {fn} ---\n```\n{fc}\n```")
+                if doc_blocks:
+                    effective_prompt = f"{'\n\n'.join(doc_blocks)}\n\n{prompt.strip()}"
+            elif isinstance(attached, dict) and isinstance(attached.get('name'), str) and isinstance(attached.get('content'), str):
                 fname = attached.get('name')[:120]
                 fcontent = attached.get('content')[:48000]
                 effective_prompt = f"[پیوست فایل پروژه: {fname}]\n```\n{fcontent}\n```\n\n{prompt.strip()}"

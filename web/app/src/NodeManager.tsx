@@ -247,6 +247,7 @@ export function NodeManager() {
   const [jobs, setJobs] = useState<ModelPull[]>([]);
   const [nodeModels, setNodeModels] = useState<Record<string, string>>({});
   const [showCatalog, setShowCatalog] = useState<Record<string, boolean>>({});
+  const [installedSearch, setInstalledSearch] = useState<Record<string, string>>({});
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -613,31 +614,97 @@ export function NodeManager() {
                     </small>
 
                     {node.metrics && (
-                      <>
-                        <p style={{ marginTop: "6px" }}>
-                          CPU {node.metrics.cpu_percent ?? "—"}٪ · RAM {node.metrics.ram_percent ?? "—"}٪ · دیسک {node.metrics.disk_percent ?? "—"}٪
-                        </p>
-                        <small>نسخه گره: {node.metrics.version || "نامشخص"}</small>
-                        {node.metrics.models?.length ? (
-                          <ul className="node-models">
-                            {node.metrics.models.map((installed) => (
-                              <li key={installed}>
-                                <bdi dir="ltr">{installed}</bdi>
-                                <button
-                                  type="button"
-                                  className="quiet-button danger"
-                                  style={{ padding: "2px 8px", fontSize: "11px", marginRight: "8px" }}
-                                  disabled={busy || !online || jobs.some((job) => job.node_id === node.id && (job.status === "queued" || job.status === "running"))}
-                                  onClick={() => void deleteModel(node, installed)}
-                                  aria-label={`حذف ${installed}`}
-                                >
-                                  حذف مدل
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </>
+                      <div className="worker-resource-dashboard">
+                        <div className="worker-resource-meters">
+                          <div className="resource-meter">
+                            <div className="meter-header">
+                              <span>پردازنده (CPU)</span>
+                              <strong>{node.metrics.cpu_percent != null ? `${node.metrics.cpu_percent.toLocaleString("fa-IR")}٪` : "—"}</strong>
+                            </div>
+                            <div className="meter-bar-track">
+                              <div
+                                className={`meter-bar-fill ${(node.metrics.cpu_percent ?? 0) > 85 ? "critical" : (node.metrics.cpu_percent ?? 0) > 65 ? "warning" : "normal"}`}
+                                style={{ width: `${Math.min(100, Math.max(0, node.metrics.cpu_percent ?? 0))}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="resource-meter">
+                            <div className="meter-header">
+                              <span>حافظه رم (RAM)</span>
+                              <strong>{node.metrics.ram_percent != null ? `${node.metrics.ram_percent.toLocaleString("fa-IR")}٪` : "—"}</strong>
+                            </div>
+                            <div className="meter-bar-track">
+                              <div
+                                className={`meter-bar-fill ${(node.metrics.ram_percent ?? 0) > 85 ? "critical" : (node.metrics.ram_percent ?? 0) > 65 ? "warning" : "normal"}`}
+                                style={{ width: `${Math.min(100, Math.max(0, node.metrics.ram_percent ?? 0))}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="resource-meter">
+                            <div className="meter-header">
+                              <span>فضای دیسک (Disk)</span>
+                              <strong>{node.metrics.disk_percent != null ? `${node.metrics.disk_percent.toLocaleString("fa-IR")}٪` : "—"}</strong>
+                            </div>
+                            <div className="meter-bar-track">
+                              <div
+                                className={`meter-bar-fill ${(node.metrics.disk_percent ?? 0) > 90 ? "critical" : (node.metrics.disk_percent ?? 0) > 75 ? "warning" : "normal"}`}
+                                style={{ width: `${Math.min(100, Math.max(0, node.metrics.disk_percent ?? 0))}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="worker-node-meta-row">
+                          <small>نسخه گره: <code dir="ltr">{node.metrics.version || "نامشخص"}</code></small>
+                          {node.metrics.models && (
+                            <small>مدل‌های نصب‌شده: {node.metrics.models.length.toLocaleString("fa-IR")} مدل</small>
+                          )}
+                        </div>
+
+                        {node.metrics.models?.length ? (() => {
+                          const query = (installedSearch[node.id] || "").trim().toLowerCase();
+                          const filtered = query
+                            ? node.metrics.models.filter(m => m.toLowerCase().includes(query))
+                            : node.metrics.models;
+
+                          return (
+                            <div className="node-installed-models-wrapper">
+                              {node.metrics.models.length > 2 && (
+                                <input
+                                  type="text"
+                                  className="installed-model-search-input"
+                                  dir="ltr"
+                                  placeholder="🔍 جستجو در مدل‌های نصب‌شده گره..."
+                                  value={installedSearch[node.id] || ""}
+                                  onChange={(e) => setInstalledSearch(prev => ({ ...prev, [node.id]: e.target.value }))}
+                                />
+                              )}
+                              <ul className="node-models">
+                                {filtered.map((installed) => (
+                                  <li key={installed}>
+                                    <bdi dir="ltr">{installed}</bdi>
+                                    <button
+                                      type="button"
+                                      className="quiet-button danger"
+                                      style={{ padding: "2px 8px", fontSize: "11px", marginRight: "8px" }}
+                                      disabled={busy || !online || jobs.some((job) => job.node_id === node.id && (job.status === "queued" || job.status === "running"))}
+                                      onClick={() => void deleteModel(node, installed)}
+                                      aria-label={`حذف ${installed}`}
+                                    >
+                                      حذف مدل
+                                    </button>
+                                  </li>
+                                ))}
+                                {filtered.length === 0 && (
+                                  <li className="empty-filter-note">مدلی با این عبارت پیدا نشد.</li>
+                                )}
+                              </ul>
+                            </div>
+                          );
+                        })() : null}
+                      </div>
                     )}
 
                     {node.role === "worker" && !node.revoked_at && (() => {

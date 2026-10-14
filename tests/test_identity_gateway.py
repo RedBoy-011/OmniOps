@@ -476,6 +476,20 @@ class WorkerEndpointTests(unittest.TestCase):
         code, _ = self.call("GET", "/api/admin/nodes/ping")
         self.assertEqual(code, 401)
 
+    def test_chat_with_multi_file_knowledge_binder(self):
+        admin = self.store.login("root-admin", "a very strong admin password")["token"]
+        payload = {
+            "message": "تحلیل مقایسه‌ای انجام بده",
+            "attached_files": [
+                {"name": "doc1.txt", "content": "محتوای سند اول برای تحلیل"},
+                {"name": "doc2.md", "content": "محتوای سند دوم برای مقایسه"},
+            ],
+        }
+        status, answer = self.call("POST", "/api/web/chat", payload, admin)
+        self.assertEqual(status, 200)
+        self.assertIn("reply", answer)
+        self.assertTrue(len(answer["reply"]) > 0)
+
 
 if __name__ == "__main__":
     unittest.main()

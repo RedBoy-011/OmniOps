@@ -232,6 +232,13 @@ async function request<T>(path: string, method = "GET", payload?: object): Promi
   return data as T;
 }
 
+export type AttachedDoc = {
+  id?: string;
+  name: string;
+  content: string;
+  path?: string;
+};
+
 export const api = {
   login: (username: string, password: string) => request<LoginResult>("/api/auth/login", "POST", { username, password }),
   register: (username: string, password: string, mobile: string) => request<{ status: string; message: string }>("/api/auth/register", "POST", { username, password, mobile }),
@@ -246,7 +253,8 @@ export const api = {
     save_history = false,
     attached_file?: { name: string; content: string } | null,
     session_id?: string | null,
-    include_system_context?: boolean
+    include_system_context?: boolean,
+    attached_files?: AttachedDoc[] | null
   ) =>
     request<{ reply: string; model: string }>("/api/web/chat", "POST", {
       message,
@@ -256,6 +264,7 @@ export const api = {
       attached_file,
       session_id,
       include_system_context,
+      attached_files,
     }),
   webChatStream: async (
     message: string,
@@ -267,7 +276,8 @@ export const api = {
     include_system_context: boolean,
     onChunk: (chunk: string, model?: string) => void,
     onDone: (fullReply: string, model?: string) => void,
-    onError: (err: string) => void
+    onError: (err: string) => void,
+    attached_files?: AttachedDoc[] | null
   ) => {
     const token = localStorage.getItem("omniops_token") || volatileWebToken || "";
     try {
@@ -285,6 +295,7 @@ export const api = {
           attached_file,
           session_id,
           include_system_context,
+          attached_files,
         }),
       });
 
