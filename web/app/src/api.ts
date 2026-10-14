@@ -966,4 +966,57 @@ export const api = {
     request<DownloadsInfoResponse>("/api/downloads/info"),
   syncReleaseAssets: () =>
     request<{ status: string; message: string; synced_count: number; synced_files: string[]; files: CoreDownloadFile[] }>("/api/admin/system/sync-release-assets", "POST", {}),
+  mobileDispatchCommand: (payload: DispatchCommandPayload) =>
+    request<MobileAgentCommand>("/api/mobile/commands/dispatch", "POST", payload),
+  mobileApproveCommand: (command_id: string, auth_method = "biometric_fingerprint") =>
+    request<{ id: string; status: string; approved_at: number; approved_by: string; auth_method: string }>(
+      "/api/mobile/commands/approve",
+      "POST",
+      { command_id, auth_method }
+    ),
+  mobileCancelCommand: (command_id: string, reason?: string) =>
+    request<{ id: string; status: string; reason?: string }>("/api/mobile/commands/cancel", "POST", { command_id, reason }),
+  mobileCommandsHistory: (target_node_id?: string, status?: string, limit = 50) =>
+    request<{ commands: MobileAgentCommand[] }>(
+      `/api/mobile/commands/history?limit=${limit}${target_node_id ? `&target_node_id=${encodeURIComponent(target_node_id)}` : ""}${status ? `&status=${encodeURIComponent(status)}` : ""}`
+    ),
+  mobileKillSwitch: (node_id = "all", reason = "Emergency mobile operator stop") =>
+    request<{ kill_id: string; node_id: string; status: string; triggered_at: number; message: string }>(
+      "/api/mobile/kill-switch",
+      "POST",
+      { node_id, reason }
+    ),
 };
+
+export type MobileAgentCommand = {
+  id: string;
+  sender_user_id: string;
+  target_node_id: string;
+  command_type: string;
+  command_payload?: string;
+  command?: string;
+  description: string;
+  risk_level: "low" | "medium" | "high" | "destructive";
+  status: "pending_approval" | "queued" | "in_progress" | "completed" | "failed" | "rejected" | "cancelled";
+  challenge_nonce: string;
+  approval_id?: string | null;
+  created_at: number;
+  approved_at?: number | null;
+  approved_by?: string | null;
+  claimed_at?: number | null;
+  claimed_by_node?: string | null;
+  completed_at?: number | null;
+  output?: string | null;
+  exit_code?: number | null;
+  duration_ms?: number | null;
+};
+
+export type DispatchCommandPayload = {
+  target_node_id: string;
+  command: string;
+  command_type?: "powershell" | "cmd" | "service" | "custom";
+  description?: string;
+  risk_level?: "low" | "medium" | "high" | "destructive";
+  require_approval?: boolean;
+};
+

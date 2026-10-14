@@ -557,6 +557,60 @@ async fn list_agent_runs(
 }
 
 #[tauri::command]
+async fn list_agent_pending_commands(
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    profile_call(
+        state,
+        "chat",
+        reqwest::Method::GET,
+        "/api/agent/commands/pending",
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn claim_agent_command(
+    command_id: String,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    profile_call(
+        state,
+        "chat",
+        reqwest::Method::POST,
+        "/api/agent/commands/claim",
+        Some(serde_json::json!({"command_id": command_id})),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn report_agent_command(
+    command_id: String,
+    status: String,
+    output: Option<String>,
+    exit_code: Option<i32>,
+    duration_ms: Option<u64>,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    profile_call(
+        state,
+        "chat",
+        reqwest::Method::POST,
+        "/api/agent/commands/report",
+        Some(serde_json::json!({
+            "command_id": command_id,
+            "status": status,
+            "output": output.unwrap_or_default(),
+            "exit_code": exit_code.unwrap_or(0),
+            "duration_ms": duration_ms.unwrap_or(0),
+        })),
+    )
+    .await
+}
+
+#[tauri::command]
 async fn list_agent_models(state: State<'_, SharedState>) -> Result<ModelList, String> {
     let (origin, token) = {
         let guard = state.session.lock().map_err(|_| "نشست در دسترس نیست")?;
@@ -784,6 +838,9 @@ pub fn run() {
             cancel_agent_run,
             list_agent_runs,
             list_agent_models,
+            list_agent_pending_commands,
+            claim_agent_command,
+            report_agent_command,
             disconnect_agent,
             hide_agent,
             quit_agent,

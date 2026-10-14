@@ -632,6 +632,9 @@ def make_server(
                 "/api/admin/providers/test-socks", "/api/admin/providers/socks-health", "/api/admin/providers/enable", "/api/admin/providers/price",
                 "/api/admin/system/backups", "/api/admin/system/update", "/api/admin/system/sync-release-assets",
                 "/api/admin/users/update", "/api/admin/users/reset-quota", "/api/user/profile", "/api/user/change-password",
+                "/api/mobile/commands/dispatch", "/api/mobile/commands/approve", "/api/mobile/commands/cancel",
+                "/api/mobile/approvals/request", "/api/mobile/approvals/decide", "/api/mobile/kill-switch",
+                "/api/agent/commands/claim", "/api/agent/commands/report",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
@@ -895,6 +898,44 @@ def make_server(
                         payload.get('node_id', 'all'),
                         payload.get('reason', 'Emergency mobile operator stop')
                     ))
+                elif path == '/api/mobile/commands/dispatch':
+                    self._send(201, mobile_store.dispatch_command(
+                        principal,
+                        target_node_id=payload.get('target_node_id', 'windows-edge'),
+                        command=payload.get('command') or payload.get('command_payload', ''),
+                        command_type=payload.get('command_type', 'powershell'),
+                        description=payload.get('description', ''),
+                        risk_level=payload.get('risk_level', 'high'),
+                        require_approval=payload.get('require_approval'),
+                    ))
+                elif path == '/api/mobile/commands/approve':
+                    self._send(200, mobile_store.approve_command(
+                        principal,
+                        payload.get('command_id'),
+                        auth_method=payload.get('auth_method', 'biometric_fingerprint')
+                    ))
+                elif path == '/api/mobile/commands/cancel':
+                    self._send(200, mobile_store.cancel_command(
+                        principal,
+                        payload.get('command_id'),
+                        reason=payload.get('reason', '')
+                    ))
+                elif path == '/api/agent/commands/claim':
+                    agent_node = principal.get('device_id') or principal.get('id') or 'windows-edge'
+                    self._send(200, mobile_store.claim_agent_command(
+                        payload.get('command_id'),
+                        agent_node_id=payload.get('agent_node_id') or agent_node
+                    ))
+                elif path == '/api/agent/commands/report':
+                    agent_node = principal.get('device_id') or principal.get('id') or 'windows-edge'
+                    self._send(200, mobile_store.report_agent_command(
+                        command_id=payload.get('command_id'),
+                        agent_node_id=payload.get('agent_node_id') or agent_node,
+                        status=payload.get('status', 'completed'),
+                        output=payload.get('output', ''),
+                        exit_code=int(payload.get('exit_code', 0)),
+                        duration_ms=int(payload.get('duration_ms', 0)),
+                    ))
                 else:
                     pieces = path.split("/")
                     if len(pieces) != 6 or not pieces[4]:
@@ -980,6 +1021,25 @@ def make_server(
                         }
                     })
                     return
+            if parsed.path in ('/api/mobile/commands/history', '/api/agent/commands/pending'):
+                audience = 'agent' if parsed.path.startswith('/api/agent/') else 'web'
+                principal = self._principal(audience)
+                if principal is None:
+                    return
+                try:
+                    q = parse_qs(parsed.query)
+                    if parsed.path == '/api/mobile/commands/history':
+                        t_id = q.get('target_node_id', [None])[0]
+                        st = q.get('status', [None])[0]
+                        lim = int(q.get('limit', ['50'])[0])
+                        self._send(200, {'commands': mobile_store.list_commands(principal, target_node_id=t_id, status=st, limit=lim)})
+                    elif parsed.path == '/api/agent/commands/pending':
+                        agent_node = q.get('agent_node_id', [None])[0] or principal.get('device_id') or principal.get('id')
+                        lim = int(q.get('limit', ['20'])[0])
+                        self._send(200, {'commands': mobile_store.get_pending_agent_commands(agent_node_id=agent_node, limit=lim)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                return
             if parsed.path in ('/api/web/project/files', '/api/web/project/file'):
                 principal = self._principal('web')
                 if principal is None:
