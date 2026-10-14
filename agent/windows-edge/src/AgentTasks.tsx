@@ -33,6 +33,7 @@ export function AgentTasks({ canRequest }: { canRequest: boolean }) {
   const [selected, setSelected] = useState("");
   const [description, setDescription] = useState("");
   const [runPrompt, setRunPrompt] = useState("");
+  const [role, setRole] = useState<"general" | "coder" | "tester" | "architect">("general");
   const [tab, setTab] = useState<"autonomous" | "drafts">("autonomous");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -92,7 +93,11 @@ export function AgentTasks({ canRequest }: { canRequest: boolean }) {
     setBusy(true);
     setError("");
     try {
-      const res = await invoke<{ run: AgentRun }>("start_agent_run", { projectId: selected, prompt: runPrompt.trim() });
+      const res = await invoke<{ run: AgentRun }>("start_agent_run", {
+        projectId: selected,
+        prompt: runPrompt.trim(),
+        role,
+      });
       setActiveRun(res.run);
       setRunPrompt("");
       await refresh();
@@ -239,6 +244,33 @@ export function AgentTasks({ canRequest }: { canRequest: boolean }) {
         <div className="agent-autonomous-view">
           <form onSubmit={(e) => void startRun(e)}>
             <label htmlFor="agent-run-prompt">تعریف وظیفه یا هدف روی پروژه:</label>
+            <div style={{ display: "flex", gap: "6px", margin: "6px 0 8px 0" }}>
+              {(
+                [
+                  ["general", "🧠 عمومی"],
+                  ["coder", "🛠️ برنامه‌نویس"],
+                  ["tester", "🧪 تست"],
+                  ["architect", "🏛️ معمار"],
+                ] as const
+              ).map(([r, label]) => (
+                <button
+                  key={r}
+                  type="button"
+                  style={{
+                    flex: 1,
+                    padding: "4px",
+                    fontSize: "11px",
+                    borderRadius: "4px",
+                    background: role === r ? "rgba(99,102,241,0.3)" : "rgba(255,255,255,0.05)",
+                    borderColor: role === r ? "#6366f1" : "rgba(255,255,255,0.1)",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => setRole(r)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <textarea
               id="agent-run-prompt"
               rows={2}

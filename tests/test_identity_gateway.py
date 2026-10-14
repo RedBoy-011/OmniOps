@@ -586,6 +586,42 @@ class WorkerEndpointTests(unittest.TestCase):
             self.assertEqual(adv_res["run"]["status"], "completed")
             self.assertTrue(len(adv_res["run"]["result_summary"]) > 0)
 
+            # Start run with specialized role
+            code, coder_start = self.call("POST", "/api/web/workspace/task/run", {
+                "project_id": p_id,
+                "prompt": "کدنویسی و توسعه ماژول جدید",
+                "role": "coder"
+            }, admin)
+            self.assertEqual(code, 201)
+            self.assertEqual(coder_start["run"]["role"], "coder")
+            coder_run_id = coder_start["run"]["id"]
+
+            # Propose file patch via API
+            code, patch_res = self.call("POST", "/api/web/workspace/project/patch", {
+                "project_id": p_id,
+                "path": "package.json",
+                "content": '{"name": "test-agent-run", "dependencies": {"react": "19.0.0", "lodash": "4.17.21"}}',
+                "apply": True
+            }, admin)
+            self.assertEqual(code, 200)
+            self.assertTrue(patch_res["applied"])
+            self.assertGreater(patch_res["additions"], 0)
+            self.assertIn("lodash", (tmp_path / "package.json").read_text(encoding="utf-8"))
+
+            # Admin governance: list all runs
+            code, all_runs_res = self.call("GET", "/api/admin/workspace/agent/runs?limit=20", None, admin)
+            self.assertEqual(code, 200)
+            self.assertGreaterEqual(len(all_runs_res["runs"]), 2)
+            self.assertIn("owner_username", all_runs_res["runs"][0])
+
+            # Admin emergency stop on coder run
+            code, stop_res = self.call("POST", "/api/admin/workspace/agent/runs/stop", {
+                "run_id": coder_run_id,
+                "reason": "توقف اداری به منظور بررسی پچ"
+            }, admin)
+            self.assertEqual(code, 200)
+            self.assertEqual(stop_res["run"]["status"], "cancelled")
+
 
 if __name__ == "__main__":
     unittest.main()

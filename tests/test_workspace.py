@@ -179,3 +179,123 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(len(runs_list), 1)
         self.assertEqual(runs_list[0]['id'], admin_run['id'])
 
+    def test_workspace_file_patch_diff_and_apply(self):
+        proj_dir = Path(self.temp.name) / 'patch_project'
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        (proj_dir / 'config.py').write_text("DEBUG = False\nVERSION = '1.0'\n", encoding='utf-8')
+
+        proj = self.workspace.create_project(self.member, 'Patch Project', str(proj_dir))
+
+        # Propose patch to existing file without applying
+        patch_res = self.workspace.propose_file_patch(
+            self.member,
+            proj['id'],
+            'config.py',
+            "DEBUG = True\nVERSION = '1.1'\nTIMEOUT = 30\n",
+            apply=False
+        )
+        self.assertFalse(patch_res['is_new_file'])
+        self.assertTrue(patch_res['has_changes'])
+        self.assertFalse(patch_res['applied'])
+        self.assertGreater(patch_res['additions'], 0)
+        self.assertIn('+DEBUG = True', patch_res['diff'])
+        self.assertIn('-DEBUG = False', patch_res['diff'])
+        # Original file on disk should not be changed yet
+        self.assertIn("DEBUG = False", (proj_dir / 'config.py').read_text(encoding='utf-8'))
+
+        # Propose and apply patch
+        applied_res = self.workspace.propose_file_patch(
+            self.member,
+            proj['id'],
+            'config.py',
+            "DEBUG = True\nVERSION = '1.1'\nTIMEOUT = 30\n",
+            apply=True
+        )
+        self.assertTrue(applied_res['applied'])
+        self.assertIn("TIMEOUT = 30", (proj_dir / 'config.py').read_text(encoding='utf-8'))
+
+        # Propose patch for brand new file
+        new_patch = self.workspace.propose_file_patch(
+            self.member,
+            proj['id'],
+            'new_module.py',
+            "def run():\n    return 42\n",
+            apply=True
+        )
+        self.assertTrue(new_patch['is_new_file'])
+        self.assertTrue(new_patch['applied'])
+        self.assertTrue((proj_dir / 'new_module.py').is_file())
+
+    def test_workspace_agent_roles_and_tailored_plans(self):
+        proj_dir = Path(self.temp.name) / 'role_project'
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        (proj_dir / 'requirements.txt').write_text("fastapi>=0.100.0\nuvicorn\npytest\n", encoding='utf-8')
+        (proj_dir / 'main.py').write_text("from fastapi import FastAPI\napp = FastAPI()\n", encoding='utf-8')
+
+        proj = self.workspace.create_project(self.member, 'Role Project', str(proj_dir))
+
+        # Test invalid role
+        with self.assertRaises(IdentityError) as ctx:
+            self.workspace.start_agent_run(self.member, proj['id'], 'تست با نقش نامعتبر', role='superhacker')
+        self.assertEqual(ctx.exception.status, 400)
+
+        # Test coder role
+        coder_run = self.workspace.start_agent_run(self.member, proj['id'], 'پیاده‌سازی ماژول جدید', role='coder')
+        self.assertEqual(coder_run['role'], 'coder')
+        self.assertIn('ماژول‌ها', coder_run['plan_steps'][0]['title'])
+        self.assertIn('پچ', coder_run['plan_steps'][3]['title'])
+
+        # Test tester role
+        tester_run = self.workspace.start_agent_run(self.member, proj['id'], 'بررسی پوشش آزمون‌ها', role='tester')
+        self.assertEqual(tester_run['role'], 'tester')
+        self.assertIn('پایگاه تست‌ها', tester_run['plan_steps'][0]['title'])
+        self.assertIn('تضمین کیفیت', tester_run['plan_steps'][3]['title'])
+
+        # Test architect role
+        arch_run = self.workspace.start_agent_run(self.member, proj['id'], 'بررسی ساختار کلان', role='architect')
+        self.assertEqual(arch_run['role'], 'architect')
+        self.assertIn('معماری', arch_run['plan_steps'][0]['title'])
+        self.assertIn('سند ارزیابی معماری', arch_run['plan_steps'][3]['title'])
+
+    def test_admin_agent_run_governance_and_emergency_stop(self):
+        proj_dir = Path(self.temp.name) / 'gov_project'
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        (proj_dir / 'package.json').write_text('{"name": "gov-app"}', encoding='utf-8')
+
+        member_proj = self.workspace.create_project(self.member, 'Member Gov Project', str(proj_dir))
+        member_run = self.workspace.start_agent_run(self.member, member_proj['id'], 'اجرای تسک طولانی', role='coder')
+
+        # Regular member cannot access admin governance APIs
+        with self.assertRaises(IdentityError) as ctx:
+            self.workspace.list_all_agent_runs(self.member)
+        self.assertEqual(ctx.exception.status, 403)
+
+        with self.assertRaises(IdentityError) as ctx:
+            self.workspace.admin_stop_agent_run(self.member, member_run['id'])
+        self.assertEqual(ctx.exception.status, 403)
+
+        with self.assertRaises(IdentityError) as ctx:
+            self.workspace.admin_approve_agent_run_step(self.member, member_run['id'])
+        self.assertEqual(ctx.exception.status, 403)
+
+        # Superadmin lists all runs across the organization
+        all_runs = self.workspace.list_all_agent_runs(self.owner, limit=50)
+        self.assertGreaterEqual(len(all_runs), 1)
+        found = next((r for r in all_runs if r['id'] == member_run['id']), None)
+        self.assertIsNotNone(found)
+        self.assertEqual(found['owner_username'], 'workspace-member')
+        self.assertEqual(found['project_name'], 'Member Gov Project')
+
+        # Superadmin approves the member's run step
+        approved_run = self.workspace.admin_approve_agent_run_step(self.owner, member_run['id'])
+        self.assertEqual(approved_run['status'], 'completed')
+
+        # Superadmin emergency stop on another run
+        second_run = self.workspace.start_agent_run(self.member, member_proj['id'], 'تسک دیگر برای توقف', role='general')
+        stopped_run = self.workspace.admin_stop_agent_run(self.owner, second_run['id'], reason='توقف به دلیل مصرف بیش از حد منابع')
+        self.assertEqual(stopped_run['status'], 'cancelled')
+        last_log = stopped_run['logs'][-1]
+        self.assertEqual(last_log['type'], 'admin_intervention')
+        self.assertIn('توقف به دلیل مصرف', last_log['content'])
+
+

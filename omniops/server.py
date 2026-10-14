@@ -529,11 +529,13 @@ def make_server(
                 "/api/web/workspace/attachments/remove", "/api/agent/workspace/attachments/remove",
                 "/api/web/workspace/projects/bind-root", "/api/agent/workspace/projects/bind-root",
                 "/api/web/workspace/project/file", "/api/agent/workspace/project/file",
+                "/api/web/workspace/project/patch", "/api/agent/workspace/project/patch",
                 "/api/web/workspace/project/command", "/api/agent/workspace/project/command",
                 "/api/web/workspace/task/run", "/api/agent/workspace/task/run",
                 "/api/web/workspace/task/run/advance", "/api/agent/workspace/task/run/advance",
                 "/api/web/workspace/task/run/approve", "/api/agent/workspace/task/run/approve",
                 "/api/web/workspace/task/run/cancel", "/api/agent/workspace/task/run/cancel",
+                "/api/admin/workspace/agent/runs/stop", "/api/admin/workspace/agent/runs/approve",
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/test-socks", "/api/admin/providers/enable", "/api/admin/providers/price",
                 "/api/admin/system/backups", "/api/admin/system/update",
@@ -657,6 +659,14 @@ def make_server(
                     self._send(200, workspace.bind_project_root(principal, payload.get('project_id'), payload.get('root_path', '')))
                 elif path in ('/api/web/workspace/project/file', '/api/agent/workspace/project/file'):
                     self._send(200, workspace.write_project_file(principal, payload.get('project_id'), payload.get('path'), payload.get('content')))
+                elif path in ('/api/web/workspace/project/patch', '/api/agent/workspace/project/patch'):
+                    self._send(200, workspace.propose_file_patch(
+                        principal,
+                        payload.get('project_id'),
+                        payload.get('path'),
+                        payload.get('content', ''),
+                        apply=bool(payload.get('apply', False))
+                    ))
                 elif path in ('/api/web/workspace/project/command', '/api/agent/workspace/project/command'):
                     self._send(200, workspace.execute_project_command(principal, payload.get('project_id'), payload.get('command'), payload.get('timeout', 15)))
                 elif path in ('/api/web/workspace/tasks', '/api/agent/workspace/tasks'):
@@ -664,13 +674,17 @@ def make_server(
                 elif path in ('/api/web/workspace/tasks/cancel', '/api/agent/workspace/tasks/cancel'):
                     self._send(200, workspace.cancel_task(principal, payload.get('id')))
                 elif path in ('/api/web/workspace/task/run', '/api/agent/workspace/task/run'):
-                    self._send(201, {'run': workspace.start_agent_run(principal, payload.get('project_id'), payload.get('prompt'))})
+                    self._send(201, {'run': workspace.start_agent_run(principal, payload.get('project_id'), payload.get('prompt'), role=payload.get('role', 'general'))})
                 elif path in ('/api/web/workspace/task/run/advance', '/api/agent/workspace/task/run/advance'):
                     self._send(200, {'run': workspace.advance_agent_run(principal, payload.get('run_id'))})
                 elif path in ('/api/web/workspace/task/run/approve', '/api/agent/workspace/task/run/approve'):
                     self._send(200, {'run': workspace.approve_agent_run_step(principal, payload.get('run_id'))})
                 elif path in ('/api/web/workspace/task/run/cancel', '/api/agent/workspace/task/run/cancel'):
                     self._send(200, {'run': workspace.cancel_agent_run(principal, payload.get('run_id'))})
+                elif path == '/api/admin/workspace/agent/runs/stop':
+                    self._send(200, {'run': workspace.admin_stop_agent_run(principal, payload.get('run_id'), payload.get('reason', 'Admin emergency stop'))})
+                elif path == '/api/admin/workspace/agent/runs/approve':
+                    self._send(200, {'run': workspace.admin_approve_agent_run_step(principal, payload.get('run_id'))})
                 elif path in ('/api/web/workspace/attachments', '/api/agent/workspace/attachments'):
                     self._send(201, workspace.add_attachment(principal, payload.get('project_id'),
                                                               payload.get('name'), payload.get('mime'), payload.get('content_base64')))
@@ -887,6 +901,18 @@ def make_server(
                         self._send(200, {'run': workspace.get_agent_run(principal, r_id)})
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
+                return
+            if parsed.path == '/api/admin/workspace/agent/runs':
+                principal = self._principal('web') or self._principal('agent')
+                if principal is None:
+                    return
+                try:
+                    limit = int(parse_qs(parsed.query).get('limit', ['50'])[0])
+                    self._send(200, {'runs': workspace.list_all_agent_runs(principal, limit=limit)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                except Exception as exc:
+                    self._send(400, {'error': {'message': f'Invalid request: {exc}'}})
                 return
             if parsed.path in ('/api/chat/sessions', '/api/agent/sessions',
                               '/api/chat/history', '/api/chat/memory',

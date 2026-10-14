@@ -6,6 +6,8 @@ import {
   type ProjectFileEntry,
   type CommandExecutionResult,
   type AgentRun,
+  type AgentRole,
+  type FilePatchProposal,
 } from "../api";
 
 interface AgenticWorkspaceCardProps {
@@ -19,6 +21,16 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+
+  // Agent Role selection state
+  const [selectedRole, setSelectedRole] = useState<AgentRole>("general");
+
+  // File viewing and patch proposal state
+  const [isEditingFile, setIsEditingFile] = useState(false);
+  const [editedFileContent, setEditedFileContent] = useState("");
+  const [patchDiffResult, setPatchDiffResult] = useState<FilePatchProposal | null>(null);
+  const [calculatingDiff, setCalculatingDiff] = useState(false);
+  const [applyingPatch, setApplyingPatch] = useState(false);
 
   // Create / Bind state
   const [showNewModal, setShowNewModal] = useState(false);
@@ -111,7 +123,7 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
     setError("");
     setSuccessMsg("");
     try {
-      const res = await api.startAgentRun(selectedProjectId, agentTaskPrompt.trim());
+      const res = await api.startAgentRun(selectedProjectId, agentTaskPrompt.trim(), selectedRole);
       setActiveRun(res.run);
       setAgentTaskPrompt("");
       setSuccessMsg("چرخه اجرای خودکار وظیفه توسط ایجنت با موفقیت آغاز شد.");
@@ -209,13 +221,51 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
     if (!selectedProjectId) return;
     setLoadingFile(true);
     setError("");
+    setIsEditingFile(false);
+    setPatchDiffResult(null);
     try {
       const detail = await api.readProjectFile(selectedProjectId, path);
       setViewingFile(detail);
+      setEditedFileContent(detail.content);
     } catch (err) {
       setError(err instanceof Error ? err.message : "خواندن فایل ممکن نشد.");
     } finally {
       setLoadingFile(false);
+    }
+  }
+
+  async function handleCalculateDiff() {
+    if (!selectedProjectId || !viewingFile) return;
+    setCalculatingDiff(true);
+    setError("");
+    try {
+      const proposal = await api.proposeFilePatch(selectedProjectId, viewingFile.path, editedFileContent, false);
+      setPatchDiffResult(proposal);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "محاسبه پچ و اختلاف فایل با خطا مواجه شد.");
+    } finally {
+      setCalculatingDiff(false);
+    }
+  }
+
+  async function handleApplyPatch() {
+    if (!selectedProjectId || !viewingFile) return;
+    setApplyingPatch(true);
+    setError("");
+    setSuccessMsg("");
+    try {
+      const res = await api.proposeFilePatch(selectedProjectId, viewingFile.path, editedFileContent, true);
+      setPatchDiffResult(res);
+      setSuccessMsg(`وصله فایل «${viewingFile.path}» با موفقیت روی دیسک اعمال شد.`);
+      const detail = await api.readProjectFile(selectedProjectId, viewingFile.path);
+      setViewingFile(detail);
+      setEditedFileContent(detail.content);
+      const filesRes = await api.listProjectFiles(selectedProjectId);
+      setFiles(filesRes.entries || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "اعمال پچ با خطا مواجه شد.");
+    } finally {
+      setApplyingPatch(false);
     }
   }
 
@@ -441,6 +491,42 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
 
             {/* فرم ورود تسک یا هدف */}
             <form onSubmit={handleStartAgentRun} className="agent-task-input-box">
+              <div className="agent-role-selector-row">
+                <span className="role-selector-label">نقش تخصصی ایجنت:</span>
+                <button
+                  type="button"
+                  className={`role-pill-btn ${selectedRole === "general" ? "active" : ""}`}
+                  onClick={() => setSelectedRole("general")}
+                  title="بررسی عمومی، داکیومنت‌ها، وابستگی‌ها و تدوین نقشه راه"
+                >
+                  🧠 عمومی (Generalist)
+                </button>
+                <button
+                  type="button"
+                  className={`role-pill-btn ${selectedRole === "coder" ? "active" : ""}`}
+                  onClick={() => setSelectedRole("coder")}
+                  title="تحلیل ماژول‌ها، بررسی سینتکس، کامپایلر و تولید پیشنهاد پچ (Patch)"
+                >
+                  🛠️ برنامه‌نویس (Coder)
+                </button>
+                <button
+                  type="button"
+                  className={`role-pill-btn ${selectedRole === "tester" ? "active" : ""}`}
+                  onClick={() => setSelectedRole("tester")}
+                  title="پویش پایگاه تست‌ها، اجرای آزمون‌ها و گزارش تضمین کیفیت QA"
+                >
+                  🧪 تست و ارزیابی (Tester)
+                </button>
+                <button
+                  type="button"
+                  className={`role-pill-btn ${selectedRole === "architect" ? "active" : ""}`}
+                  onClick={() => setSelectedRole("architect")}
+                  title="تحلیل کلان معماری، استانداردهای مهندسی، توپولوژی و انطباق سیستم"
+                >
+                  🏛️ معمار سیستم (Architect)
+                </button>
+              </div>
+
               <div className="prompt-input-row">
                 <input
                   type="text"
@@ -608,14 +694,92 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
             </div>
           </div>
 
-          {/* نمایشگر محتوای فایل انتخاب‌شده */}
+          {/* نمایشگر و موتور مقایسه و پیشنهاد پچ فایل */}
           {viewingFile && (
             <div className="agentic-file-viewer-modal">
               <div className="file-viewer-header">
-                <span>📄 {viewingFile.path} ({viewingFile.lines.toLocaleString("fa-IR")} سطر · {(viewingFile.size / 1024).toFixed(1)} KB)</span>
-                <button type="button" onClick={() => setViewingFile(null)}>✕ بستن</button>
+                <div className="viewer-title-group">
+                  <span>📄 {viewingFile.path}</span>
+                  <small>({viewingFile.lines.toLocaleString("fa-IR")} سطر · {(viewingFile.size / 1024).toFixed(1)} KB)</small>
+                </div>
+                <div className="file-viewer-actions">
+                  <button
+                    type="button"
+                    className={`mode-toggle-btn ${!isEditingFile ? "active" : ""}`}
+                    onClick={() => {
+                      setIsEditingFile(false);
+                      setPatchDiffResult(null);
+                    }}
+                  >
+                    👁️ مشاهده محتوا
+                  </button>
+                  <button
+                    type="button"
+                    className={`mode-toggle-btn ${isEditingFile ? "active" : ""}`}
+                    onClick={() => setIsEditingFile(true)}
+                  >
+                    🛠️ ویرایش و پیشنهاد پچ (Diff)
+                  </button>
+                  <button type="button" className="close-viewer-btn" onClick={() => setViewingFile(null)}>✕ بستن</button>
+                </div>
               </div>
-              <pre className="file-viewer-content">{viewingFile.content}</pre>
+
+              {!isEditingFile ? (
+                <pre className="file-viewer-content">{viewingFile.content}</pre>
+              ) : (
+                <div className="file-patch-editor-container">
+                  <div className="editor-hint-banner">
+                    💡 محتوای فایل را ویرایش یا کد جدید را جایگزین کنید، سپس دکمه <strong>«محاسبه Diff»</strong> را بزنید تا تغییرات خط‌به‌خط بررسی و اعتبارسنجی شوند.
+                  </div>
+                  <textarea
+                    className="file-editor-textarea"
+                    dir="ltr"
+                    value={editedFileContent}
+                    onChange={(e) => setEditedFileContent(e.target.value)}
+                    rows={12}
+                    placeholder="محتوای جدید فایل..."
+                  />
+
+                  <div className="patch-controls-bar">
+                    <button
+                      type="button"
+                      className="action-button"
+                      onClick={() => void handleCalculateDiff()}
+                      disabled={calculatingDiff || applyingPatch}
+                    >
+                      {calculatingDiff ? "⏳ در حال محاسبه Diff..." : "🔍 محاسبه Diff و تغییرات"}
+                    </button>
+                    {patchDiffResult && (
+                      <button
+                        type="button"
+                        className="action-button primary-accent"
+                        onClick={() => void handleApplyPatch()}
+                        disabled={applyingPatch}
+                      >
+                        {applyingPatch ? "⏳ در حال اعمال..." : "💾 اعمال پچ روی فایل (Apply Patch)"}
+                      </button>
+                    )}
+                  </div>
+
+                  {patchDiffResult && (
+                    <div className="patch-diff-preview-box">
+                      <div className="diff-header">
+                        <span className="diff-title">نتیجهٔ اختلاف و بازبینی پچ (Unified Diff):</span>
+                        <div className="diff-stats">
+                          <span className="additions">+{patchDiffResult.additions} سطر</span>
+                          <span className="deletions">-{patchDiffResult.deletions} سطر</span>
+                          <span className="diff-status">
+                            {patchDiffResult.has_changes ? "تغییرات تشخیص داده شد" : "بدون تغییر"}
+                          </span>
+                        </div>
+                      </div>
+                      <pre className="diff-content" dir="ltr">
+                        {patchDiffResult.diff || "هیچ اختلافی با فایل اصلی یافت نشد."}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

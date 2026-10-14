@@ -287,10 +287,29 @@ export type AgentRunLog = {
   exit_code?: number;
 };
 
+export type AgentRole = "general" | "coder" | "tester" | "architect";
+
+export type FilePatchProposal = {
+  project_id: string;
+  path: string;
+  is_new_file: boolean;
+  old_size: number;
+  new_size: number;
+  additions: number;
+  deletions: number;
+  diff: string;
+  has_changes: boolean;
+  applied: boolean;
+};
+
 export type AgentRun = {
   id: string;
+  owner_id?: string;
+  owner_username?: string;
   project_id: string;
+  project_name?: string;
   prompt: string;
+  role: AgentRole;
   status: "planning" | "in_progress" | "waiting_approval" | "completed" | "failed" | "cancelled";
   current_step_index: number;
   plan_steps: AgentPlanStep[];
@@ -494,8 +513,10 @@ export const api = {
     request<{ status: string; project_id: string; path: string; bytes: number }>("/api/web/workspace/project/file", "POST", { project_id, path, content }),
   executeProjectCommand: (project_id: string, command: string, timeout = 15) =>
     request<CommandExecutionResult>("/api/web/workspace/project/command", "POST", { project_id, command, timeout }),
-  startAgentRun: (project_id: string, prompt: string) =>
-    request<{ run: AgentRun }>("/api/web/workspace/task/run", "POST", { project_id, prompt }),
+  startAgentRun: (project_id: string, prompt: string, role: AgentRole = "general") =>
+    request<{ run: AgentRun }>("/api/web/workspace/task/run", "POST", { project_id, prompt, role }),
+  proposeFilePatch: (project_id: string, path: string, content: string, apply = false) =>
+    request<FilePatchProposal>("/api/web/workspace/project/patch", "POST", { project_id, path, content, apply }),
   advanceAgentRun: (run_id: string) =>
     request<{ run: AgentRun }>("/api/web/workspace/task/run/advance", "POST", { run_id }),
   approveAgentRunStep: (run_id: string) =>
@@ -506,4 +527,10 @@ export const api = {
     request<{ run: AgentRun }>(`/api/web/workspace/task/run?run_id=${encodeURIComponent(run_id)}`),
   listAgentRuns: (project_id: string) =>
     request<{ runs: AgentRun[] }>(`/api/web/workspace/task/runs?project_id=${encodeURIComponent(project_id)}`),
+  adminAgentRuns: (limit = 50) =>
+    request<{ runs: AgentRun[] }>(`/api/admin/workspace/agent/runs?limit=${limit}`),
+  adminStopAgentRun: (run_id: string, reason?: string) =>
+    request<{ run: AgentRun }>("/api/admin/workspace/agent/runs/stop", "POST", { run_id, reason }),
+  adminApproveAgentRun: (run_id: string) =>
+    request<{ run: AgentRun }>("/api/admin/workspace/agent/runs/approve", "POST", { run_id }),
 };

@@ -9,6 +9,7 @@ import { UpdateNotificationBanner } from "./components/UpdateNotificationBanner"
 import { UserManagementCard } from "./components/UserManagementCard";
 import { UserProfileModal } from "./components/UserProfileModal";
 import { SecurityAuditCard } from "./components/SecurityAuditCard";
+import { AdminAgentGovernanceCard } from "./components/AdminAgentGovernanceCard";
 
 const choices = [
   ["chat", "گفت‌وگو"],
@@ -20,7 +21,7 @@ const choices = [
   ["agent.pair", "اتصال ایجنت"],
 ] as const;
 
-type AdminTab = "nodes" | "providers" | "users" | "health" | "backups" | "audit";
+type AdminTab = "nodes" | "providers" | "users" | "health" | "backups" | "audit" | "agents";
 
 type Props = {
   user: Profile;
@@ -337,6 +338,16 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
           >
             🛡️ دفترچه ممیزی و امنیت
           </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={adminTab === "agents"}
+            className={`admin-nav-tab ${adminTab === "agents" ? "active" : ""}`}
+            onClick={() => setAdminTab("agents")}
+          >
+            🤖 حاکمیت بر ایجنت‌ها
+          </button>
         </div>
 
         {/* ۱. تب سرورها و مدل‌ها */}
@@ -581,6 +592,11 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
         {/* ۶. تب ممیزی امنیتی و لاگ رویدادها */}
         <div hidden={adminTab !== "audit"}>
           <SecurityAuditCard />
+        </div>
+
+        {/* ۷. تب نظارت و حاکمیت بر ایجنت‌های سازمانی */}
+        <div hidden={adminTab !== "agents"}>
+          <AdminAgentGovernanceCard />
         </div>
 
         {message && <p className="admin-message" role="status" aria-live="polite">{message}</p>}

@@ -2,6 +2,7 @@
 
 import base64
 import binascii
+import difflib
 import json
 from pathlib import Path
 import subprocess
@@ -41,6 +42,7 @@ class WorkspaceStore:
                     owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     project_id TEXT NOT NULL REFERENCES workspace_projects(id) ON DELETE CASCADE,
                     prompt TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'general',
                     status TEXT NOT NULL CHECK(status IN ('planning','in_progress','waiting_approval','completed','failed','cancelled')),
                     current_step_index INTEGER NOT NULL DEFAULT 0,
                     plan_steps TEXT NOT NULL DEFAULT '[]',
@@ -53,6 +55,10 @@ class WorkspaceStore:
             """)
             try:
                 db.execute("ALTER TABLE workspace_projects ADD COLUMN root_path TEXT DEFAULT ''")
+            except Exception:
+                pass
+            try:
+                db.execute("ALTER TABLE workspace_agent_runs ADD COLUMN role TEXT DEFAULT 'general'")
             except Exception:
                 pass
 
@@ -101,8 +107,12 @@ class WorkspaceStore:
 
     def _resolve_project_root(self, principal, project_id):
         with self.store._db() as db:
-            row = db.execute('SELECT root_path, name FROM workspace_projects WHERE id=? AND owner_id=?',
-                             (project_id, principal['id'])).fetchone()
+            if principal.get('role') == 'superadmin':
+                row = db.execute('SELECT root_path, name FROM workspace_projects WHERE id=?',
+                                 (project_id,)).fetchone()
+            else:
+                row = db.execute('SELECT root_path, name FROM workspace_projects WHERE id=? AND owner_id=?',
+                                 (project_id, principal['id'])).fetchone()
             if not row:
                 raise IdentityError('Project not found', 404)
             root_str = (row['root_path'] or '').strip()
@@ -291,6 +301,62 @@ class WorkspaceStore:
             'bytes': len(content.encode('utf-8')),
         }
 
+    def propose_file_patch(self, principal, project_id, relative_path, new_content, apply=False):
+        self._cap(principal, 'chat')
+        if not isinstance(new_content, str):
+            raise IdentityError('New content must be a string')
+        if len(new_content.encode('utf-8')) > 256 * 1024:
+            raise IdentityError('File content exceeds 256 KiB limit', 413)
+
+        root_dir, _ = self._resolve_project_root(principal, project_id)
+        target = self._safe_resolve(root_dir, relative_path)
+
+        old_content = ''
+        is_new_file = not target.is_file()
+        if not is_new_file:
+            if target.stat().st_size > 256 * 1024:
+                raise IdentityError('Existing file exceeds 256 KiB limit', 413)
+            try:
+                old_content = target.read_text(encoding='utf-8', errors='replace')
+            except Exception as exc:
+                raise IdentityError(f'Cannot read existing file: {exc}')
+
+        old_lines = old_content.splitlines(keepends=True)
+        new_lines = new_content.splitlines(keepends=True)
+        diff_lines = list(difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile=f"a/{relative_path}",
+            tofile=f"b/{relative_path}",
+            lineterm="\n"
+        ))
+        diff_text = "".join(diff_lines)
+        additions = sum(1 for line in diff_lines if line.startswith('+') and not line.startswith('+++'))
+        deletions = sum(1 for line in diff_lines if line.startswith('-') and not line.startswith('---'))
+
+        applied = False
+        if apply:
+            if 'action.request' not in principal.get('capabilities', []) and principal.get('role') != 'superadmin':
+                raise IdentityError('action.request permission required to apply patch', 403)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(new_content, encoding='utf-8')
+            applied = True
+            with self.store._lock, self.store._db() as db:
+                self.store._audit(db, principal['id'], 'workspace_file_patch_applied', f"{project_id}:{relative_path}")
+
+        return {
+            'project_id': project_id,
+            'path': relative_path,
+            'is_new_file': is_new_file,
+            'old_size': len(old_content.encode('utf-8')),
+            'new_size': len(new_content.encode('utf-8')),
+            'additions': additions,
+            'deletions': deletions,
+            'diff': diff_text,
+            'has_changes': bool(diff_lines),
+            'applied': applied,
+        }
+
     def execute_project_command(self, principal, project_id, command, timeout=15):
         if 'action.approve' not in principal.get('capabilities', []) and principal.get('role') != 'superadmin':
             raise IdentityError('action.approve capability or superadmin role required to execute workspace commands', 403)
@@ -461,10 +527,12 @@ class WorkspaceStore:
             logs = json.loads(run.get('logs') or '[]')
         except Exception:
             logs = []
-        return {
+        res = {
             'id': run['id'],
+            'owner_id': run.get('owner_id') or '',
             'project_id': run['project_id'],
             'prompt': run['prompt'],
+            'role': run.get('role') or 'general',
             'status': run['status'],
             'current_step_index': run['current_step_index'],
             'plan_steps': plan,
@@ -473,13 +541,22 @@ class WorkspaceStore:
             'created_at': run['created_at'],
             'updated_at': run['updated_at']
         }
+        if 'owner_username' in run and run['owner_username'] is not None:
+            res['owner_username'] = run['owner_username']
+        if 'project_name' in run and run['project_name'] is not None:
+            res['project_name'] = run['project_name']
+        return res
 
-    def start_agent_run(self, principal, project_id, prompt):
+    def start_agent_run(self, principal, project_id, prompt, role='general'):
         self._cap(principal, 'chat')
         if not isinstance(project_id, str) or len(project_id) != 32:
             raise IdentityError('Invalid project ID')
         if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 2000:
             raise IdentityError('Goal/prompt must contain 1-2000 characters')
+
+        clean_role = (role or 'general').strip().lower()
+        if clean_role not in ('general', 'coder', 'tester', 'architect'):
+            raise IdentityError('Invalid agent role. Allowed: general, coder, tester, architect', 400)
 
         root_dir, project_name = self._resolve_project_root(principal, project_id)
         inspection = self.inspect_project(principal, project_id)
@@ -500,17 +577,53 @@ class WorkspaceStore:
             target_file = 'go.mod'
             default_cmd = 'go test'
 
+        role_labels = {
+            'general': 'عمومی',
+            'coder': 'برنامه‌نویس',
+            'tester': 'تست و ارزیابی',
+            'architect': 'معمار سیستم',
+        }
+
+        if clean_role == 'coder':
+            step0_title = 'تحلیل ماژول‌ها و ساختار کدهای منبع'
+            step0_summary = f"بررسی ماژول‌های {inspection['framework']} ({inspection['total_entries']} فایل کشف شد)"
+            step1_title = f'بازخوانی و ممیزی فایل هدف برای پیاده‌سازی ({target_file})'
+            step2_title = f'اجرای بررسی‌های کامپایلر یا لینتر ({default_cmd})'
+            step3_title = 'تهیه پیشنهاد پچ (Patch Diff) و یکپارچه‌سازی کد'
+            step3_summary = 'تدوین تغییرات و وصله‌های پیشنهادی بر روی پروژه'
+        elif clean_role == 'tester':
+            step0_title = 'پویش پایگاه تست‌ها و سناریوهای آزمون'
+            step0_summary = f"ارزیابی وابستگی‌های تست در {inspection['framework']}"
+            step1_title = f'بررسی فریم‌ورک تست و فایل‌های پیکربندی ({target_file})'
+            step2_title = f'اجرای سوئیت تست و تحلیل خروجی آزمون‌ها ({default_cmd})'
+            step3_title = 'تدوین گزارش جامع تضمین کیفیت و نتایج تست'
+            step3_summary = 'ارزیابی ریسک و نتایج قبولی/ردی تست‌های سیستم'
+        elif clean_role == 'architect':
+            step0_title = 'تحلیل توپولوژی معماری و وابستگی‌های سیستم'
+            step0_summary = f"بررسی معماری پروژه {inspection['framework']} در ریشه پروژه"
+            step1_title = f'ارزیابی مانیفست‌های معماری و تنظیمات پایه ({target_file})'
+            step2_title = f'بررسی یکپارچگی گیت و انطباق استانداردها ({default_cmd})'
+            step3_title = 'تدوین سند ارزیابی معماری و راهنمای استقرار'
+            step3_summary = 'ارائه راهکارهای مقیاس‌پذیری و بازطراحی سیستم'
+        else:
+            step0_title = 'پویش ساختار و شناسایی فریم‌ورک پروژه'
+            step0_summary = f"فریم‌ورک: {inspection['framework']} | فایل‌ها: {inspection['total_entries']} مورد"
+            step1_title = f'بررسی فایل پیکربندی و وابستگی‌ها ({target_file})'
+            step2_title = f'ارزیابی تست‌ها و اجرای دستورات صحه‌سنجی ({default_cmd})'
+            step3_title = 'تدوین گزارش راهکار و جمع‌بندی گام‌های توسعه'
+            step3_summary = 'تهیه نقشه راه نهایی تکمیل تسک‌ها'
+
         plan_steps = [
             {
                 'index': 0,
-                'title': 'پویش ساختار و شناسایی فریم‌ورک پروژه',
+                'title': step0_title,
                 'action': 'inspect',
                 'status': 'completed',
-                'summary': f"فریم‌ورک: {inspection['framework']} | فایل‌ها: {inspection['total_entries']} مورد"
+                'summary': step0_summary
             },
             {
                 'index': 1,
-                'title': f'بررسی فایل پیکربندی و وابستگی‌ها ({target_file})',
+                'title': step1_title,
                 'action': 'read_file',
                 'target': target_file,
                 'status': 'in_progress',
@@ -518,7 +631,7 @@ class WorkspaceStore:
             },
             {
                 'index': 2,
-                'title': f'ارزیابی تست‌ها و اجرای دستورات صحه‌سنجی ({default_cmd})',
+                'title': step2_title,
                 'action': 'run_command',
                 'command': default_cmd,
                 'status': 'pending',
@@ -526,10 +639,10 @@ class WorkspaceStore:
             },
             {
                 'index': 3,
-                'title': 'تدوین گزارش راهکار و جمع‌بندی گام‌های توسعه',
+                'title': step3_title,
                 'action': 'synthesize',
                 'status': 'pending',
-                'summary': 'تهیه نقشه راه نهایی تکمیل تسک‌ها'
+                'summary': step3_summary
             }
         ]
 
@@ -539,7 +652,7 @@ class WorkspaceStore:
                 'timestamp': now,
                 'step': 0,
                 'type': 'inspection',
-                'title': 'پویش ساختار پروژه',
+                'title': f'آغاز مأموریت با نقش «{role_labels[clean_role]}»',
                 'content': f"پروژه «{project_name}» در مسیر {inspection['root_path']} با فریم‌ورک {inspection['framework']} پویش شد."
             }
         ]
@@ -579,10 +692,10 @@ class WorkspaceStore:
         with self.store._lock, self.store._db() as db:
             db.execute("""
                 INSERT INTO workspace_agent_runs 
-                (id, owner_id, project_id, prompt, status, current_step_index, plan_steps, logs, result_summary, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)
-            """, (run_id, principal['id'], project_id, prompt.strip(), run_status, current_step, json.dumps(plan_steps), json.dumps(logs), now, now))
-            self.store._audit(db, principal['id'], 'workspace_agent_run_started', f"{run_id}:{project_id}")
+                (id, owner_id, project_id, prompt, role, status, current_step_index, plan_steps, logs, result_summary, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)
+            """, (run_id, principal['id'], project_id, prompt.strip(), clean_role, run_status, current_step, json.dumps(plan_steps), json.dumps(logs), now, now))
+            self.store._audit(db, principal['id'], 'workspace_agent_run_started', f"{run_id}:{project_id}:{clean_role}")
 
         return self.get_agent_run(principal, run_id)
 
@@ -592,7 +705,10 @@ class WorkspaceStore:
             raise IdentityError('Invalid run ID')
 
         with self.store._lock, self.store._db() as db:
-            row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
+            if principal.get('role') == 'superadmin':
+                row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=?", (run_id,)).fetchone()
+            else:
+                row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
             if not row:
                 raise IdentityError('Agent run not found', 404)
             run = dict(row)
@@ -646,6 +762,7 @@ class WorkspaceStore:
                 new_status = 'completed'
                 result_summary = (
                     f"🎯 هدف ارزیابی شد: «{run['prompt']}»\n"
+                    f"نقش فعال ایجنت: {run.get('role', 'general')}\n"
                     f"تمامی مراحل پویش متادیتا، بازخوانی تنظیمات و ارزیابی دستورات با موفقیت انجام گرفت.\n"
                     f"پروژه آماده استقرار، ادغام تغییرات یا ارسال دستورات تکمیلی از طریق چت هوش مصنوعی می‌باشد."
                 )
@@ -678,7 +795,10 @@ class WorkspaceStore:
             raise IdentityError('Invalid run ID')
 
         with self.store._lock, self.store._db() as db:
-            row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
+            if principal.get('role') == 'superadmin':
+                row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=?", (run_id,)).fetchone()
+            else:
+                row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
             if not row:
                 raise IdentityError('Agent run not found', 404)
             run = dict(row)
@@ -696,7 +816,10 @@ class WorkspaceStore:
         if not isinstance(run_id, str) or len(run_id) != 32:
             raise IdentityError('Invalid run ID')
         with self.store._lock, self.store._db() as db:
-            row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
+            if principal.get('role') == 'superadmin':
+                row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=?", (run_id,)).fetchone()
+            else:
+                row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
             if not row:
                 raise IdentityError('Agent run not found', 404)
             now = int(self.store.clock())
@@ -709,7 +832,22 @@ class WorkspaceStore:
         if not isinstance(run_id, str) or len(run_id) != 32:
             raise IdentityError('Invalid run ID')
         with self.store._db() as db:
-            row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
+            if principal.get('role') == 'superadmin':
+                row = db.execute("""
+                    SELECT r.*, u.username as owner_username, p.name as project_name
+                    FROM workspace_agent_runs r
+                    LEFT JOIN users u ON r.owner_id = u.id
+                    LEFT JOIN workspace_projects p ON r.project_id = p.id
+                    WHERE r.id=?
+                """, (run_id,)).fetchone()
+            else:
+                row = db.execute("""
+                    SELECT r.*, u.username as owner_username, p.name as project_name
+                    FROM workspace_agent_runs r
+                    LEFT JOIN users u ON r.owner_id = u.id
+                    LEFT JOIN workspace_projects p ON r.project_id = p.id
+                    WHERE r.id=? AND r.owner_id=?
+                """, (run_id, principal['id'])).fetchone()
             if not row:
                 raise IdentityError('Agent run not found', 404)
             return self._format_run(dict(row))
@@ -719,7 +857,81 @@ class WorkspaceStore:
         if not isinstance(project_id, str) or len(project_id) != 32:
             raise IdentityError('Invalid project ID')
         with self.store._db() as db:
-            rows = db.execute("SELECT * FROM workspace_agent_runs WHERE owner_id=? AND project_id=? ORDER BY created_at DESC LIMIT 30",
-                              (principal['id'], project_id)).fetchall()
+            rows = db.execute("""
+                SELECT r.*, u.username as owner_username, p.name as project_name
+                FROM workspace_agent_runs r
+                LEFT JOIN users u ON r.owner_id = u.id
+                LEFT JOIN workspace_projects p ON r.project_id = p.id
+                WHERE r.owner_id=? AND r.project_id=?
+                ORDER BY r.created_at DESC LIMIT 30
+            """, (principal['id'], project_id)).fetchall()
             return [self._format_run(dict(r)) for r in rows]
+
+    def list_all_agent_runs(self, principal, limit=50):
+        if principal.get('role') != 'superadmin':
+            raise IdentityError('Superadmin role required', 403)
+        limit = max(1, min(int(limit), 200))
+        with self.store._db() as db:
+            rows = db.execute("""
+                SELECT r.*, u.username as owner_username, p.name as project_name
+                FROM workspace_agent_runs r
+                LEFT JOIN users u ON r.owner_id = u.id
+                LEFT JOIN workspace_projects p ON r.project_id = p.id
+                ORDER BY r.created_at DESC LIMIT ?
+            """, (limit,)).fetchall()
+            return [self._format_run(dict(r)) for r in rows]
+
+    def admin_stop_agent_run(self, principal, run_id, reason="Admin emergency stop"):
+        if principal.get('role') != 'superadmin':
+            raise IdentityError('Superadmin role required', 403)
+        if not isinstance(run_id, str) or len(run_id) != 32:
+            raise IdentityError('Invalid run ID')
+
+        with self.store._lock, self.store._db() as db:
+            row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=?", (run_id,)).fetchone()
+            if not row:
+                raise IdentityError('Agent run not found', 404)
+            run = dict(row)
+            if run['status'] in ('completed', 'failed', 'cancelled'):
+                return self._format_run(run)
+
+            now = int(self.store.clock())
+            logs = json.loads(run['logs'] or '[]')
+            logs.append({
+                'timestamp': now,
+                'step': run['current_step_index'],
+                'type': 'admin_intervention',
+                'title': 'توقف اضطراری توسط ادمین',
+                'content': str(reason)
+            })
+            db.execute("""
+                UPDATE workspace_agent_runs
+                SET status='cancelled', logs=?, updated_at=?
+                WHERE id=?
+            """, (json.dumps(logs), now, run_id))
+            self.store._audit(db, principal['id'], 'workspace_admin_agent_run_stopped', f"{run_id}:{str(reason)[:60]}")
+            run['status'] = 'cancelled'
+            run['logs'] = json.dumps(logs)
+            run['updated_at'] = now
+            return self._format_run(run)
+
+    def admin_approve_agent_run_step(self, principal, run_id):
+        if principal.get('role') != 'superadmin':
+            raise IdentityError('Superadmin role required', 403)
+        if not isinstance(run_id, str) or len(run_id) != 32:
+            raise IdentityError('Invalid run ID')
+
+        with self.store._lock, self.store._db() as db:
+            row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=?", (run_id,)).fetchone()
+            if not row:
+                raise IdentityError('Agent run not found', 404)
+            run = dict(row)
+            if run['status'] != 'waiting_approval':
+                raise IdentityError('Run is not waiting for approval', 400)
+
+            db.execute("UPDATE workspace_agent_runs SET status='in_progress', updated_at=? WHERE id=?",
+                       (int(self.store.clock()), run_id))
+            self.store._audit(db, principal['id'], 'workspace_admin_agent_run_approved', run_id)
+
+        return self.advance_agent_run(principal, run_id)
 
