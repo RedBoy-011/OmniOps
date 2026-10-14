@@ -483,6 +483,91 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(del_res['status'], 'deleted')
         self.assertEqual(self.workspace.list_governance_webhooks(self.owner), [])
 
+    def test_workspace_code_search_and_grep(self):
+        proj_dir = Path(self.temp.name) / 'search_proj'
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        (proj_dir / 'app.py').write_text('def start_server():\n    print("Server ready")\n', encoding='utf-8')
+        (proj_dir / 'helper.js').write_text('export function startClient() {\n  console.log("Client ready");\n}\n', encoding='utf-8')
+        (proj_dir / 'config.json').write_text('{"env": "production", "port": 8080}\n', encoding='utf-8')
+        
+        # Ignored dir
+        ignored = proj_dir / 'node_modules' / 'dummy'
+        ignored.mkdir(parents=True, exist_ok=True)
+        (ignored / 'index.js').write_text('function startServer() {}\n', encoding='utf-8')
+
+        proj = self.workspace.create_project(self.member, 'Search Project', str(proj_dir))
+
+        # Search for "start" (case insensitive)
+        res = self.workspace.search_project(self.member, proj['id'], 'start', case_sensitive=False)
+        self.assertEqual(res['total_matches'], 2)
+        paths = [r['path'] for r in res['results']]
+        self.assertIn('app.py', paths)
+        self.assertIn('helper.js', paths)
+        # Ignored node_modules shouldn't be in results
+        self.assertFalse(any('node_modules' in p for p in paths))
+
+        # Filter by extension: only .py
+        py_res = self.workspace.search_project(self.member, proj['id'], 'start', file_extensions=['py'])
+        self.assertEqual(py_res['total_matches'], 1)
+        self.assertEqual(py_res['results'][0]['path'], 'app.py')
+
+        # Case sensitive search: "start_server" vs "startServer"
+        case_res = self.workspace.search_project(self.member, proj['id'], 'start_server', case_sensitive=True)
+        self.assertEqual(case_res['total_matches'], 1)
+        self.assertEqual(case_res['results'][0]['matches'][0]['line_number'], 1)
+
+    def test_workspace_command_history_recording(self):
+        proj_dir = Path(self.temp.name) / 'cmd_history_proj'
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        proj = self.workspace.create_project(self.owner, 'Command History Proj', str(proj_dir))
+
+        # Execute safe commands
+        cmd1 = self.workspace.execute_project_command(self.owner, proj['id'], 'echo first test command')
+        self.assertEqual(cmd1['exit_code'], 0)
+        self.assertIn('id', cmd1)
+
+        cmd2 = self.workspace.execute_project_command(self.owner, proj['id'], 'echo second test command')
+        self.assertEqual(cmd2['exit_code'], 0)
+
+        # Retrieve history
+        history = self.workspace.list_command_history(self.owner, proj['id'])
+        self.assertGreaterEqual(len(history), 2)
+        self.assertEqual(history[0]['command'], 'echo second test command')
+        self.assertEqual(history[0]['exit_code'], 0)
+        self.assertIn('first test command', history[1]['command'])
+        self.assertEqual(history[0]['executed_by_username'], 'workspace-admin')
+
+    def test_workspace_interactive_agent_steerability(self):
+        proj_dir = Path(self.temp.name) / 'steer_proj'
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        (proj_dir / 'index.js').write_text('console.log("hello");\n', encoding='utf-8')
+        proj = self.workspace.create_project(self.member, 'Steer Proj', str(proj_dir))
+
+        # Start agent run
+        run = self.workspace.start_agent_run(self.member, proj['id'], 'پروژه تست را ارزیابی کن')
+        self.assertIn(run['status'], ('in_progress', 'waiting_approval'))
+
+        # Send interactive steering feedback
+        steered_run = self.workspace.send_agent_run_feedback(
+            self.member,
+            run['id'],
+            'لطفاً از کتابخانه axios به جای fetch استفاده کن'
+        )
+        self.assertEqual(steered_run['id'], run['id'])
+        
+        # Verify feedback entry in logs
+        feedback_logs = [l for l in steered_run['logs'] if l.get('type') == 'user_feedback']
+        self.assertEqual(len(feedback_logs), 1)
+        self.assertIn('axios', feedback_logs[0]['content'])
+        self.assertIn('workspace-member', feedback_logs[0]['title'])
+
+        # Cancel run
+        self.workspace.cancel_agent_run(self.member, run['id'])
+        # Sending feedback to cancelled run should raise error
+        with self.assertRaises(IdentityError):
+            self.workspace.send_agent_run_feedback(self.member, run['id'], 'دستور جدید')
+
+
 
 
 

@@ -351,6 +351,36 @@ export type GovernanceWebhook = {
   updated_at: number;
 };
 
+export type SearchMatchLine = {
+  line_number: number;
+  line_text: string;
+};
+
+export type SearchFileResult = {
+  path: string;
+  matches: SearchMatchLine[];
+};
+
+export type ProjectSearchResult = {
+  project_id: string;
+  query: string;
+  total_matches: number;
+  results: SearchFileResult[];
+};
+
+export type CommandHistoryRecord = {
+  id: string;
+  project_id: string;
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+  duration_ms: number;
+  executed_by: string;
+  executed_by_username?: string;
+  created_at: number;
+};
+
 export type AgentRun = {
   id: string;
   owner_id?: string;
@@ -600,4 +630,10 @@ export const api = {
     request<{ status: string; id: string }>("/api/admin/workspace/webhooks/delete", "POST", { webhook_id }),
   testGovernanceWebhook: (webhook_id: string) =>
     request<{ status: string; code: number; message: string }>("/api/admin/workspace/webhooks/test", "POST", { webhook_id }),
+  searchProjectFiles: (payload: { project_id: string; query: string; case_sensitive?: boolean; max_results?: number; file_extensions?: string[] }) =>
+    request<ProjectSearchResult>("/api/web/workspace/project/search", "POST", payload),
+  listProjectCommands: (project_id: string, limit = 50) =>
+    request<{ commands: CommandHistoryRecord[] }>(`/api/web/workspace/project/commands?project_id=${encodeURIComponent(project_id)}&limit=${limit}`),
+  sendAgentRunFeedback: (run_id: string, message: string) =>
+    request<{ run: AgentRun }>("/api/web/workspace/task/run/feedback", "POST", { run_id, message }),
 };

@@ -538,6 +538,8 @@ def make_server(
                 "/api/admin/workspace/agent/runs/stop", "/api/admin/workspace/agent/runs/approve",
                 "/api/admin/workspace/sandbox/policy",
                 "/api/web/workspace/project/patches/rollback", "/api/agent/workspace/project/patches/rollback",
+                "/api/web/workspace/project/search", "/api/agent/workspace/project/search",
+                "/api/web/workspace/task/run/feedback", "/api/agent/workspace/task/run/feedback",
                 "/api/admin/workspace/webhooks", "/api/admin/workspace/webhooks/test", "/api/admin/workspace/webhooks/delete",
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/test-socks", "/api/admin/providers/enable", "/api/admin/providers/price",
@@ -692,6 +694,21 @@ def make_server(
                     self._send(200, {'policy': workspace.update_sandbox_policy(principal, payload)})
                 elif path in ('/api/web/workspace/project/patches/rollback', '/api/agent/workspace/project/patches/rollback'):
                     self._send(200, {'patch': workspace.rollback_file_patch(principal, payload.get('patch_id'))})
+                elif path in ('/api/web/workspace/project/search', '/api/agent/workspace/project/search'):
+                    self._send(200, workspace.search_project(
+                        principal,
+                        payload.get('project_id'),
+                        payload.get('query'),
+                        case_sensitive=bool(payload.get('case_sensitive', False)),
+                        max_results=payload.get('max_results', 50),
+                        file_extensions=payload.get('file_extensions')
+                    ))
+                elif path in ('/api/web/workspace/task/run/feedback', '/api/agent/workspace/task/run/feedback'):
+                    self._send(200, {'run': workspace.send_agent_run_feedback(
+                        principal,
+                        payload.get('run_id'),
+                        payload.get('message')
+                    )})
                 elif path == '/api/admin/workspace/webhooks':
                     self._send(200, {'webhook': workspace.save_governance_webhook(principal, payload)})
                 elif path == '/api/admin/workspace/webhooks/test':
@@ -923,6 +940,18 @@ def make_server(
                     q = parse_qs(parsed.query)
                     p_id = q.get('project_id', [None])[0]
                     self._send(200, {'patches': workspace.list_project_patches(principal, p_id)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                return
+            if parsed.path in ('/api/web/workspace/project/commands', '/api/agent/workspace/project/commands'):
+                principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
+                if principal is None:
+                    return
+                try:
+                    q = parse_qs(parsed.query)
+                    p_id = q.get('project_id', [None])[0]
+                    lim = int(q.get('limit', ['50'])[0])
+                    self._send(200, {'commands': workspace.list_command_history(principal, p_id, limit=lim)})
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 return

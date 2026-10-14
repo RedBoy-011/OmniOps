@@ -690,6 +690,38 @@ class WorkerEndpointTests(unittest.TestCase):
             self.assertEqual(code, 200)
             self.assertEqual(del_res["status"], "deleted")
 
+            # Project Code Search API
+            code, search_res = self.call("POST", "/api/web/workspace/project/search", {
+                "project_id": p_id,
+                "query": "react",
+                "case_sensitive": False
+            }, admin)
+            self.assertEqual(code, 200)
+            self.assertGreaterEqual(search_res["total_matches"], 1)
+            self.assertEqual(search_res["results"][0]["path"], "package.json")
+
+            # Command History API
+            code, history_res = self.call("GET", f"/api/web/workspace/project/commands?project_id={p_id}", None, admin)
+            self.assertEqual(code, 200)
+            self.assertIn("commands", history_res)
+
+            # Interactive Agent Feedback API
+            # Start run for feedback test
+            code, run_fb = self.call("POST", "/api/web/workspace/task/run", {
+                "project_id": p_id,
+                "prompt": "بررسی اولیه وابستگی‌ها"
+            }, admin)
+            self.assertEqual(code, 201)
+            target_run_id = run_fb["run"]["id"]
+
+            code, fb_res = self.call("POST", "/api/web/workspace/task/run/feedback", {
+                "run_id": target_run_id,
+                "message": "پیشنهاد تکمیلی برای بهینه‌سازی ساختار ماژول‌ها"
+            }, admin)
+            self.assertEqual(code, 200)
+            self.assertIn("run", fb_res)
+            self.assertTrue(any(l.get("type") == "user_feedback" for l in fb_res["run"]["logs"]))
+
 
 if __name__ == "__main__":
     unittest.main()

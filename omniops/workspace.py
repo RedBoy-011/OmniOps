@@ -6,6 +6,7 @@ import difflib
 import hashlib
 import hmac
 import json
+import os
 from pathlib import Path
 import subprocess
 import threading
@@ -106,6 +107,18 @@ class WorkspaceStore:
                     updated_at INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_workspace_webhooks_enabled ON workspace_governance_webhooks(enabled);
+                CREATE TABLE IF NOT EXISTS workspace_command_history (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES workspace_projects(id) ON DELETE CASCADE,
+                    command TEXT NOT NULL,
+                    exit_code INTEGER NOT NULL,
+                    stdout TEXT NOT NULL DEFAULT '',
+                    stderr TEXT NOT NULL DEFAULT '',
+                    duration_ms INTEGER NOT NULL DEFAULT 0,
+                    executed_by TEXT NOT NULL REFERENCES users(id),
+                    created_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_workspace_cmd_history ON workspace_command_history(project_id, created_at DESC);
             """)
             try:
                 db.execute("ALTER TABLE workspace_projects ADD COLUMN root_path TEXT DEFAULT ''")
@@ -775,16 +788,117 @@ class WorkspaceStore:
 
         duration_ms = int((time.time() - t0) * 1000)
 
+        now_ts = int(self.store.clock())
+        cmd_id = uuid.uuid4().hex
         with self.store._lock, self.store._db() as db:
+            db.execute("""
+                INSERT INTO workspace_command_history
+                (id, project_id, command, exit_code, stdout, stderr, duration_ms, executed_by, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (cmd_id, project_id, clean_cmd, exit_code, stdout, stderr, duration_ms, principal['id'], now_ts))
             self.store._audit(db, principal['id'], 'workspace_command_executed', f"{project_id}:{clean_cmd[:80]}")
 
         return {
+            'id': cmd_id,
             'project_id': project_id,
             'command': clean_cmd,
             'exit_code': exit_code,
             'stdout': stdout,
             'stderr': stderr,
             'duration_ms': duration_ms,
+            'created_at': now_ts,
+        }
+
+    def list_command_history(self, principal, project_id, limit=50):
+        self._cap(principal, 'chat')
+        if not isinstance(project_id, str) or len(project_id) != 32:
+            raise IdentityError('Invalid project ID')
+        self._resolve_project_root(principal, project_id)
+        effective_limit = min(max(1, int(limit or 50)), 200)
+        with self.store._db() as db:
+            rows = db.execute("""
+                SELECT h.id, h.project_id, h.command, h.exit_code, h.stdout, h.stderr, h.duration_ms,
+                       h.executed_by, u.username as executed_by_username, h.created_at
+                FROM workspace_command_history h
+                LEFT JOIN users u ON u.id = h.executed_by
+                WHERE h.project_id=?
+                ORDER BY h.created_at DESC, h.rowid DESC
+                LIMIT ?
+            """, (project_id, effective_limit)).fetchall()
+            return [dict(r) for r in rows]
+
+    def search_project(self, principal, project_id, query, case_sensitive=False, max_results=50, file_extensions=None):
+        self._cap(principal, 'chat')
+        root_dir, _ = self._resolve_project_root(principal, project_id)
+        clean_query = str(query or '').strip()
+        if not clean_query:
+            raise IdentityError('Search query cannot be empty', 400)
+        if len(clean_query) > 200:
+            raise IdentityError('Search query too long', 400)
+
+        effective_limit = min(max(1, int(max_results or 50)), 200)
+        ignored_dirs = {
+            'node_modules', '.git', 'dist', 'build', '__pycache__', '.venv',
+            'venv', '.cargo', 'target', '.idea', '.vscode', '.next', '.nuxt', 'coverage'
+        }
+        allowed_exts = None
+        if file_extensions and isinstance(file_extensions, list):
+            allowed_exts = {str(ext).lower().lstrip('.') for ext in file_extensions if str(ext).strip()}
+
+        matches = []
+        total_matches = 0
+        search_term = clean_query if case_sensitive else clean_query.lower()
+
+        for dirpath, dirnames, filenames in os.walk(root_dir):
+            dirnames[:] = [d for d in dirnames if d not in ignored_dirs and not d.startswith('.')]
+            for fn in sorted(filenames):
+                if total_matches >= effective_limit:
+                    break
+                ext = fn.split('.')[-1].lower() if '.' in fn else ''
+                if allowed_exts and ext not in allowed_exts:
+                    continue
+
+                full_path = Path(dirpath) / fn
+                try:
+                    if full_path.stat().st_size > 2 * 1024 * 1024:
+                        continue
+                except OSError:
+                    continue
+
+                rel_path = str(full_path.relative_to(root_dir)).replace('\\', '/')
+                try:
+                    with open(full_path, 'rb') as f:
+                        chunk = f.read(1024)
+                        if b'\0' in chunk:
+                            continue
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        file_matches = []
+                        for line_no, line in enumerate(f, start=1):
+                            line_check = line if case_sensitive else line.lower()
+                            if search_term in line_check:
+                                file_matches.append({
+                                    'line_number': line_no,
+                                    'line_text': line.strip()[:300]
+                                })
+                                total_matches += 1
+                                if total_matches >= effective_limit:
+                                    break
+                        if file_matches:
+                            matches.append({
+                                'path': rel_path,
+                                'matches': file_matches
+                            })
+                except Exception:
+                    continue
+
+            if total_matches >= effective_limit:
+                break
+
+        return {
+            'project_id': project_id,
+            'query': clean_query,
+            'total_matches': total_matches,
+            'results': matches
         }
 
     def list_tasks(self, principal):
@@ -1414,6 +1528,52 @@ class WorkspaceStore:
             db.execute("UPDATE workspace_agent_runs SET status='cancelled', updated_at=? WHERE id=?", (now, run_id))
             db.execute("UPDATE workspace_subagent_runs SET status='cancelled', updated_at=? WHERE parent_run_id=? AND status IN ('pending', 'in_progress', 'waiting_approval')", (now, run_id))
             self.store._audit(db, principal['id'], 'workspace_agent_run_cancelled', run_id)
+        return self.get_agent_run(principal, run_id)
+
+    def send_agent_run_feedback(self, principal, run_id, message):
+        self._cap(principal, 'action.request')
+        if not isinstance(run_id, str) or len(run_id) != 32:
+            raise IdentityError('Invalid run ID')
+        clean_msg = str(message or '').strip()
+        if not clean_msg:
+            raise IdentityError('Feedback message cannot be empty', 400)
+        if len(clean_msg) > 2000:
+            raise IdentityError('Feedback message cannot exceed 2000 characters', 400)
+
+        now = int(self.store.clock())
+        with self.store._lock, self.store._db() as db:
+            if principal.get('role') == 'superadmin':
+                row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=?", (run_id,)).fetchone()
+            else:
+                row = db.execute("SELECT * FROM workspace_agent_runs WHERE id=? AND owner_id=?", (run_id, principal['id'])).fetchone()
+            if not row:
+                raise IdentityError('Agent run not found', 404)
+            run = dict(row)
+            if run['status'] in ('completed', 'failed', 'cancelled'):
+                raise IdentityError('Cannot send guidance to an ended task', 400)
+
+            try:
+                logs = json.loads(run.get('logs') or '[]')
+            except Exception:
+                logs = []
+
+            sender_name = principal.get('username') or 'کاربر'
+            logs.append({
+                'timestamp': now,
+                'step': run.get('current_step_index', 0),
+                'type': 'user_feedback',
+                'title': f'💬 هدایت تعاملی توسط {sender_name}',
+                'content': clean_msg
+            })
+
+            db.execute("""
+                UPDATE workspace_agent_runs
+                SET logs=?, updated_at=?
+                WHERE id=?
+            """, (json.dumps(logs), now, run_id))
+
+            self.store._audit(db, principal['id'], 'workspace_agent_run_feedback', f"{run_id}:{clean_msg[:60]}")
+
         return self.get_agent_run(principal, run_id)
 
     def get_agent_run(self, principal, run_id):

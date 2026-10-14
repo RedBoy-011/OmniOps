@@ -10,6 +10,8 @@ import {
   type AgentMode,
   type FilePatchProposal,
   type FilePatchRecord,
+  type ProjectSearchResult,
+  type CommandHistoryRecord,
 } from "../api";
 
 interface AgenticWorkspaceCardProps {
@@ -41,6 +43,23 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
   const [loadingPatches, setLoadingPatches] = useState(false);
   const [selectedPatchForDiff, setSelectedPatchForDiff] = useState<FilePatchRecord | null>(null);
   const [rollingBackPatchId, setRollingBackPatchId] = useState<string | null>(null);
+
+  // Project Search & Grep state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
+  const [searchExtensions, setSearchExtensions] = useState("");
+  const [searchResults, setSearchResults] = useState<ProjectSearchResult | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [showSearchModal, setShowSearchModal] = useState(false);
+
+  // Command History state
+  const [commandHistory, setCommandHistory] = useState<CommandHistoryRecord[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+
+  // Steer active run state
+  const [steerInput, setSteerInput] = useState("");
+  const [steeringRun, setSteeringRun] = useState(false);
 
   // Create / Bind state
   const [showNewModal, setShowNewModal] = useState(false);
@@ -107,7 +126,63 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
     void handleInspectProject(selectedProjectId);
     void loadAgentRuns(selectedProjectId);
     void loadProjectPatches(selectedProjectId);
+    void loadCommandHistory(selectedProjectId);
   }, [selectedProjectId, projects]);
+
+  async function loadCommandHistory(projectId: string) {
+    if (!projectId) return;
+    try {
+      setLoadingHistory(true);
+      const res = await api.listProjectCommands(projectId, 50);
+      setCommandHistory(res.commands || []);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
+
+  async function handleSearch(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    if (!selectedProjectId || !searchQuery.trim()) return;
+    try {
+      setSearching(true);
+      setError("");
+      const extList = searchExtensions
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+      const res = await api.searchProjectFiles({
+        project_id: selectedProjectId,
+        query: searchQuery.trim(),
+        case_sensitive: searchCaseSensitive,
+        file_extensions: extList.length ? extList : undefined,
+      });
+      setSearchResults(res);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطا در جستجوی فایل‌ها");
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function handleSendSteer(e: React.FormEvent) {
+    e.preventDefault();
+    if (!activeRun || !steerInput.trim()) return;
+    try {
+      setSteeringRun(true);
+      setError("");
+      const res = await api.sendAgentRunFeedback(activeRun.id, steerInput.trim());
+      setActiveRun(res.run);
+      setSteerInput("");
+      setSuccessMsg("دستور هدایت تکمیلی با موفقیت به ایجنت ابلاغ شد.");
+      await loadAgentRuns(selectedProjectId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطا در ارسال هدایت به ایجنت");
+    } finally {
+      setSteeringRun(false);
+    }
+  }
 
   async function loadProjectPatches(projectId: string) {
     if (!projectId) return;
@@ -349,6 +424,7 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
       // Refresh files after command execution (e.g. build or git output)
       const filesRes = await api.listProjectFiles(selectedProjectId);
       setFiles(filesRes.entries || []);
+      void loadCommandHistory(selectedProjectId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "اجرای دستور با خطا مواجه شد.");
     } finally {
@@ -773,6 +849,30 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
                   )}
                 </div>
 
+                {/* هدایت تعاملی حین اجرای ایجنت (Agent Steerability & Guidance) */}
+                {(activeRun.status === "in_progress" || activeRun.status === "waiting_approval") && (
+                  <form onSubmit={handleSendSteer} className="agent-steer-form">
+                    <div className="steer-input-row">
+                      <span className="steer-icon">🎯</span>
+                      <input
+                        type="text"
+                        placeholder="💬 هدایت تعاملی ایجنت (مثلاً: تست‌ها را با فلگ -v اجرا کن، یا وابستگی axios را جایگزین کن)..."
+                        value={steerInput}
+                        onChange={(e) => setSteerInput(e.target.value)}
+                        disabled={steeringRun}
+                      />
+                      <button
+                        type="submit"
+                        className="action-button steer-btn"
+                        disabled={steeringRun || !steerInput.trim()}
+                        title="ارسال دستور تکمیلی به لاگ و روند کار ایجنت"
+                      >
+                        {steeringRun ? "⏳ در حال ارسال..." : "🚀 ارسال هدایت"}
+                      </button>
+                    </div>
+                  </form>
+                )}
+
                 {/* خلاصه نتیجه نهایی */}
                 {activeRun.result_summary && (
                   <div className="run-result-summary-box">
@@ -802,8 +902,17 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
           {/* کاوشگر سریع فایل‌ها */}
           <div className="agentic-files-explorer">
             <div className="explorer-header">
-              <strong>🗂️ کاوشگر فایل‌های پروژه:</strong>
-              <small>{loadingFile ? "⏳ در حال خواندن محتوای فایل..." : "کلیک روی هر فایل برای مشاهده محتوا"}</small>
+              <div className="header-title-group">
+                <strong>🗂️ کاوشگر فایل‌های پروژه:</strong>
+                <small>{loadingFile ? "⏳ در حال خواندن محتوای فایل..." : "کلیک روی هر فایل برای مشاهده محتوا"}</small>
+              </div>
+              <button
+                type="button"
+                className="quiet-button search-open-btn"
+                onClick={() => setShowSearchModal(true)}
+              >
+                🔍 جستجوی کد در پروژه (Grep)
+              </button>
             </div>
             <div className="explorer-files-grid">
               {files.map((file) => (
@@ -914,8 +1023,20 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
           {/* ترمینال و مجری دستورات در دایرکتوری پروژه */}
           <div className="agentic-command-runner-section">
             <div className="runner-header">
-              <strong>⚡ اجرای دستور در محیط پروژه (Workspace Terminal Runner):</strong>
-              <span className="safety-badge">🛡️ ساندباکس در پوشه محلی</span>
+              <div className="header-title-group">
+                <strong>⚡ اجرای دستور در محیط پروژه (Workspace Terminal Runner):</strong>
+                <span className="safety-badge">🛡️ ساندباکس در پوشه محلی</span>
+              </div>
+              <button
+                type="button"
+                className="quiet-button history-btn"
+                onClick={() => {
+                  void loadCommandHistory(selectedProjectId);
+                  setShowHistoryModal(true);
+                }}
+              >
+                📜 تاریخچه فرامین ({commandHistory.length})
+              </button>
             </div>
             {!canExecuteCommands ? (
               <p className="no-perm-hint">💡 اجرای مستقیم دستورات ترمینال نیازمند مجوز «تایید اقدام» (action.approve) یا نقش مدیر ارشد است.</p>
@@ -1077,6 +1198,180 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
                     </button>
                   )}
                   <button type="button" className="quiet-button" onClick={() => setSelectedPatchForDiff(null)}>
+                    بستن
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* مدال جستجوی کد و Grep در پروژه */}
+          {showSearchModal && (
+            <div className="agent-modal-overlay" onClick={() => setShowSearchModal(false)}>
+              <div className="agent-modal-card search-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3>🔍 جستجوی محتوا و Grep در کدهای پروژه</h3>
+                  <button type="button" className="close-btn" onClick={() => setShowSearchModal(false)}>✕</button>
+                </div>
+                <div className="modal-body">
+                  <form onSubmit={handleSearch} className="search-form-row">
+                    <div className="search-input-wrap">
+                      <input
+                        type="text"
+                        placeholder="عبارت، تابع، کامپوننت، یا متغیر مورد نظر برای جستجو..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+                    <div className="search-options-row">
+                      <input
+                        type="text"
+                        placeholder="پسوندها (مثلاً: js, ts, py, json)..."
+                        value={searchExtensions}
+                        onChange={(e) => setSearchExtensions(e.target.value)}
+                        className="ext-input"
+                        dir="ltr"
+                      />
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={searchCaseSensitive}
+                          onChange={(e) => setSearchCaseSensitive(e.target.checked)}
+                        />
+                        <span>حساس به حروف بزرگ و کوچک</span>
+                      </label>
+                      <button
+                        type="submit"
+                        className="action-button primary-accent"
+                        disabled={searching || !searchQuery.trim()}
+                      >
+                        {searching ? "⏳ در حال جستجو..." : "🔎 جستجو"}
+                      </button>
+                    </div>
+                  </form>
+
+                  {searchResults && (
+                    <div className="search-results-section">
+                      <div className="search-results-header">
+                        <span>یافته‌ها برای «<strong>{searchResults.query}</strong>»:</span>
+                        <span className="results-count-badge">{searchResults.total_matches} مورد در {searchResults.results.length} فایل</span>
+                      </div>
+
+                      {searchResults.results.length === 0 ? (
+                        <p className="no-matches-hint">هیچ موردی مطابق با عبارت جستجو یافت نشد.</p>
+                      ) : (
+                        <div className="search-results-list">
+                          {searchResults.results.map((fileRes) => (
+                            <div key={fileRes.path} className="search-file-group">
+                              <div
+                                className="search-file-title"
+                                onClick={() => {
+                                  setShowSearchModal(false);
+                                  void handleReadFile(fileRes.path);
+                                }}
+                                title="کلیک برای باز کردن فایل"
+                              >
+                                <span className="file-icon">📄</span>
+                                <code dir="ltr">{fileRes.path}</code>
+                                <span className="matches-pill">{fileRes.matches.length} تطابق</span>
+                              </div>
+                              <div className="search-matches-list">
+                                {fileRes.matches.map((m, mIdx) => (
+                                  <div
+                                    key={mIdx}
+                                    className="search-match-line"
+                                    onClick={() => {
+                                      setShowSearchModal(false);
+                                      void handleReadFile(fileRes.path);
+                                    }}
+                                  >
+                                    <span className="line-num">{m.line_number}:</span>
+                                    <pre className="line-code" dir="ltr">{m.line_text}</pre>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="quiet-button" onClick={() => setShowSearchModal(false)}>
+                    بستن
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* مدال تاریخچه فرامین ترمینال پروژه */}
+          {showHistoryModal && (
+            <div className="agent-modal-overlay" onClick={() => setShowHistoryModal(false)}>
+              <div className="agent-modal-card history-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3>📜 تاریخچه اجرای فرامین ترمینال پروژه</h3>
+                  <button type="button" className="close-btn" onClick={() => setShowHistoryModal(false)}>✕</button>
+                </div>
+                <div className="modal-body">
+                  <div className="history-modal-meta">
+                    <span>مجموع فرامین ثبت‌شده: <strong>{commandHistory.length}</strong></span>
+                    <button
+                      type="button"
+                      className="quiet-button"
+                      onClick={() => selectedProjectId && void loadCommandHistory(selectedProjectId)}
+                      disabled={loadingHistory}
+                    >
+                      {loadingHistory ? "⏳..." : "🔄 بازخوانی"}
+                    </button>
+                  </div>
+
+                  {commandHistory.length === 0 ? (
+                    <p className="no-matches-hint">هنوز هیچ فرمانی روی این پروژه اجرا نشده است.</p>
+                  ) : (
+                    <div className="command-history-list">
+                      {commandHistory.map((cmd) => (
+                        <div key={cmd.id} className={`command-history-item exit-${cmd.exit_code === 0 ? "success" : "fail"}`}>
+                          <div className="cmd-item-header">
+                            <code className="cmd-text" dir="ltr">{cmd.command}</code>
+                            <div className="cmd-badges">
+                              <span className={`cmd-exit-badge ${cmd.exit_code === 0 ? "success" : "fail"}`}>
+                                {cmd.exit_code === 0 ? "✅ کد ۰ (موفق)" : `❌ کد ${cmd.exit_code}`}
+                              </span>
+                              <span className="cmd-duration">{cmd.duration_ms}ms</span>
+                            </div>
+                          </div>
+                          <div className="cmd-item-meta">
+                            <span>مجری: <strong>{cmd.executed_by_username || "کاربر"}</strong></span>
+                            <span>زمان: {new Date(cmd.created_at * 1000).toLocaleString("fa-IR")}</span>
+                            <button
+                              type="button"
+                              className="quiet-button reuse-cmd-btn"
+                              onClick={() => {
+                                setCommandInput(cmd.command);
+                                setShowHistoryModal(false);
+                              }}
+                              title="قرار دادن این دستور در کادر ورودی ترمینال"
+                            >
+                              ↩️ استفاده مجدد
+                            </button>
+                          </div>
+                          {(cmd.stdout || cmd.stderr) && (
+                            <details className="cmd-output-details">
+                              <summary>مشاهده خروجی دستور</summary>
+                              {cmd.stdout && <pre className="cmd-stdout" dir="ltr">{cmd.stdout}</pre>}
+                              {cmd.stderr && <pre className="cmd-stderr" dir="ltr">{cmd.stderr}</pre>}
+                            </details>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="quiet-button" onClick={() => setShowHistoryModal(false)}>
                     بستن
                   </button>
                 </div>
