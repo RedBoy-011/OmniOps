@@ -8597,4 +8597,327 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
   color: #475569;
 }
 
+/* ============================================================
+   Stage 4: SOCKS5h Health Status & Latency Monitoring
+   ============================================================ */
+.socks-health-card {
+  padding: 18px 20px;
+  border-radius: 18px;
+  border: 1px solid rgba(94, 234, 212, 0.25);
+  background: linear-gradient(135deg, rgba(20, 184, 166, 0.08), rgba(15, 23, 42, 0.65));
+  backdrop-filter: blur(16px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  margin-bottom: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.socks-health-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.socks-health-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.socks-health-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(20, 184, 166, 0.3), rgba(6, 95, 70, 0.4));
+  border: 1px solid rgba(94, 234, 212, 0.4);
+  color: #5eead4;
+  font-size: 18px;
+  box-shadow: 0 0 16px rgba(20, 184, 166, 0.25);
+}
+
+.socks-health-title-group h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.socks-health-title-group small {
+  display: block;
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.socks-health-badges-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.socks-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 13px;
+  border-radius: 50px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.socks-badge-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  position: relative;
+}
+
+.socks-badge-dot::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  border-radius: 50%;
+  animation: socks-pulse 2s infinite ease-out;
+}
+
+@keyframes socks-pulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  70% { transform: scale(2.2); opacity: 0; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+.socks-badge.healthy {
+  background: rgba(16, 185, 129, 0.16);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  color: #34d399;
+}
+.socks-badge.healthy .socks-badge-dot {
+  background: #10b981;
+}
+.socks-badge.healthy .socks-badge-dot::after {
+  background: rgba(16, 185, 129, 0.4);
+}
+
+.socks-badge.degraded {
+  background: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #fbbf24;
+}
+.socks-badge.degraded .socks-badge-dot {
+  background: #f59e0b;
+}
+.socks-badge.degraded .socks-badge-dot::after {
+  background: rgba(245, 158, 11, 0.4);
+}
+
+.socks-badge.down {
+  background: rgba(239, 68, 68, 0.16);
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  color: #f87171;
+}
+.socks-badge.down .socks-badge-dot {
+  background: #ef4444;
+}
+.socks-badge.down .socks-badge-dot::after {
+  background: rgba(239, 68, 68, 0.4);
+}
+
+.socks-latency-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(94, 234, 212, 0.25);
+  color: #5eead4;
+}
+
+.socks-latency-chip b {
+  font-family: monospace, Vazirmatn;
+  font-weight: 700;
+}
+
+.socks-health-details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  padding: 12px 14px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+}
+
+.socks-detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.socks-detail-item span {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.socks-detail-item strong {
+  color: #e2e8f0;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.socks-health-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.socks-manual-test-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: linear-gradient(135deg, rgba(20, 184, 166, 0.2), rgba(16, 185, 129, 0.3));
+  border: 1px solid rgba(94, 234, 212, 0.5);
+  color: #5eead4;
+  transition: all 0.2s ease;
+}
+
+.socks-manual-test-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(20, 184, 166, 0.35), rgba(16, 185, 129, 0.45));
+  border-color: #5eead4;
+  box-shadow: 0 0 15px rgba(94, 234, 212, 0.3);
+  transform: translateY(-1px);
+}
+
+.socks-manual-test-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.socks-warning-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(185, 28, 28, 0.1));
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  box-shadow: 0 4px 20px rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  animation: socks-fade-in 0.3s ease;
+}
+
+@keyframes socks-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.socks-warning-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.socks-warning-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.socks-warning-content strong {
+  font-size: 13px;
+  color: #fecdd3;
+  font-weight: 700;
+}
+
+.socks-warning-tips {
+  margin: 4px 0 0;
+  padding-right: 18px;
+  color: #fda4af;
+  font-size: 11px;
+}
+
+/* Light Theme Support */
+[data-theme="light"] .socks-health-card {
+  background: linear-gradient(135deg, #f0fdfa, #f8fafc);
+  border-color: #99f6e4;
+  box-shadow: 0 8px 24px rgba(20, 184, 166, 0.1);
+}
+
+[data-theme="light"] .socks-health-icon {
+  background: #ccfbf1;
+  border-color: #5eead4;
+  color: #0d9488;
+}
+
+[data-theme="light"] .socks-health-title-group h3 {
+  color: #0f172a;
+}
+
+[data-theme="light"] .socks-health-title-group small {
+  color: #64748b;
+}
+
+[data-theme="light"] .socks-latency-chip {
+  background: #ffffff;
+  border-color: #99f6e4;
+  color: #0f766e;
+}
+
+[data-theme="light"] .socks-health-details-grid {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+[data-theme="light"] .socks-detail-item strong {
+  color: #1e293b;
+}
+
+[data-theme="light"] .socks-manual-test-btn {
+  background: #f0fdfa;
+  border-color: #2dd4bf;
+  color: #0f766e;
+}
+
+[data-theme="light"] .socks-manual-test-btn:hover:not(:disabled) {
+  background: #ccfbf1;
+  border-color: #0d9488;
+}
+
+[data-theme="light"] .socks-warning-banner {
+  background: #fff1f2;
+  border-color: #fca5a5;
+  color: #991b1b;
+}
+
+[data-theme="light"] .socks-warning-content strong {
+  color: #881337;
+}
+
+[data-theme="light"] .socks-warning-tips {
+  color: #9f1239;
+}
+
+
 

@@ -387,14 +387,56 @@ class ProviderRegistry:
             latency_ms = max(1, int(round((time.time() - start) * 1000)))
             with self.identity._lock, self.identity._db() as db:
                 self.identity._audit(db, principal['id'], 'proxy_tested', _mask_proxy(normalized))
+            health = 'healthy' if latency_ms <= 400 else 'degraded'
             return {
                 'status': 'ok',
+                'health': health,
                 'proxy_url': normalized,
                 'latency_ms': latency_ms,
+                'tested_at': int(self.identity.clock()),
+                'target_host': target_host,
                 'message': f'پراکسی SOCKS فعال است و با موفقیت پاسخ داد (تأخیر: {latency_ms} میلی‌ثانیه)'
             }
         except (OSError, socket.timeout, ConnectionRefusedError) as exc:
             raise IdentityError(f'خطا در برقراری ارتباط با پراکسی SOCKS: {exc}', 502) from exc
+
+    def check_socks_health(self, principal, proxy_url=None, kind=None):
+        _admin(principal)
+        if not proxy_url and kind:
+            with self.identity._db() as db:
+                row = db.execute('SELECT network_mode, proxy_url FROM provider_accounts WHERE kind=?', (kind,)).fetchone()
+                if row and row['network_mode'] == 'socks' and row['proxy_url']:
+                    proxy_url = row['proxy_url']
+        if not proxy_url:
+            with self.identity._db() as db:
+                row = db.execute("SELECT proxy_url FROM provider_accounts WHERE network_mode='socks' AND proxy_url IS NOT NULL AND proxy_url != '' LIMIT 1").fetchone()
+                if row:
+                    proxy_url = row['proxy_url']
+        if not proxy_url:
+            return {
+                'status': 'unconfigured',
+                'health': 'down',
+                'proxy_url': '',
+                'latency_ms': None,
+                'tested_at': int(self.identity.clock()),
+                'target_host': 'api.openai.com',
+                'message': 'نشانی پراکسی SOCKS تنظیم نشده است.'
+            }
+
+        try:
+            return self.test_socks(principal, proxy_url, kind)
+        except Exception as exc:
+            err_msg = str(getattr(exc, 'args', [str(exc)])[0]) if getattr(exc, 'args', None) else str(exc)
+            return {
+                'status': 'error',
+                'health': 'down',
+                'proxy_url': proxy_url,
+                'latency_ms': None,
+                'tested_at': int(self.identity.clock()),
+                'target_host': 'api.openai.com',
+                'error': err_msg,
+                'message': f'خطا در برقراری ارتباط با پراکسی SOCKS: {err_msg}'
+            }
 
     def enable(self, principal, kind, enabled):
         _admin(principal)

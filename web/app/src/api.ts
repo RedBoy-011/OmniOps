@@ -142,6 +142,17 @@ export type ApiProvider = { kind: "openai" | "gemini" | "anthropic" | "openroute
   models: string[]; tested_at: number | null;
   prices: Record<string, { input: string; output: string }>;
   catalog_prices: Record<string, { input: string; output: string }> };
+export type SocksHealthStatus = "healthy" | "degraded" | "down";
+export type SocksHealthResult = {
+  status: "ok" | "error" | "unconfigured";
+  health: SocksHealthStatus;
+  proxy_url: string;
+  latency_ms: number | null;
+  tested_at: number;
+  target_host: string;
+  message: string;
+  error?: string;
+};
 export type NodeGrant = { id: string; role: "worker" | "edge"; grant: string; expires_at: number };
 export type NodeTokenResponse = {
   id: string;
@@ -747,7 +758,16 @@ export const api = {
     request<{ status: string }>("/api/admin/providers/save", "POST", { kind, api_key, network_mode, proxy_url }),
   testProvider: (kind: string) => request<{ models: string[]; network_mode: string }>("/api/admin/providers/test", "POST", { kind }),
   testSocks: (proxy_url?: string, kind?: string) =>
-    request<{ status: string; latency_ms: number; proxy_url: string; message: string }>("/api/admin/providers/test-socks", "POST", { proxy_url, kind }),
+    request<{ status: string; health: SocksHealthStatus; latency_ms: number; proxy_url: string; message: string; target_host?: string; tested_at?: number }>("/api/admin/providers/test-socks", "POST", { proxy_url, kind }),
+  socksHealth: (proxy_url?: string, kind?: string) =>
+    request<SocksHealthResult>("/api/admin/providers/socks-health", "POST", { proxy_url, kind }),
+  getSocksHealth: (proxy_url?: string, kind?: string) => {
+    const params = new URLSearchParams();
+    if (proxy_url) params.set("proxy_url", proxy_url);
+    if (kind) params.set("kind", kind);
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return request<SocksHealthResult>(`/api/admin/providers/socks-health${qs}`);
+  },
   enableProvider: (kind: string, enabled: boolean) => request<{ enabled: boolean }>("/api/admin/providers/enable", "POST", { kind, enabled }),
   priceProvider: (kind: string, model: string, input: string, output: string) =>
     request<{ model: string }>("/api/admin/providers/price", "POST", { kind, model, input, output }),

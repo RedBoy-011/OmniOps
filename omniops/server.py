@@ -590,7 +590,7 @@ def make_server(
                 "/api/web/workspace/spec/reject", "/api/agent/workspace/spec/reject",
                 "/api/admin/workspace/webhooks", "/api/admin/workspace/webhooks/test", "/api/admin/workspace/webhooks/delete",
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
-                "/api/admin/providers/test-socks", "/api/admin/providers/enable", "/api/admin/providers/price",
+                "/api/admin/providers/test-socks", "/api/admin/providers/socks-health", "/api/admin/providers/enable", "/api/admin/providers/price",
                 "/api/admin/system/backups", "/api/admin/system/update",
                 "/api/admin/users/update", "/api/admin/users/reset-quota", "/api/user/profile", "/api/user/change-password",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
@@ -623,6 +623,8 @@ def make_server(
                                                 payload.get('network_mode'), payload.get('proxy_url'))
                     elif path.endswith('/test-socks'):
                         result = providers.test_socks(principal, payload.get('proxy_url'), payload.get('kind'))
+                    elif path.endswith('/socks-health'):
+                        result = providers.check_socks_health(principal, payload.get('proxy_url'), payload.get('kind'))
                     elif path.endswith('/test'):
                         result = providers.test(principal, payload.get('kind'))
                     elif path.endswith('/enable'):
@@ -1198,6 +1200,23 @@ def make_server(
                     return
                 try:
                     self._send(200, {'providers': providers.list(principal)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                return
+            if parsed.path == '/api/admin/providers/socks-health':
+                if not self._node_channel():
+                    return
+                principal = self._principal()
+                if principal is None:
+                    return
+                if providers is None:
+                    self._send(503, {'error': {'message': 'Provider registry unavailable'}})
+                    return
+                try:
+                    q = parse_qs(parsed.query)
+                    proxy_url = q.get('proxy_url', [None])[0]
+                    kind = q.get('kind', [None])[0]
+                    self._send(200, providers.check_socks_health(principal, proxy_url, kind))
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 return

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { api, type ApiProvider } from "./api";
+import { api, type ApiProvider, type SocksHealthResult, type SocksHealthStatus } from "./api";
 
 const labels = { openai: "OpenAI", gemini: "Gemini", anthropic: "Claude / Anthropic", openrouter: "OpenRouter" };
 
@@ -16,7 +16,7 @@ function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
   const [output, setOutput] = useState("");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
-  const [socksStatus, setSocksStatus] = useState<{ ok: boolean; message: string; latency_ms?: number } | null>(null);
+  const [socksStatus, setSocksStatus] = useState<{ ok: boolean; health: SocksHealthStatus; message: string; latency_ms?: number } | null>(null);
   const [autoTestSocks, setAutoTestSocks] = useState(true);
 
   const models = useMemo(() => {
@@ -54,11 +54,12 @@ function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
         await saveSettings();
       }
       const res = await api.testSocks(proxyValue, provider.kind);
-      setSocksStatus({ ok: true, message: res.message, latency_ms: res.latency_ms });
+      const health: SocksHealthStatus = res.health || (res.latency_ms <= 400 ? "healthy" : "degraded");
+      setSocksStatus({ ok: true, health, message: res.message, latency_ms: res.latency_ms });
       setMessage(res.message);
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : "خطا در تست ارتباط با پراکسی SOCKS";
-      setSocksStatus({ ok: false, message: errMsg });
+      setSocksStatus({ ok: false, health: "down", message: errMsg });
       setMessage(errMsg);
     } finally {
       setBusy("");
@@ -108,20 +109,57 @@ function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
           </label>
         </div>
         {socksStatus && (
-          <div style={{
-            marginTop: "6px",
-            padding: "8px 12px",
-            borderRadius: "10px",
-            fontSize: "12px",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            background: socksStatus.ok ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 68, 68, 0.12)",
-            border: `1px solid ${socksStatus.ok ? "rgba(16, 185, 129, 0.35)" : "rgba(239, 68, 68, 0.35)"}`,
-            color: socksStatus.ok ? "#34d399" : "#fca5a5",
-          }}>
-            <span>{socksStatus.ok ? "✅" : "❌"}</span>
-            <span>{socksStatus.message}</span>
+          <div style={{ marginTop: "6px", display: "flex", flexDirection: "column", gap: "6px" }}>
+            <div style={{
+              padding: "8px 12px",
+              borderRadius: "10px",
+              fontSize: "12px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: "8px",
+              background: socksStatus.health === "healthy"
+                ? "rgba(16, 185, 129, 0.12)"
+                : socksStatus.health === "degraded"
+                ? "rgba(245, 158, 11, 0.12)"
+                : "rgba(239, 68, 68, 0.12)",
+              border: `1px solid ${
+                socksStatus.health === "healthy"
+                  ? "rgba(16, 185, 129, 0.35)"
+                  : socksStatus.health === "degraded"
+                  ? "rgba(245, 158, 11, 0.35)"
+                  : "rgba(239, 68, 68, 0.35)"
+              }`,
+              color: socksStatus.health === "healthy"
+                ? "#34d399"
+                : socksStatus.health === "degraded"
+                ? "#fbbf24"
+                : "#fca5a5",
+            }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <span>{socksStatus.health === "healthy" ? "🟢" : socksStatus.health === "degraded" ? "🟡" : "🔴"}</span>
+                <span className={`socks-badge ${socksStatus.health}`} style={{ padding: "2px 8px", fontSize: "11px" }}>
+                  <span className="socks-badge-dot" aria-hidden="true" />
+                  {socksStatus.health === "healthy" ? "Healthy" : socksStatus.health === "degraded" ? "Degraded" : "Down"}
+                </span>
+                <span>{socksStatus.message}</span>
+              </span>
+              {socksStatus.latency_ms !== undefined && (
+                <span className="socks-latency-chip" style={{ fontSize: "11px", padding: "2px 8px" }}>
+                  ⚡ {socksStatus.latency_ms.toLocaleString("fa-IR")} ms
+                </span>
+              )}
+            </div>
+            {socksStatus.health === "down" && (
+              <div className="socks-warning-banner" style={{ padding: "10px 12px", fontSize: "11px" }}>
+                <span className="socks-warning-icon" style={{ fontSize: "16px" }}>⚠️</span>
+                <div className="socks-warning-content">
+                  <strong>خطای دسترسی به پراکسی SOCKS5h برای {labels[provider.kind]}</strong>
+                  <span>پراکسی پاسخ نمی‌دهد. مدل‌های این ارائه‌دهنده در حالت ساکس غیرقابل استفاده خواهند بود.</span>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </motion.div>}</AnimatePresence>
@@ -155,28 +193,76 @@ function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
 export function ProviderManager() {
   const [providers, setProviders] = useState<ApiProvider[]>([]);
   const [defaultProxy, setDefaultProxy] = useState(() => localStorage.getItem("omniops_shared_proxy") || "");
-  const [sharedTesting, setSharedTesting] = useState(false);
-  const [sharedResult, setSharedResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [socksHealth, setSocksHealth] = useState<SocksHealthResult | null>(null);
+  const [socksHealthLoading, setSocksHealthLoading] = useState(false);
   const [error, setError] = useState("");
   const secure = window.location.protocol === "https:";
+
   async function refresh() {
-    try { setProviders((await api.providers()).providers); setError(""); }
-    catch (reason) { const message = reason instanceof Error ? reason.message : "فهرست Provider دریافت نشد."; setError(message); throw reason; }
-  }
-  async function testSharedSocks() {
-    if (!defaultProxy.trim()) return;
-    setSharedTesting(true);
-    setSharedResult(null);
     try {
-      const res = await api.testSocks(defaultProxy.trim());
-      setSharedResult({ ok: true, message: res.message });
-    } catch (err) {
-      setSharedResult({ ok: false, message: err instanceof Error ? err.message : "خطا در تست ساکس مشترک" });
-    } finally {
-      setSharedTesting(false);
+      const data = await api.providers();
+      setProviders(data.providers);
+      setError("");
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "فهرست Provider دریافت نشد.";
+      setError(message);
+      throw reason;
     }
   }
-  useEffect(() => { if (secure) void refresh().catch(() => {}); }, [secure]);
+
+  async function checkSocksHealth(proxyUrl?: string) {
+    setSocksHealthLoading(true);
+    try {
+      const target = proxyUrl !== undefined ? proxyUrl : defaultProxy.trim();
+      const res = await api.getSocksHealth(target || undefined);
+      setSocksHealth(res);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "خطا در سنجش سلامت پراکسی SOCKS5h";
+      setSocksHealth({
+        status: "error",
+        health: "down",
+        proxy_url: defaultProxy.trim(),
+        latency_ms: null,
+        tested_at: Math.floor(Date.now() / 1000),
+        target_host: "api.openai.com",
+        error: errMsg,
+        message: errMsg,
+      });
+    } finally {
+      setSocksHealthLoading(false);
+    }
+  }
+
+  async function testManualSocksHealth() {
+    setSocksHealthLoading(true);
+    try {
+      const target = defaultProxy.trim() || undefined;
+      const res = await api.socksHealth(target);
+      setSocksHealth(res);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "خطا در تست اتصال با پراکسی SOCKS5h";
+      setSocksHealth({
+        status: "error",
+        health: "down",
+        proxy_url: defaultProxy.trim(),
+        latency_ms: null,
+        tested_at: Math.floor(Date.now() / 1000),
+        target_host: "api.openai.com",
+        error: errMsg,
+        message: errMsg,
+      });
+    } finally {
+      setSocksHealthLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (secure) {
+      void refresh().catch(() => {});
+      void checkSocksHealth().catch(() => {});
+    }
+  }, [secure]);
+
   return <section className="glass admin-card operations-card provider-manager" aria-label="مدیریت Providerهای API">
     {!secure ? (
       <div style={{ padding: "18px", borderRadius: "14px", background: "rgba(124, 58, 237, 0.08)", border: "1px solid rgba(124, 58, 237, 0.3)", margin: "10px 0" }}>
@@ -192,54 +278,140 @@ export function ProviderManager() {
           🚀 ورود به پنل امن: https://{window.location.hostname}:9443/
         </a>
       </div>
-    )
-      : <><div className="provider-shared-proxy">
-        <div>
-          <strong>پراکسی مشترک خروجی</strong>
-          <small>پشتیبانی از socks5:// و socks5h:// با نام دامنه و احراز هویت کاربری</small>
-        </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-          <input
-            dir="ltr"
-            aria-label="نشانی پراکسی مشترک"
-            value={defaultProxy}
-            onChange={e => {
-              setDefaultProxy(e.target.value);
-              localStorage.setItem("omniops_shared_proxy", e.target.value);
-              setSharedResult(null);
-            }}
-            placeholder="socks5://user:pass@host:port یا socks5h://..."
-          />
-          <button
-            type="button"
-            className="quiet-button"
-            style={{ borderColor: "#10b981", color: "#34d399" }}
-            disabled={!defaultProxy.trim() || sharedTesting}
-            onClick={() => void testSharedSocks()}
-          >
-            {sharedTesting ? "در حال تست…" : "⚡ تست ساکس مشترک"}
-          </button>
-        </div>
-        {sharedResult && (
-          <div style={{
-            width: "100%",
-            marginTop: "6px",
-            padding: "8px 12px",
-            borderRadius: "10px",
-            fontSize: "12px",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            background: sharedResult.ok ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 68, 68, 0.12)",
-            border: `1px solid ${sharedResult.ok ? "rgba(16, 185, 129, 0.35)" : "rgba(239, 68, 68, 0.35)"}`,
-            color: sharedResult.ok ? "#34d399" : "#fca5a5",
-          }}>
-            <span>{sharedResult.ok ? "✅" : "❌"}</span>
-            <span>{sharedResult.message}</span>
+    ) : (
+      <>
+        {/* داشبورد وضعیت سلامت و پایش تأخیر SOCKS5h */}
+        <div className="socks-health-card">
+          <div className="socks-health-header">
+            <div className="socks-health-title-group">
+              <div className="socks-health-icon" aria-hidden="true">🛡️</div>
+              <div>
+                <h3>وضعیت سلامت و پایش تأخیر SOCKS5h</h3>
+                <small>پایش برخط تونل خروجی SOCKS5 / SOCKS5h به مقصد سرورهای هوش مصنوعی</small>
+              </div>
+            </div>
+            <div className="socks-health-badges-group">
+              {socksHealth ? (
+                <span className={`socks-badge ${socksHealth.health}`}>
+                  <span className="socks-badge-dot" aria-hidden="true" />
+                  {socksHealth.health === "healthy" && "🟢 سالم (Healthy)"}
+                  {socksHealth.health === "degraded" && "🟡 کند یا ناپایدار (Degraded)"}
+                  {socksHealth.health === "down" && "🔴 قطع یا خرابی (Down)"}
+                </span>
+              ) : (
+                <span className="socks-badge down">
+                  <span className="socks-badge-dot" style={{ background: "#94a3b8" }} aria-hidden="true" />
+                  نامشخص (در انتظار سنجش)
+                </span>
+              )}
+
+              {socksHealth?.latency_ms != null && (
+                <span className="socks-latency-chip" title="تأخیر برقراری ارتباط با هاست مقصد">
+                  ⚡ تأخیر: <b>{socksHealth.latency_ms.toLocaleString("fa-IR")}</b> میلی‌ثانیه
+                  <small style={{ opacity: 0.85, fontSize: "10px" }}>
+                    ({socksHealth.latency_ms <= 200 ? "عالی" : socksHealth.latency_ms <= 400 ? "مطلوب" : "کند"})
+                  </small>
+                </span>
+              )}
+            </div>
           </div>
-        )}
-      </div>
+
+          {/* هشدار خرابی در صورت Down بودن سلامت پراکسی */}
+          <AnimatePresence>
+            {socksHealth?.health === "down" && (
+              <motion.div
+                className="socks-warning-banner"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                role="alert"
+              >
+                <div className="socks-warning-icon">⚠️</div>
+                <div className="socks-warning-content">
+                  <strong>هشدار خرابی پراکسی SOCKS5h (وضعیت Down)</strong>
+                  <span>
+                    ارتباط با پراکسی خروجی برقرار نیست. در صورت فعال بودن حالت SOCKS برای هر یک از ارائه‌دهندگان (OpenAI / Gemini / Anthropic)، تماس‌های API ناموفق خواهند بود.
+                  </span>
+                  <ul className="socks-warning-tips">
+                    <li>بررسی کنید سرویس‌دهنده پروکسی (مانند V2Ray, Clash, Shadowsocks یا SSH Tunnel) روشن و در حال اجرا باشد.</li>
+                    <li>آدرس IP و پورت (مثلاً <code>127.0.0.1:10808</code> یا <code>127.0.0.1:7890</code>) را بازبینی فرمایید.</li>
+                    <li>در صورت استفاده از نام کاربری و رمزعبور، ساختار <code>socks5h://user:pass@host:port</code> را بررسی کنید.</li>
+                    <li>پروتکل <b>SOCKS5h</b> جهت جلوگیری از نشت و تحریم DNS، نام دامنه را مستقیماً روی سرور مقصد پروکسی ترجمه می‌کند.</li>
+                  </ul>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* جزییات فنی و آخرین سنجش */}
+          <div className="socks-health-details-grid">
+            <div className="socks-detail-item">
+              <span>نشانی پراکسی هدف:</span>
+              <strong dir="ltr">{socksHealth?.proxy_url || defaultProxy || "تنظیم نشده"}</strong>
+            </div>
+            <div className="socks-detail-item">
+              <span>سرور مقصد آزمایش:</span>
+              <strong dir="ltr">{socksHealth?.target_host || "api.openai.com"}</strong>
+            </div>
+            <div className="socks-detail-item">
+              <span>آخرین زمان سنجش:</span>
+              <strong>
+                {socksHealth?.tested_at
+                  ? new Date(socksHealth.tested_at * 1000).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+                  : "هنوز سنجیده نشده"}
+              </strong>
+            </div>
+            <div className="socks-detail-item">
+              <span>پیام وضعیت شبکه:</span>
+              <strong style={{ color: socksHealth?.health === "healthy" ? "#34d399" : socksHealth?.health === "degraded" ? "#fbbf24" : "#f87171" }}>
+                {socksHealth?.message || "در انتظار نخستین آزمون"}
+              </strong>
+            </div>
+          </div>
+
+          {/* فیلد ورودی پراکسی مشترک و دکمه تست دستی */}
+          <div className="socks-health-actions-row">
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", flex: "1 1 320px", flexWrap: "wrap" }}>
+              <input
+                dir="ltr"
+                aria-label="نشانی پراکسی مشترک"
+                style={{
+                  flex: "1 1 240px",
+                  padding: "9px 13px",
+                  border: "1px solid rgba(94, 234, 212, 0.3)",
+                  borderRadius: "10px",
+                  background: "rgba(15, 23, 42, 0.6)",
+                  color: "#f1f5f9",
+                  fontSize: "12px",
+                  fontFamily: "monospace"
+                }}
+                value={defaultProxy}
+                onChange={e => {
+                  setDefaultProxy(e.target.value);
+                  localStorage.setItem("omniops_shared_proxy", e.target.value);
+                }}
+                placeholder="socks5://user:pass@host:port یا socks5h://..."
+              />
+            </div>
+
+            <button
+              type="button"
+              className="socks-manual-test-btn"
+              disabled={socksHealthLoading || (!defaultProxy.trim() && !socksHealth?.proxy_url)}
+              onClick={() => void testManualSocksHealth()}
+            >
+              {socksHealthLoading ? "⏳ در حال سنجش سلامت و تأخیر…" : "⚡ تست دستی سلامت اتصال SOCKS5h"}
+            </button>
+          </div>
+        </div>
+
         {error && <p className="admin-message" role="alert">{error}</p>}
-        <div className="provider-grid">{providers.map(provider => <ProviderCard key={provider.kind} provider={provider} defaultProxy={defaultProxy} refresh={refresh} />)}</div></>}
+        <div className="provider-grid">
+          {providers.map(provider => (
+            <ProviderCard key={provider.kind} provider={provider} defaultProxy={defaultProxy} refresh={refresh} />
+          ))}
+        </div>
+      </>
+    )}
   </section>;
 }

@@ -319,4 +319,38 @@ class ProviderTests(unittest.TestCase):
             result = self.providers.test_socks(self.admin, kind='openai')
             self.assertEqual(result['status'], 'ok')
             self.assertEqual(result['proxy_url'], 'socks5h://172.19.30.99:10808')
+            self.assertIn(result['health'], ('healthy', 'degraded'))
+
+    def test_check_socks_health_states(self):
+        from unittest.mock import MagicMock
+        # 1. Unconfigured
+        unconfigured = self.providers.check_socks_health(self.admin)
+        self.assertEqual(unconfigured['health'], 'down')
+        self.assertEqual(unconfigured['status'], 'unconfigured')
+
+        # 2. Healthy (<400ms)
+        mock_sock = MagicMock()
+        with patch('omniops.providers._connect_proxy', return_value=mock_sock):
+            with patch('time.time', side_effect=[100.0, 100.05]): # 50ms
+                healthy = self.providers.check_socks_health(self.admin, 'socks5h://127.0.0.1:1080')
+                self.assertEqual(healthy['health'], 'healthy')
+                self.assertEqual(healthy['status'], 'ok')
+                self.assertEqual(healthy['latency_ms'], 50)
+
+        # 3. Degraded (>400ms)
+        with patch('omniops.providers._connect_proxy', return_value=mock_sock):
+            with patch('time.time', side_effect=[100.0, 100.65]): # 650ms
+                degraded = self.providers.check_socks_health(self.admin, 'socks5h://127.0.0.1:1080')
+                self.assertEqual(degraded['health'], 'degraded')
+                self.assertEqual(degraded['status'], 'ok')
+                self.assertEqual(degraded['latency_ms'], 650)
+
+        # 4. Down (Connection error)
+        with patch('omniops.providers._connect_proxy', side_effect=OSError('Connection refused')):
+            down = self.providers.check_socks_health(self.admin, 'socks5h://127.0.0.1:1080')
+            self.assertEqual(down['health'], 'down')
+            self.assertEqual(down['status'], 'error')
+            self.assertIsNone(down['latency_ms'])
+            self.assertIn('خطا در برقراری ارتباط', down['message'])
+
 
