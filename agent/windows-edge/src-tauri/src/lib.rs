@@ -666,6 +666,16 @@ fn set_compact(app: AppHandle, compact: bool) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn set_always_on_top(app: AppHandle, always_on_top: bool) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("پنجرهٔ ایجنت پیدا نشد")?;
+    window
+        .set_always_on_top(always_on_top)
+        .map_err(|_| "تغییر اولویت نمایش پنجره ممکن نشد".to_string())
+}
+
 fn reveal_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -774,7 +784,8 @@ pub fn run() {
             disconnect_agent,
             hide_agent,
             quit_agent,
-            set_compact
+            set_compact,
+            set_always_on_top
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

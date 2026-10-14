@@ -19,7 +19,7 @@
       "minHeight": 70,
       "transparent": true,
       "decorations": false,
-      "alwaysOnTop": true,
+      "alwaysOnTop": false,
       "resizable": true,
       "center": true
     }],

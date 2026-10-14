@@ -51,6 +51,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid #84f2d2; outline-
 .agent-window-controls { display: flex; align-items: center; gap: 10px; }
 .agent-close { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-control); color: var(--text-main); font-size: 20px; line-height: 1; transition: all 0.2s; }
 .agent-theme-btn { font-size: 13px; }
+.agent-pin-btn { font-size: 11px; opacity: 0.55; }
+.agent-pin-btn:hover:not(:disabled) { background: rgba(64, 217, 161, 0.15); border-color: rgba(64, 217, 161, 0.4); color: #5eead4; opacity: 1; }
+.agent-pin-btn.pinned { opacity: 1; background: rgba(64, 217, 161, 0.25); border-color: #40d9a1; color: #5eead4; box-shadow: 0 0 10px rgba(64, 217, 161, 0.35); }
 .agent-close:hover:not(:disabled) { background: #b9435938; border-color: #e899a9; color: #ffe0e5; }
 .agent-theme-btn:hover:not(:disabled) { background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.4); color: #38bdf8; }
 .agent-close:disabled { opacity: .5; }

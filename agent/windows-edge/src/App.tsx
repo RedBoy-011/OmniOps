@@ -58,6 +58,19 @@ export default function App() {
     }
     return "dark";
   });
+  const [alwaysOnTop, setAlwaysOnTop] = useState(false);
+
+  const toggleAlwaysOnTop = async () => {
+    const next = !alwaysOnTop;
+    setAlwaysOnTop(next);
+    if (isTauri()) {
+      try {
+        await invoke("set_always_on_top", { alwaysOnTop: next });
+      } catch {
+        // Fallback
+      }
+    }
+  };
   const fields = useRef<Array<HTMLInputElement | null>>([]);
   const attempt = useRef("");
   const sessionGeneration = useRef(0);
@@ -388,7 +401,7 @@ export default function App() {
           </button>
         </div>
       ) : <>
-      <div className="agent-header" data-tauri-drag-region><div className="agent-heading" data-tauri-drag-region><div className="agent-orb" data-tauri-drag-region aria-hidden="true">✦</div><span data-tauri-drag-region><strong data-tauri-drag-region>OmniOps</strong><small data-tauri-drag-region>بازوی امن ویندوز</small></span></div><div className="agent-window-controls"><span className={`state-dot ${phase === "chat" ? "on" : ""}`} aria-label={phase === "chat" ? "متصل" : "قفل"} /><button className="agent-close agent-theme-btn" type="button" title={theme === "dark" ? "تغییر به تم روشن شیشه‌ای (Light Mica)" : "تغییر به تم تیره نئونی (Dark Acrylic)"} aria-label="تغییر تم ظاهری" onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}>{theme === "dark" ? "☀️" : "🌙"}</button><button className="agent-close" type="button" title="پنهان کردن کنار ساعت" aria-label="پنهان کردن کنار ساعت" disabled={!isTauri()} onClick={() => void hideToTray()}>−</button><button className="agent-close" type="button" title="انتخاب پنهان‌کردن یا خروج کامل" aria-label="انتخاب پنهان‌کردن یا خروج کامل" disabled={!isTauri()} onClick={requestExit}>×</button></div></div>
+      <div className="agent-header" data-tauri-drag-region><div className="agent-heading" data-tauri-drag-region><div className="agent-orb" data-tauri-drag-region aria-hidden="true">✦</div><span data-tauri-drag-region><strong data-tauri-drag-region>OmniOps</strong><small data-tauri-drag-region>بازوی امن ویندوز</small></span></div><div className="agent-window-controls"><span className={`state-dot ${phase === "chat" ? "on" : ""}`} aria-label={phase === "chat" ? "متصل" : "قفل"} /><button className={`agent-close agent-pin-btn ${alwaysOnTop ? "pinned" : ""}`} type="button" title={alwaysOnTop ? "حذف سنجاق (بازگشت به ترتیب استاندارد پنجره‌های ویندوز)" : "سنجاق کردن پنجره روی همهٔ پنجره‌ها (Always on Top)"} aria-label="تغییر وضعیت سنجاق پنجره" disabled={!isTauri()} onClick={() => void toggleAlwaysOnTop()}>📌</button><button className="agent-close agent-theme-btn" type="button" title={theme === "dark" ? "تغییر به تم روشن شیشه‌ای (Light Mica)" : "تغییر به تم تیره نئونی (Dark Acrylic)"} aria-label="تغییر تم ظاهری" onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}>{theme === "dark" ? "☀️" : "🌙"}</button><button className="agent-close" type="button" title="پنهان کردن کنار ساعت" aria-label="پنهان کردن کنار ساعت" disabled={!isTauri()} onClick={() => void hideToTray()}>−</button><button className="agent-close" type="button" title="انتخاب پنهان‌کردن یا خروج کامل" aria-label="انتخاب پنهان‌کردن یا خروج کامل" disabled={!isTauri()} onClick={requestExit}>×</button></div></div>
       <AnimatePresence mode="wait">
         {phase === "locked" || phase === "verifying" ? (
           <motion.section key="pin" className="pair-view" initial={{ opacity: 0, scale: .97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: .95 }} transition={{ duration: .25 }}>
