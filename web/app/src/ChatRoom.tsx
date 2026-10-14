@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { api, type MemoryNote, type ChatSession, type AttachedDoc, type TaskNotification } from "./api";
 import { FilePreviewPanel } from "./components/FilePreviewPanel";
 import { MarkdownMessage } from "./components/MarkdownMessage";
+import { estimateModelCost } from "./design-system/tokens";
 
 type Entry = { id?: string; role: "user" | "assistant"; text: string; time: string; model?: string };
 type QueuedMessage = { id: string; text: string; time: string };
@@ -16,6 +17,7 @@ export function ChatRoom({
   onClearInitialPrompt?: () => void;
 } = {}) {
   const [models, setModels] = useState<string[]>([]);
+  const [modelPricing, setModelPricing] = useState<Record<string, { input: string; output: string }>>({});
   const [selected, setSelected] = useState("auto");
   const [externalConsent, setExternalConsent] = useState(false);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -123,6 +125,9 @@ export function ChatRoom({
     try {
       const result = await api.webModels();
       setModels(result.models);
+      if (result.pricing) {
+        setModelPricing(result.pricing);
+      }
       setSelected((previous) => previous === "auto" || result.models.includes(previous) ? previous : "auto");
       setError(result.models.length ? "" : "مدل مناسبی برای گفت‌وگو در دسترس نیست.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "فهرست مدل‌ها در دسترس نیست."); }
@@ -1241,7 +1246,7 @@ export function ChatRoom({
             </button>
           )}
 
-          {/* دکمه انتخاب مدل و منوی سهمیه (تصویر ۲ و ۳) */}
+          {/* دکمه انتخاب مدل و منوی سهمیه همراه با برآورد هزینه */}
           <div className="antigravity-model-picker-container">
             <button
               type="button"
@@ -1252,54 +1257,80 @@ export function ChatRoom({
               <span className="antigravity-model-name">
                 {selected === "auto" ? "انتخاب خودکار (Auto)" : selected}
               </span>
+              {(() => {
+                const cost = estimateModelCost(selected, modelPricing);
+                return (
+                  <span className={`omni-cost-badge ${cost.badgeClass}`} title={cost.summary}>
+                    {cost.tier === "free" ? "🟢 رایگان" : `💳 ${cost.inputPerMillion}`}
+                  </span>
+                );
+              })()}
               <span className="antigravity-model-arrow">▲</span>
             </button>
 
-            {/* پاپ‌آپ لیست مدل‌ها با نشانگر سهمیه و سرعت */}
+            {/* پاپ‌آپ لیست مدل‌ها با نشانگر سهمیه، سرعت و هزینه تقریبی */}
             {showModelPicker && (
               <div className="antigravity-model-dropdown">
                 <div className="antigravity-model-dropdown-header">
                   <span>مدل‌های هوش مصنوعی (AI Models)</span>
-                  <small>سرعت و سهمیه فعال</small>
+                  <small>سرعت، سهمیه و تخمین هزینه به ازای ۱M توکن</small>
                 </div>
 
                 <div className="antigravity-model-section">
-                  <span className="antigravity-model-section-title">مدل‌های محلی ورکر (Ollama):</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                    <span className="antigravity-model-section-title">مدل‌های محلی ورکر (Ollama):</span>
+                    <span className="omni-cost-badge free" style={{ fontSize: "10px" }}>۱۰۰٪ رایگان</span>
+                  </div>
                   <div
                     className={`antigravity-model-item ${selected === "auto" ? "active" : ""}`}
                     onClick={() => { setSelected("auto"); setShowModelPicker(false); }}
                   >
-                    <span>⚡ هوشمند خودکار (Auto Router)</span>
-                    <span className="antigravity-badge green">Fast</span>
-                  </div>
-                  {localModels.map(m => (
-                    <div
-                      key={m}
-                      className={`antigravity-model-item ${selected === m ? "active" : ""}`}
-                      onClick={() => { setSelected(m); setShowModelPicker(false); }}
-                    >
-                      <span className="truncate">{m}</span>
-                      <span className="antigravity-badge purple">GPU Local</span>
+                    <div>
+                      <span>⚡ هوشمند خودکار (Auto Router)</span>
+                      <small style={{ display: "block", color: "#94a3b8", fontSize: "10px" }}>مسیریابی کم‌هزینه و سریع</small>
                     </div>
-                  ))}
+                    <span className="omni-cost-badge free">رایگان / بهینه</span>
+                  </div>
+                  {localModels.map(m => {
+                    const cost = estimateModelCost(m, modelPricing);
+                    return (
+                      <div
+                        key={m}
+                        className={`antigravity-model-item ${selected === m ? "active" : ""}`}
+                        onClick={() => { setSelected(m); setShowModelPicker(false); }}
+                        title={cost.summary}
+                      >
+                        <span className="truncate">{m}</span>
+                        <span className={`omni-cost-badge ${cost.badgeClass}`}>
+                          {cost.tier === "free" ? "🟢 GPU Local" : cost.inputPerMillion}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 {externalModels.length > 0 && externalConsent && (
                   <div className="antigravity-model-section">
                     <span className="antigravity-model-section-title">مدل‌های ابری آنلاین (Cloud API):</span>
-                    {externalModels.map(m => (
-                      <div
-                        key={m}
-                        className={`antigravity-model-item ${selected === m ? "active" : ""}`}
-                        onClick={() => { setSelected(m); setShowModelPicker(false); }}
-                      >
-                        <span className="truncate">{m}</span>
-                        <div className="antigravity-quota-indicator">
-                          <span className="antigravity-quota-circle"></span>
-                          <span>94% باقی‌مانده</span>
+                    {externalModels.map(m => {
+                      const cost = estimateModelCost(m, modelPricing);
+                      return (
+                        <div
+                          key={m}
+                          className={`antigravity-model-item ${selected === m ? "active" : ""}`}
+                          onClick={() => { setSelected(m); setShowModelPicker(false); }}
+                          title={cost.summary}
+                        >
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <span className="truncate" style={{ display: "block" }}>{m}</span>
+                            <small style={{ color: "#94a3b8", fontSize: "10px" }}>{cost.summary}</small>
+                          </div>
+                          <span className={`omni-cost-badge ${cost.badgeClass}`}>
+                            {cost.inputPerMillion}
+                          </span>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

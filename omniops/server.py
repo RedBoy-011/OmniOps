@@ -624,6 +624,7 @@ def make_server(
                 "/api/web/workspace/task/run/feedback", "/api/agent/workspace/task/run/feedback",
                 "/api/web/workspace/project/artifacts", "/api/agent/workspace/project/artifacts",
                 "/api/web/workspace/project/artifacts/delete", "/api/agent/workspace/project/artifacts/delete",
+                "/api/web/workspace/project/steering", "/api/agent/workspace/project/steering",
                 "/api/web/workspace/spec/create", "/api/agent/workspace/spec/create",
                 "/api/web/workspace/spec/update", "/api/agent/workspace/spec/update",
                 "/api/web/workspace/spec/approve", "/api/agent/workspace/spec/approve",
@@ -835,6 +836,12 @@ def make_server(
                         principal,
                         payload.get('project_id'),
                         payload.get('artifact_id')
+                    ))
+                elif path in ('/api/web/workspace/project/steering', '/api/agent/workspace/project/steering'):
+                    self._send(200, workspace.save_project_steering(
+                        principal,
+                        payload.get('project_id'),
+                        payload.get('steering')
                     ))
                 elif path in ('/api/web/workspace/spec/create', '/api/agent/workspace/spec/create'):
                     self._send(201, {'spec': workspace.create_or_generate_spec(
@@ -1234,6 +1241,17 @@ def make_server(
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 return
+            if parsed.path in ('/api/web/workspace/project/steering', '/api/agent/workspace/project/steering', '/api/workspace/project/steering'):
+                principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
+                if principal is None:
+                    return
+                try:
+                    q = parse_qs(parsed.query)
+                    p_id = q.get('project_id', [None])[0]
+                    self._send(200, workspace.get_project_steering(principal, p_id))
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                return
             if parsed.path in ('/api/web/workspace/specs', '/api/agent/workspace/specs'):
                 principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
                 if principal is None:
@@ -1420,7 +1438,19 @@ def make_server(
                 if not models:
                     self._send(503, {"error": {"message": "No chat model available"}})
                 else:
-                    self._send(200, {"models": models})
+                    pricing_map = {}
+                    if providers:
+                        try:
+                            with identity._db() as db:
+                                accounts = db.execute("SELECT kind, catalog_prices_json FROM provider_accounts WHERE enabled=1").fetchall()
+                                for acc in accounts:
+                                    cat = json.loads(acc['catalog_prices_json'] or '{}')
+                                    for m_k, pr in cat.items():
+                                        pricing_map[f"{acc['kind']}/{m_k}"] = pr
+                                        pricing_map[m_k] = pr
+                        except Exception:
+                            pass
+                    self._send(200, {"models": models, "pricing": pricing_map})
                 return
             if self.path == "/api/admin/system/metrics":
                 principal = self._principal()

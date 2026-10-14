@@ -1,0 +1,31 @@
+# ========================================================
+# OmniOps Project Steering Rules & Autonomous Agent Policy
+# ========================================================
+version: 1.0
+project_name: OmniOps
+
+project_rules:
+  - "معماری سه‌لایه Master-Worker-Edge و اصل نظارت انسانی (Human-in-the-Loop) همواره رعایت شود."
+  - "هویت بصری یکپارچه (طیف فیروزه‌ای/زمردی #00f0ff و #00ffaa، فونت وزیرمتن و چیدمان راست‌به‌چپ RTL) حفظ گردد."
+  - "فرامین سیستمی و تغییرات تخریبی در سندباکس محدود شده و پیش از اجرا نیازمند تأیید صریح کاربر است."
+  - "کدنویسی به صورت تمیز، ماژولار و با حفظ کامل کامنت‌ها و توابع موجود انجام پذیرد."
+  - "تمامی رویدادها، تغییرات فایل و گام‌های اجرایی در لاگ نظارتی سازمان (Audit Trail) ثبت شوند."
+
+guidelines:
+  visual_identity:
+    primary_color: "#00f0ff"
+    secondary_color: "#00ffaa"
+    font_family: "Vazirmatn"
+    direction: "rtl"
+  architecture:
+    model: "Master-Worker-Edge"
+    human_in_the_loop: true
+    sandbox_isolation: true
+  allowed_tools:
+    - "git"
+    - "npm"
+    - "python"
+    - "pytest"
+    - "cargo"
+    - "go"
+    - "node"

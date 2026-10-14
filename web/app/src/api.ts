@@ -263,6 +263,34 @@ export type UpdateStatus = {
   error?: string | null;
 };
 
+export type ProjectSteering = {
+  version?: string;
+  project_name?: string;
+  project_rules: string[];
+  guidelines?: {
+    visual_identity?: {
+      primary_color?: string;
+      secondary_color?: string;
+      font_family?: string;
+      direction?: string;
+    };
+    architecture?: {
+      model?: string;
+      human_in_the_loop?: boolean;
+      sandbox_isolation?: boolean;
+    };
+    allowed_tools?: string[];
+    [key: string]: unknown;
+  };
+};
+
+export type ProjectSteeringResponse = {
+  steering: ProjectSteering;
+  is_custom: boolean;
+  path: string;
+  raw_yaml: string;
+};
+
 export type UpdateResult = {
   status: "updated" | "error";
   message: string;
@@ -645,7 +673,7 @@ export const api = {
   me: () => request<{ user: Profile; pending_count?: number }>("/api/auth/me"),
   pending: () => request<{ users: PendingUser[] }>("/api/admin/pending"),
   operations: () => request<Operations>("/api/admin/operations"),
-  webModels: () => request<{ models: string[] }>("/api/web/models"),
+  webModels: () => request<{ models: string[]; pricing?: Record<string, { input: string; output: string }> }>("/api/web/models"),
   webChat: (
     message: string,
     model: string,
@@ -979,6 +1007,10 @@ export const api = {
     request<{ spec: WorkspaceSpec }>(`/api/web/workspace/spec?spec_id=${encodeURIComponent(spec_id)}`),
   listSpecs: (project_id: string, limit = 50) =>
     request<{ specs: WorkspaceSpec[] }>(`/api/web/workspace/specs?project_id=${encodeURIComponent(project_id)}&limit=${limit}`),
+  getProjectSteering: (project_id: string) =>
+    request<ProjectSteeringResponse>(`/api/web/workspace/project/steering?project_id=${encodeURIComponent(project_id)}`),
+  saveProjectSteering: (project_id: string, steering: ProjectSteering) =>
+    request<ProjectSteeringResponse>("/api/web/workspace/project/steering", "POST", { project_id, steering }),
   downloadsInfo: () =>
     request<DownloadsInfoResponse>("/api/downloads/info"),
   syncReleaseAssets: () =>

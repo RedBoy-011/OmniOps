@@ -16,6 +16,8 @@ import {
   type ProjectArtifact,
   type TaskPreset,
   type WorkspaceSpec,
+  type ProjectSteering,
+  type ProjectSteeringResponse,
   TASK_PRESETS,
 } from "../api";
 import { SpecReviewModal } from "./SpecReviewModal";
@@ -86,6 +88,16 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
   const [showSpecModal, setShowSpecModal] = useState(false);
   const [showSpecsListModal, setShowSpecsListModal] = useState(false);
   const [generatingSpec, setGeneratingSpec] = useState(false);
+
+  // Project Steering Files state
+  const [steeringData, setSteeringData] = useState<ProjectSteeringResponse | null>(null);
+  const [loadingSteering, setLoadingSteering] = useState(false);
+  const [savingSteering, setSavingSteering] = useState(false);
+  const [showSteeringModal, setShowSteeringModal] = useState(false);
+  const [steeringRulesText, setSteeringRulesText] = useState("");
+  const [steeringToolsText, setSteeringToolsText] = useState("");
+  const [steeringRawYaml, setSteeringRawYaml] = useState("");
+  const [steeringEditorTab, setSteeringEditorTab] = useState<"visual" | "yaml">("visual");
 
   // Create / Bind state
   const [showNewModal, setShowNewModal] = useState(false);
@@ -178,6 +190,7 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
     void loadGitStatus(selectedProjectId);
     void loadArtifacts(selectedProjectId);
     void loadSpecs(selectedProjectId);
+    void loadProjectSteering(selectedProjectId);
   }, [selectedProjectId, projects]);
 
   async function loadGitStatus(projectId: string) {
@@ -256,6 +269,60 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
       setSpecs(res.specs || []);
     } catch {
       // ignore
+    }
+  }
+
+  async function loadProjectSteering(projectId: string) {
+    if (!projectId) return;
+    try {
+      setLoadingSteering(true);
+      const res = await api.getProjectSteering(projectId);
+      setSteeringData(res);
+      const rules = res.steering?.project_rules || [];
+      const tools = res.steering?.guidelines?.allowed_tools || [];
+      setSteeringRulesText(rules.join("\n"));
+      setSteeringToolsText(tools.join(", "));
+      setSteeringRawYaml(res.raw_yaml || "");
+    } catch {
+      setSteeringData(null);
+    } finally {
+      setLoadingSteering(false);
+    }
+  }
+
+  async function handleSaveSteering() {
+    if (!selectedProjectId) return;
+    try {
+      setSavingSteering(true);
+      setError("");
+      const rules = steeringRulesText
+        .split("\n")
+        .map((r) => r.trim())
+        .filter(Boolean);
+      const tools = steeringToolsText
+        .split(/[,\n]/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      const payload: ProjectSteering = {
+        version: steeringData?.steering?.version || "1.0",
+        project_name: steeringData?.steering?.project_name,
+        project_rules: rules,
+        guidelines: {
+          ...(steeringData?.steering?.guidelines || {}),
+          allowed_tools: tools,
+        },
+      };
+
+      const res = await api.saveProjectSteering(selectedProjectId, payload);
+      setSteeringData(res);
+      setSteeringRawYaml(res.raw_yaml);
+      setSuccessMsg("قوانین هدایت پروژه (.omniops/steering.yaml) با موفقیت ذخیره شد.");
+      setShowSteeringModal(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "خطا در ذخیره قوانین هدایت پروژه");
+    } finally {
+      setSavingSteering(false);
     }
   }
 
@@ -813,6 +880,17 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
             >
               📋 مشخصات (Spec): <strong>{specs.length} سند</strong>
             </button>
+            <button
+              type="button"
+              className="meta-badge steering-badge clickable"
+              onClick={() => {
+                void loadProjectSteering(selectedProjectId);
+                setShowSteeringModal(true);
+              }}
+              title="مشاهده و ویرایش قوانین هدایت پروژه (Steering Rules)"
+            >
+              🧭 قوانین پروژه: <strong>{steeringData?.steering?.project_rules?.length ?? 0} قانون</strong>
+            </button>
           </div>
 
           {/* اکشن بار هوشمند برای بارگذاری در چت و دسترسی سریع */}
@@ -847,6 +925,17 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
               title="مشاهده، بازبینی و مدیریت اسناد مشخصات و مراحل اجرایی (Spec-Driven)"
             >
               📋 اسناد مشخصات ({specs.length})
+            </button>
+            <button
+              type="button"
+              className="action-button steering-action-btn"
+              onClick={() => {
+                void loadProjectSteering(selectedProjectId);
+                setShowSteeringModal(true);
+              }}
+              title="مشاهده، تنظیم و ویرایش قوانین راهبردی ایجنت (.omniops/steering.yaml)"
+            >
+              🧭 قوانین هدایت (Steering)
             </button>
             <button
               type="button"
@@ -2237,6 +2326,161 @@ export function AgenticWorkspaceCard({ onLoadContextToChat, canExecuteCommands =
                 </div>
                 <div className="modal-footer">
                   <button type="button" className="quiet-button" onClick={() => setShowSpecsListModal(false)}>بستن</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* مدال قوانین و چارچوب هدایت پروژه (Project Steering Files) */}
+          {showSteeringModal && (
+            <div className="agent-modal-overlay" onClick={() => setShowSteeringModal(false)}>
+              <div className="agent-modal-content max-w-3xl omni-glass-panel" onClick={(e) => e.stopPropagation()} dir="rtl">
+                <div className="modal-header">
+                  <div className="modal-title-with-icon">
+                    <span className="modal-icon">🧭</span>
+                    <div>
+                      <h3 className="modal-title font-bold text-base text-cyan-300">قوانین و چارچوب هدایت پروژه (Project Steering Files)</h3>
+                      <span className="modal-subtitle text-xs text-slate-400">
+                        تنظیم خط‌مشی‌ها، هویت بصری، ابزارهای مجاز و محدودیت‌های عملیاتی ایجنت در <code>{steeringData?.path || ".omniops/steering.yaml"}</code>
+                      </span>
+                    </div>
+                  </div>
+                  <button type="button" className="close-btn" onClick={() => setShowSteeringModal(false)}>✕</button>
+                </div>
+
+                <div className="modal-body space-y-4">
+                  {/* اطلاعات کلی و وضعیت استیرینگ */}
+                  <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-xl flex items-center justify-between text-xs flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400">وضعیت سند:</span>
+                      <span className={`px-2 py-0.5 rounded-full font-semibold border ${
+                        steeringData?.is_custom
+                          ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
+                          : "bg-slate-700/40 text-slate-300 border-slate-600/40"
+                      }`}>
+                        {steeringData?.is_custom ? "🌟 سفارشی‌شده پروژه" : "⚙️ پیش‌فرض هوشمند سیستم"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400">فونت و جهت:</span>
+                      <span className="text-slate-300 font-mono">
+                        {steeringData?.steering?.guidelines?.visual_identity?.font_family || "Vazirmatn"} (RTL)
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400">رنگ‌های برند:</span>
+                      <span className="w-3.5 h-3.5 rounded-full border border-white/20 inline-block" style={{ backgroundColor: steeringData?.steering?.guidelines?.visual_identity?.primary_color || "#00f0ff" }} title="Primary Cyan" />
+                      <span className="w-3.5 h-3.5 rounded-full border border-white/20 inline-block" style={{ backgroundColor: steeringData?.steering?.guidelines?.visual_identity?.secondary_color || "#00ffaa" }} title="Secondary Emerald" />
+                    </div>
+                  </div>
+
+                  {/* تب‌های ویرایشگر */}
+                  <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+                    <button
+                      type="button"
+                      className={`px-3 py-1 text-xs rounded-lg font-medium transition ${
+                        steeringEditorTab === "visual"
+                          ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                      onClick={() => setSteeringEditorTab("visual")}
+                    >
+                      ✏️ ویرایش ساختاریافته
+                    </button>
+                    <button
+                      type="button"
+                      className={`px-3 py-1 text-xs rounded-lg font-medium transition ${
+                        steeringEditorTab === "yaml"
+                          ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                      onClick={() => setSteeringEditorTab("yaml")}
+                    >
+                      📄 پیش‌نمایش فایل YAML
+                    </button>
+                  </div>
+
+                  {loadingSteering ? (
+                    <div className="text-center py-8 text-cyan-400 text-xs">در حال بارگذاری قوانین هدایت...</div>
+                  ) : steeringEditorTab === "visual" ? (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">
+                          قوانین و الزامات پروژه (هر سطر یک قانون):
+                        </label>
+                        <textarea
+                          className="w-full bg-slate-950/80 border border-slate-800 focus:border-cyan-500 rounded-xl p-3 text-xs text-slate-100 font-sans leading-relaxed focus:outline-none focus:ring-1 focus:ring-cyan-500 min-h-[140px]"
+                          value={steeringRulesText}
+                          onChange={(e) => setSteeringRulesText(e.target.value)}
+                          placeholder="مثال: تمام فایل‌ها باید دارای مستندات و تایپ کامل باشند..."
+                          dir="rtl"
+                        />
+                        <span className="text-[11px] text-slate-500">
+                          این قوانین به‌طور خودکار در شروع هر چرخه کاری (Task Loop) به پرامپت ایجنت تزریق می‌گردند.
+                        </span>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">
+                          ابزارهای مجاز ایجنت (Allowed Tools):
+                        </label>
+                        <input
+                          type="text"
+                          className="w-full bg-slate-950/80 border border-slate-800 focus:border-cyan-500 rounded-xl p-2.5 text-xs text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                          value={steeringToolsText}
+                          onChange={(e) => setSteeringToolsText(e.target.value)}
+                          placeholder="bash, read_file, write_file, git_status, playwright"
+                          dir="ltr"
+                        />
+                        <span className="text-[11px] text-slate-500">
+                          فهرست ابزارهایی که ایجنت مجاز به فراخوانی آن‌ها در این مخزن است (با کاما جدا شود).
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs text-slate-400 font-mono">.omniops/steering.yaml</span>
+                        <button
+                          type="button"
+                          className="text-xs text-cyan-400 hover:text-cyan-300 transition"
+                          onClick={() => {
+                            navigator.clipboard.writeText(steeringRawYaml);
+                            setSuccessMsg("متن YAML در کلیپ‌بورد کپی شد.");
+                          }}
+                        >
+                          📋 کپی محتوا
+                        </button>
+                      </div>
+                      <pre className="w-full bg-slate-950/90 border border-slate-800 rounded-xl p-3 text-xs font-mono text-cyan-200 overflow-x-auto max-h-[220px]" dir="ltr">
+                        {steeringRawYaml || "# No YAML content available"}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+
+                <div className="modal-footer flex items-center justify-between gap-2 border-t border-slate-800 pt-3">
+                  <span className="text-[11px] text-slate-400">
+                    💡 تغییرات بلافاصله در پرامپت‌های بعدی ایجنت اعمال خواهد شد.
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="quiet-button"
+                      onClick={() => setShowSteeringModal(false)}
+                      disabled={savingSteering}
+                    >
+                      انصراف
+                    </button>
+                    <button
+                      type="button"
+                      className="action-button primary-accent font-bold"
+                      onClick={() => void handleSaveSteering()}
+                      disabled={savingSteering || loadingSteering}
+                    >
+                      {savingSteering ? "⏳ در حال ذخیره..." : "💾 ذخیره قوانین هدایت"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

@@ -16,6 +16,7 @@ import urllib.request
 import uuid
 
 from .identity import IdentityError
+from .steering import dump_steering_yaml, get_default_steering, parse_steering_yaml
 
 _command_streams = {}
 _command_streams_lock = threading.Lock()
@@ -1658,13 +1659,17 @@ class WorkspaceStore:
                     }
                 ]
 
+            steering_info = self.get_project_steering(principal, project_id)
+            steering_rules = steering_info.get('steering', {}).get('project_rules', [])
+            steering_msg = f"\n🧭 قوانین هدایت فعال ({len(steering_rules)} قانون پروژه لود شد)." if steering_rules else ""
+
             logs = [
                 {
                     'timestamp': now,
                     'step': 0,
                     'type': 'inspection',
                     'title': f'آغاز مأموریت با نقش «{role_labels.get(clean_role, "عمومی")}»',
-                    'content': f"پروژه «{project_name}» در مسیر {inspection['root_path']} با فریم‌ورک {inspection['framework']} پویش شد."
+                    'content': f"پروژه «{project_name}» در مسیر {inspection['root_path']} با فریم‌ورک {inspection['framework']} پویش شد.{steering_msg}"
                 }
             ]
 
@@ -2927,6 +2932,63 @@ class WorkspaceStore:
             else:
                 db.execute("UPDATE workspace_task_notifications SET read=1 WHERE owner_id=?", (principal['id'],))
         return {'ok': True}
+
+    def get_project_steering(self, principal, project_id):
+        self._cap(principal, 'chat')
+        root_dir, project_name = self._resolve_project_root(principal, project_id)
+        candidates = [
+            root_dir / '.omniops' / 'steering.yaml',
+            root_dir / '.omniops' / 'steering.json',
+            root_dir / 'steering.yaml',
+            root_dir / '.steering' / 'rules.yaml',
+        ]
+        target_file = None
+        for cand in candidates:
+            if cand.is_file():
+                target_file = cand
+                break
+
+        if target_file:
+            try:
+                content = target_file.read_text(encoding='utf-8')
+                data = parse_steering_yaml(content)
+                return {
+                    'steering': data,
+                    'is_custom': True,
+                    'path': str(target_file.relative_to(root_dir)).replace('\\', '/'),
+                    'raw_yaml': dump_steering_yaml(data)
+                }
+            except Exception:
+                pass
+
+        default_data = get_default_steering(project_name)
+        return {
+            'steering': default_data,
+            'is_custom': False,
+            'path': '.omniops/steering.yaml',
+            'raw_yaml': dump_steering_yaml(default_data)
+        }
+
+    def save_project_steering(self, principal, project_id, steering_data):
+        self._cap(principal, 'chat')
+        if not isinstance(steering_data, dict):
+            raise IdentityError('Invalid steering data format; expected object', 400)
+        root_dir, project_name = self._resolve_project_root(principal, project_id)
+        omniops_dir = root_dir / '.omniops'
+        omniops_dir.mkdir(parents=True, exist_ok=True)
+        target_file = omniops_dir / 'steering.yaml'
+        steering_data['project_name'] = project_name
+        yaml_content = dump_steering_yaml(steering_data)
+        target_file.write_text(yaml_content, encoding='utf-8')
+        with self.store._lock, self.store._db() as db:
+            self.store._audit(db, principal['id'], 'project_steering_saved', f"{project_id}:.omniops/steering.yaml")
+        return {
+            'steering': steering_data,
+            'is_custom': True,
+            'path': '.omniops/steering.yaml',
+            'raw_yaml': yaml_content
+        }
+
 
 
 

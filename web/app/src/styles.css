@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./design-system/tokens.css";
 
 
 :root {
@@ -7037,6 +7038,32 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 
 .artifacts-action-btn:hover {
   background: rgba(168, 85, 247, 0.35);
+}
+
+.meta-badge.steering-badge {
+  background: rgba(0, 240, 255, 0.12);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  color: #00f0ff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.meta-badge.steering-badge:hover {
+  background: rgba(0, 240, 255, 0.22);
+  border-color: rgba(0, 240, 255, 0.6);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
+}
+
+.steering-action-btn {
+  background: rgba(0, 240, 255, 0.16);
+  border: 1px solid rgba(0, 240, 255, 0.45);
+  color: #00f0ff;
+}
+
+.steering-action-btn:hover {
+  background: rgba(0, 240, 255, 0.28);
+  border-color: rgba(0, 240, 255, 0.7);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.2);
 }
 
 /* Phase 8: Git Modal */
