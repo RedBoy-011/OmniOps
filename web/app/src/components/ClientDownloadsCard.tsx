@@ -91,8 +91,8 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
 
   const pwaLaunchUrl = originUrl ? `${originUrl}/?source=pwa_mobile` : '/?source=pwa_mobile';
   const apkDownloadUrl = originUrl
-    ? `${originUrl}/downloads/OmniOps-Coucou-v1.0.apk`
-    : '/downloads/OmniOps-Coucou-v1.0.apk';
+    ? `${originUrl}/downloads/OmniOps-Mobile.apk`
+    : '/downloads/OmniOps-Mobile.apk';
 
   const handleInstallClick = async () => {
     if (deferredPrompt) {
@@ -508,9 +508,7 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
             ) : (
               <div className="space-y-2">
                 {(() => {
-                  const coucouFile = getFile('OmniOps-Coucou-v1.0.apk');
-                  const mobileFile = getFile('OmniOps-Mobile.apk');
-                  const activeFile = coucouFile || mobileFile;
+                  const activeFile = getFile('OmniOps-Mobile.apk');
                   return (
                     <>
                       <div className="flex items-center justify-between text-[11px] pb-1">
@@ -519,7 +517,7 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
                           {activeFile?.available_locally ? '🟢 موجود در هسته سرور (دانلود مستقیم)' : '🟡 هدایت به گیت‌هاب (Fallback)'}
                         </span>
                         <span className="text-gray-400 font-mono text-[10px]">
-                          نسخه: {activeFile?.version || downloadsInfo?.version || 'v1.21.0'} {activeFile?.size_formatted ? `· ${activeFile.size_formatted}` : ''}
+                          نسخه: {activeFile?.version || downloadsInfo?.version || 'v1.22.0'} {activeFile?.size_formatted ? `· ${activeFile.size_formatted}` : ''}
                         </span>
                       </div>
 
@@ -542,35 +540,24 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
                       )}
 
                       <a
-                        href="/downloads/OmniOps-Coucou-v1.0.apk"
-                        download="OmniOps-Coucou-v1.0.apk"
+                        href="/downloads/OmniOps-Mobile.apk"
+                        download="OmniOps-Mobile.apk"
                         className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs text-center transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950"
                       >
                         <span>⬇️</span>
-                        <span>دانلود مستقیم فایل OmniOps-Coucou-v1.0.apk از هسته</span>
+                        <span>دانلود مستقیم اپلیکیشن OmniOps-Mobile.apk از هسته</span>
                       </a>
 
-                      <div className="flex gap-2">
-                        <a
-                          href="/downloads/OmniOps-Mobile.apk"
-                          download="OmniOps-Mobile.apk"
-                          className="flex-1 bg-[#1a202c] hover:bg-[#252d3d] text-gray-300 border border-[#30363d] py-2 rounded-xl text-[11px] text-center transition flex items-center justify-center gap-1.5"
-                          title="دانلود مستقیم بسته کمکی Mobile.apk از هسته"
-                        >
-                          <span>📦</span>
-                          <span>دانلود Mobile.apk از هسته</span>
-                        </a>
-                        <a
-                          href="https://github.com/RedBoy-011/OmniOps/releases/latest/download/OmniOps-Coucou-v1.0.apk"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex-1 bg-[#1a202c] hover:bg-[#252d3d] text-gray-300 border border-[#30363d] py-2 rounded-xl text-[11px] text-center transition flex items-center justify-center gap-1.5"
-                          title="دانلود پشتیبان از مخزن رسمی گیت‌هاب در صورت بروز مشکل"
-                        >
-                          <span>🔗</span>
-                          <span>دانلود پشتیبان از گیت‌هاب (Fallback)</span>
-                        </a>
-                      </div>
+                      <a
+                        href="https://github.com/RedBoy-011/OmniOps/releases/latest/download/OmniOps-Mobile.apk"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full bg-[#1a202c] hover:bg-[#252d3d] text-gray-300 border border-[#30363d] py-2 rounded-xl text-[11px] text-center transition flex items-center justify-center gap-1.5"
+                        title="دانلود پشتیبان از مخزن رسمی گیت‌هاب در صورت بروز مشکل"
+                      >
+                        <span>🔗</span>
+                        <span>دانلود پشتیبان از گیت‌هاب (Fallback)</span>
+                      </a>
                     </>
                   );
                 })()}

@@ -479,11 +479,9 @@ def try_build_gradle(repo_root: Path) -> bool:
                 built_apk = candidates[0]
                 downloads_dir = repo_root / "downloads"
                 downloads_dir.mkdir(parents=True, exist_ok=True)
-                apk_coucou = downloads_dir / "OmniOps-Coucou-v1.0.apk"
                 apk_mobile = downloads_dir / "OmniOps-Mobile.apk"
-                shutil.copy2(built_apk, apk_coucou)
                 shutil.copy2(built_apk, apk_mobile)
-                print(f"Successfully compiled real Android APK: {apk_coucou} ({apk_coucou.stat().st_size} bytes)")
+                print(f"Successfully compiled real Android APK: {apk_mobile} ({apk_mobile.stat().st_size} bytes)")
                 return True
         else:
             print(f"Gradle build returned non-zero code {res.returncode}:\n{res.stderr}")
@@ -495,14 +493,11 @@ def try_build_gradle(repo_root: Path) -> bool:
 if __name__ == "__main__":
     repo_root = Path(__file__).resolve().parent.parent
     downloads_dir = repo_root / "downloads"
-    apk_coucou = downloads_dir / "OmniOps-Coucou-v1.0.apk"
     apk_mobile = downloads_dir / "OmniOps-Mobile.apk"
 
     if try_build_gradle(repo_root):
         print("Real Android APK built successfully via Gradle.")
     else:
         print("Gradle/SDK not available in current environment; generating standalone signed APK package.")
-        build_signed_apk(apk_coucou)
-        import shutil
-        shutil.copy2(apk_coucou, apk_mobile)
-        print("Copied to OmniOps-Mobile.apk successfully.")
+        build_signed_apk(apk_mobile)
+        print(f"Generated {apk_mobile} successfully.")

@@ -272,18 +272,11 @@ CORE_ARTIFACTS = [
         "description": "نصاب مستقیم ایجنت کپسولی شناور با کلید میانبر Alt+Space برای ویندوز ۱۰ و ۱۱ بدون نیاز به پایتون",
     },
     {
-        "filename": "OmniOps-Coucou-v1.0.apk",
-        "name": "ارکستراتور سیار اندروید (Coucou Mobile Orchestrator)",
-        "platform": "android",
-        "category": "mobile",
-        "description": "بسته استاندارد اندروید با تایید بیومتریک اثر انگشت و جزیره پویا",
-    },
-    {
         "filename": "OmniOps-Mobile.apk",
-        "name": "نسخه کمکی همراه اندروید (OmniOps Mobile)",
+        "name": "اپلیکیشن همراه اندروید (OmniOps Mobile)",
         "platform": "android",
         "category": "mobile",
-        "description": "بسته نصبی همراه سازگار با انواع نسخه‌های اندروید",
+        "description": "بسته نصبی رسمی اندروید با ارکستراتور سیار، تایید بیومتریک اثر انگشت و جزیره پویا",
     },
 ]
 
@@ -371,28 +364,20 @@ def sync_release_assets(repo_root: Path | str | None = None, branch: str = "main
     elif edge_exe.is_file() and not agent_setup.is_file():
         shutil.copy2(edge_exe, agent_setup)
 
-    # 2. Sync Android APKs if build script exists or if one is present
-    coucou_apk = downloads_dir / "OmniOps-Coucou-v1.0.apk"
+    # 2. Sync Android APK if build script exists or if one is present
     mobile_apk = downloads_dir / "OmniOps-Mobile.apk"
-    if coucou_apk.is_file() and not mobile_apk.is_file():
-        shutil.copy2(coucou_apk, mobile_apk)
-        synced_files.append("OmniOps-Mobile.apk (synced from Coucou)")
-    elif mobile_apk.is_file() and not coucou_apk.is_file():
-        shutil.copy2(mobile_apk, coucou_apk)
-        synced_files.append("OmniOps-Coucou-v1.0.apk (synced from Mobile)")
-    elif not coucou_apk.is_file() and not mobile_apk.is_file():
-        # Try local generator script if available
+    if not mobile_apk.is_file():
         build_script = root / "scripts" / "build_android_apk.py"
         if build_script.is_file():
             try:
                 subprocess.run(["python", str(build_script)], cwd=str(root), capture_output=True, timeout=30)
-                if coucou_apk.is_file():
-                    synced_files.append("OmniOps-Coucou-v1.0.apk (built locally)")
+                if mobile_apk.is_file():
+                    synced_files.append("OmniOps-Mobile.apk (built locally)")
             except Exception as exc:
                 logger.debug("Local APK build attempt had error: %s", exc)
 
     # 3. Check GitHub Release assets fallback download if internet is accessible
-    for artifact in ["OmniOps-Edge-Setup.exe", "OmniOps-Coucou-v1.0.apk"]:
+    for artifact in ["OmniOps-Edge-Setup.exe", "OmniOps-Mobile.apk"]:
         dest = downloads_dir / artifact
         if not dest.is_file():
             gh_url = f"https://github.com/RedBoy-011/OmniOps/releases/latest/download/{artifact}"

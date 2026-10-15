@@ -109,19 +109,18 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-      - name: Configure local.properties and accept licenses
+      - name: Configure Android SDK local.properties
         run: |
-          echo "sdk.dir=$ANDROID_HOME" > mobile/android/local.properties
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          echo "sdk.dir=${ANDROID_HOME:-/usr/local/lib/android/sdk}" > mobile/android/local.properties
+          if [ -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin" ]; then
+            yes | "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          fi
       - name: Build Android APK with Gradle
         working-directory: mobile/android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
           mkdir -p ../../downloads
-          cp -f app/build/outputs/apk/debug/*.apk ../../downloads/OmniOps-Coucou-v1.0.apk
           cp -f app/build/outputs/apk/debug/*.apk ../../downloads/OmniOps-Mobile.apk
           ls -lh ../../downloads/
       - uses: actions/download-artifact@v7
@@ -131,7 +130,6 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets/
-          cp -f downloads/OmniOps-Coucou-v1.0.apk release-assets/
           cp -f downloads/OmniOps-Mobile.apk release-assets/
           find windows-artifacts/ -name "*-setup.exe" -exec cp -f {} release-assets/OmniOps-Edge-Setup.exe \;
           if [ -f windows-artifacts/SHA256SUMS.txt ]; then

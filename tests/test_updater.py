@@ -82,11 +82,10 @@ class TestUpdater(unittest.TestCase):
         self.assertEqual(info["status"], "ok")
         self.assertIn("version", info)
         self.assertIsInstance(info["files"], list)
-        self.assertGreaterEqual(len(info["files"]), 3)
+        self.assertGreaterEqual(len(info["files"]), 2)
 
         filenames = [f["filename"] for f in info["files"]]
         self.assertIn("OmniOps-Edge-Setup.exe", filenames)
-        self.assertIn("OmniOps-Coucou-v1.0.apk", filenames)
         self.assertIn("OmniOps-Mobile.apk", filenames)
 
         for item in info["files"]:

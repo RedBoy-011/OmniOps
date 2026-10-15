@@ -147,7 +147,7 @@ class GatewayTests(unittest.TestCase):
             self.assertIn("files", data)
             filenames = [f["filename"] for f in data["files"]]
             self.assertIn("OmniOps-Edge-Setup.exe", filenames)
-            self.assertIn("OmniOps-Coucou-v1.0.apk", filenames)
+            self.assertIn("OmniOps-Mobile.apk", filenames)
 
 
 if __name__ == "__main__":
