@@ -105,24 +105,27 @@ jobs:
         with:
           python-version: '3.12'
       - name: Set up JDK 17 for Android
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
-      - name: Configure Android SDK local.properties
+      - name: Configure Android SDK and install Platform 34
         run: |
           echo "sdk.dir=${ANDROID_HOME:-/usr/local/lib/android/sdk}" > mobile/android/local.properties
           if [ -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin" ]; then
-            yes | "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+            export PATH="${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin:$PATH"
+            yes | sdkmanager --licenses || true
+            sdkmanager "platforms;android-34" "build-tools;34.0.0" || true
           fi
-      - name: Build Android APK with Gradle
-        working-directory: mobile/android
+      - name: Install Python build tools
+        run: python -m pip install cryptography==46.0.7
+      - name: Build Android APK
+        env:
+          PYTHONPATH: .:scripts
         run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
-          mkdir -p ../../downloads
-          cp -f app/build/outputs/apk/debug/*.apk ../../downloads/OmniOps-Mobile.apk
-          ls -lh ../../downloads/
+          chmod +x mobile/android/gradlew
+          python scripts/build_android_apk.py
+          ls -lh downloads/
       - uses: actions/download-artifact@v7
         with:
           name: omniops-windows-x64-unsigned-preview

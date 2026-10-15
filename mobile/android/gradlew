@@ -6,17 +6,17 @@
 set -e
 
 APP_BASE_NAME=`basename "$0"`
-APP_HOME="`cd "\`dirname \"$0\"\`" >/dev/null 2>&1 && pwd`"
+APP_HOME="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
+
+# Prioritize running gradle wrapper jar if exists
+CLASSPATH="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+if [ -f "$CLASSPATH" ]; then
+    exec java -Xmx2048m -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
+fi
 
 # Fallback to system gradle if wrapper jar is absent
 if command -v gradle >/dev/null 2>&1; then
     exec gradle "$@"
-fi
-
-# Try running gradle wrapper jar if exists
-CLASSPATH="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
-if [ -f "$CLASSPATH" ]; then
-    exec java -Xmx2048m -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
 fi
 
 # Download gradle wrapper jar if needed
@@ -31,5 +31,5 @@ if [ -f "$CLASSPATH" ]; then
     exec java -Xmx2048m -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
 fi
 
-echo "Warning: Neither gradle nor gradle-wrapper.jar available." >&2
+echo "Warning: Neither gradle-wrapper.jar nor gradle available." >&2
 exit 1
