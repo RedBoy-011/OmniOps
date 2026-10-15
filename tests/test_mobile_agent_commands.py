@@ -172,7 +172,10 @@ class MobileAgentGatewayHttpTests(unittest.TestCase):
         from http.server import ThreadingHTTPServer
         from urllib.request import build_opener, ProxyHandler
         from omniops.server import make_server
-        from test_ollama import FakeOllama
+        try:
+            from test_ollama import FakeOllama
+        except ImportError:
+            from tests.test_ollama import FakeOllama
 
         cls.json = json
         cls.temp = tempfile.TemporaryDirectory()

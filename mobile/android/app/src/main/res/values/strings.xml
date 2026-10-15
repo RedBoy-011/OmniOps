@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OmniOps Coucou</string>
+    <string name="channel_commands_name">فرمان‌ها و تاییدیه‌ها</string>
+    <string name="channel_commands_desc">اعلان‌های مربوط به درخواست تأیید فرامین و رویدادهای بحرانی</string>
+    <string name="channel_service_name">سرویس شناور Coucou</string>
+    <string name="channel_service_desc">وضعیت برخط ایجنت و جزیره پویا</string>
+</resources>

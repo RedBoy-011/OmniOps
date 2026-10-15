@@ -11,7 +11,10 @@ from http.server import ThreadingHTTPServer
 
 from omniops.identity import IdentityStore
 from omniops.server import make_server
-from test_ollama import FakeOllama
+try:
+    from test_ollama import FakeOllama
+except ImportError:
+    from tests.test_ollama import FakeOllama
 
 
 class IdentityGatewayTests(unittest.TestCase):

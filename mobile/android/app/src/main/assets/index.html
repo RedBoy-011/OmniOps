@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>OmniOps Coucou Companion</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="mobile-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-row">
+        <span class="brand-badge">⚡</span>
+        <div>
+          <h1 class="brand-title">OmniOps Coucou</h1>
+          <span class="brand-subtitle">مرکز پایش و کنترل همراه ایجنت‌ها</span>
+        </div>
+      </div>
+      <div class="connection-status-pill" id="connPill">
+        <span class="status-dot"></span>
+        <span id="connStatusText">حالت محلی (آفلاین)</span>
+      </div>
+    </header>
+
+    <!-- Master Connection Card -->
+    <section class="card glass-card">
+      <div class="card-header">
+        <span class="card-icon">🌐</span>
+        <h2>اتصال به هسته OmniOps Master</h2>
+      </div>
+      <p class="card-desc">آدرس سرور مستر (Localhost یا IP شبکه محلی) را وارد نمایید:</p>
+      <div class="input-group">
+        <input type="text" id="serverUrlInput" placeholder="http://192.168.1.100:9000" dir="ltr">
+        <button id="btnConnect" class="btn btn-primary">اتصال و ذخیره</button>
+      </div>
+    </section>
+
+    <!-- Biometric Command Approval Gate -->
+    <section class="card glass-card">
+      <div class="card-header">
+        <span class="card-icon">🔒</span>
+        <h2>درگاه تأیید بایومتریک فرامین</h2>
+      </div>
+      <p class="card-desc">تأیید امنیتی اقدامات حساس با اثر انگشت یا شناسایی چهره:</p>
+      <div class="approval-box">
+        <div class="cmd-info">
+          <span class="badge badge-warning">دستور معلق: powershell</span>
+          <p class="cmd-text" dir="ltr">Get-Service -Name OmniOpsAgent | Restart-Service</p>
+        </div>
+        <button id="btnBiometricAuth" class="btn btn-emerald">
+          <span>👆</span>
+          <span>تأیید هویت با اثر انگشت</span>
+        </button>
+        <div id="authResult" class="auth-result"></div>
+      </div>
+    </section>
+
+    <!-- Coucou Floating Companion Island -->
+    <section class="card glass-card">
+      <div class="card-header">
+        <span class="card-icon">🛸</span>
+        <h2>جزیره شناور (Coucou Floating Island)</h2>
+      </div>
+      <p class="card-desc">نمایش ویجت شناور کپسولی ایجنت روی سایر برنامه‌های اندروید:</p>
+      <div class="toggle-row">
+        <span>فعال‌سازی سرویس شناور برخط</span>
+        <label class="switch">
+          <input type="checkbox" id="floatingToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Emergency Kill Switch -->
+    <section class="card glass-card card-danger">
+      <div class="card-header">
+        <span class="card-icon">🛑</span>
+        <h2>سوئیچ توقف اضطراری (Kill Switch)</h2>
+      </div>
+      <p class="card-desc">توقف فوری کلیه ایجنت‌ها و تسک‌های فعال در کل شبکه:</p>
+      <button id="btnKillSwitch" class="btn btn-danger">توقف فوری تمام ایجنت‌ها</button>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

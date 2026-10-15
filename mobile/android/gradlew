@@ -1,0 +1,35 @@
+#!/bin/sh
+
+# Gradle start-up script for POSIX systems
+# Compatible with Gradle wrapper
+
+set -e
+
+APP_BASE_NAME=`basename "$0"`
+APP_HOME="`cd "\`dirname \"$0\"\`" >/dev/null 2>&1 && pwd`"
+
+# Fallback to system gradle if wrapper jar is absent
+if command -v gradle >/dev/null 2>&1; then
+    exec gradle "$@"
+fi
+
+# Try running gradle wrapper jar if exists
+CLASSPATH="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+if [ -f "$CLASSPATH" ]; then
+    exec java -Xmx2048m -jar "$CLASSPATH" "$@"
+fi
+
+# Download gradle wrapper jar if needed
+WRAPPER_DIR="$APP_HOME/gradle/wrapper"
+mkdir -p "$WRAPPER_DIR"
+if command -v curl >/dev/null 2>&1; then
+    echo "Downloading gradle-wrapper.jar..."
+    curl -sLo "$CLASSPATH" https://raw.githubusercontent.com/gradle/gradle/v8.2.0/gradle/wrapper/gradle-wrapper.jar || true
+fi
+
+if [ -f "$CLASSPATH" ]; then
+    exec java -Xmx2048m -jar "$CLASSPATH" "$@"
+fi
+
+echo "Warning: Neither gradle nor gradle-wrapper.jar available." >&2
+exit 1
