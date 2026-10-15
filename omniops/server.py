@@ -347,7 +347,7 @@ def make_server(
                 return False
             from urllib.parse import urlsplit
             req_path = urlsplit(self.path).path
-            if req_path.startswith('/api/') or req_path.startswith('/downloads/'):
+            if req_path.startswith('/api/') or req_path.startswith('/downloads/') or req_path == '/health' or req_path.startswith('/v1/'):
                 return False
             base = web_dist.resolve()
             rel = "index.html" if req_path in ("/", "") else req_path.lstrip("/")
