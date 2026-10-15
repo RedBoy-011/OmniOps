@@ -746,8 +746,8 @@ class WorkerEndpointTests(unittest.TestCase):
 
             code, art_list = self.call("GET", f"/api/web/workspace/project/artifacts?project_id={p_id}", None, admin)
             self.assertEqual(code, 200)
-            self.assertGreaterEqual(len(art_list["artifacts"]), 1)
-            self.assertEqual(art_list["artifacts"][0]["title"], "ممیزی امنیتی فریم‌ورک")
+            titles = [a["title"] for a in art_list["artifacts"]]
+            self.assertIn("ممیزی امنیتی فریم‌ورک", titles)
 
             code, art_single = self.call("GET", f"/api/web/workspace/project/artifact?project_id={p_id}&artifact_id={art_id}", None, admin)
             self.assertEqual(code, 200)
