@@ -6,9 +6,12 @@ from urllib.request import Request, build_opener, ProxyHandler
 
 from omniops.server import allowed_bind_host, make_server
 try:
-    from test_ollama import FakeOllama
-except ImportError:
-    from tests.test_ollama import FakeOllama
+    from .test_ollama import FakeOllama
+except (ImportError, ValueError):
+    try:
+        from test_ollama import FakeOllama
+    except ImportError:
+        from tests.test_ollama import FakeOllama
 from http.server import ThreadingHTTPServer
 
 

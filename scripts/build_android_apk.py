@@ -377,11 +377,31 @@ def build_signed_apk(output_path: Path):
     )
 
     # Prepare files inside APK
+    # Prepare files inside APK
     files_to_pack = {
         "AndroidManifest.xml": manifest_data,
         "classes.dex": dex_data,
-        "assets/app_info.json": b'{"name":"OmniOps Coucou","version":"1.1.4","biometric":true,"dynamic_island":true}',
+        "assets/app_info.json": b'{"name":"OmniOps Coucou","version":"1.2.0","biometric":true,"dynamic_island":true,"platform":"android"}',
     }
+
+    # Include actual mobile assets (HTML, CSS, JS, design tokens)
+    repo_root = output_path.resolve().parents[1]
+    assets_dir = repo_root / "mobile" / "android" / "app" / "src" / "main" / "assets"
+    if assets_dir.is_dir():
+        for asset_file in assets_dir.rglob("*"):
+            if asset_file.is_file():
+                rel_path = "assets/" + str(asset_file.relative_to(assets_dir)).replace("\\", "/")
+                try:
+                    files_to_pack[rel_path] = asset_file.read_bytes()
+                except Exception:
+                    pass
+
+    tokens_file = repo_root / "mobile" / "tokens.json"
+    if tokens_file.is_file():
+        try:
+            files_to_pack["assets/tokens.json"] = tokens_file.read_bytes()
+        except Exception:
+            pass
 
     # Generate MANIFEST.MF
     manifest_mf = bytearray(b"Manifest-Version: 1.0\r\nCreated-By: 1.0 (OmniOps Builder)\r\n\r\n")
@@ -432,8 +452,11 @@ def try_build_gradle(repo_root: Path) -> bool:
     gradlew = android_dir / gradlew_name
 
     cmd = None
-    if gradlew.exists() and os.access(str(gradlew), os.X_OK | os.R_OK):
-        cmd = [str(gradlew), "assembleDebug", "--no-daemon"]
+    if gradlew.exists():
+        if os.name == "nt":
+            cmd = [str(gradlew), "assembleDebug", "--no-daemon"]
+        else:
+            cmd = ["bash", str(gradlew), "assembleDebug", "--no-daemon"]
     elif shutil.which("gradle"):
         cmd = ["gradle", "assembleDebug", "--no-daemon"]
 
@@ -445,8 +468,9 @@ def try_build_gradle(repo_root: Path) -> bool:
         res = subprocess.run(cmd, cwd=str(android_dir), capture_output=True, text=True)
         print(res.stdout)
         if res.returncode == 0:
-            candidates = list(android_dir.glob("app/build/outputs/apk/**/*.apk"))
+            candidates = [p for p in android_dir.glob("app/build/outputs/apk/**/*.apk") if not p.name.endswith("-androidTest.apk")]
             if candidates:
+                candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
                 built_apk = candidates[0]
                 downloads_dir = repo_root / "downloads"
                 downloads_dir.mkdir(parents=True, exist_ok=True)
