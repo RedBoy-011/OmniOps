@@ -1,42 +1,51 @@
 /* OmniOps Unified Design System - Tokens for Web, Windows Edge, and Android/PWA */
 
 :root {
-  /* Brand Colors */
-  --omni-brand-cyan: #00f0ff;
-  --omni-brand-cyan-rgb: 0, 240, 255;
-  --omni-brand-emerald: #00ffaa;
-  --omni-brand-emerald-rgb: 0, 255, 170;
-  --omni-brand-mint: #5eead4;
-  --omni-brand-gradient: linear-gradient(135deg, #00f0ff 0%, #00ffaa 100%);
-  --omni-brand-gradient-hover: linear-gradient(135deg, #38bdf8 0%, #34d399 100%);
+  /* Default Palette: Magenta Velvet (قرمز / مجنتا مخملی) */
+  --omni-palette-name: "magenta";
+  --omni-brand-primary: #f43f5e;
+  --omni-brand-primary-rgb: 244, 63, 94;
+  --omni-brand-primary-hover: #fb7185;
+  --omni-brand-accent: #d946ef;
+  --omni-brand-accent-rgb: 217, 70, 239;
+  --omni-brand-gradient: linear-gradient(135deg, #f43f5e 0%, #d946ef 100%);
+  --omni-brand-gradient-hover: linear-gradient(135deg, #fb7185 0%, #e879f9 100%);
+
+  /* Legacy aliases for backward compatibility */
+  --omni-brand-cyan: #f43f5e;
+  --omni-brand-cyan-rgb: 244, 63, 94;
+  --omni-brand-emerald: #d946ef;
+  --omni-brand-emerald-rgb: 217, 70, 239;
+  --omni-brand-mint: #f9a8d4;
+
+  /* Surfaces & Backgrounds (Default Dark Velvet) */
+  --omni-bg-app: #100b15;
+  --omni-bg-surface: rgba(28, 17, 33, 0.78);
+  --omni-bg-surface-active: rgba(45, 25, 52, 0.88);
+  --omni-border: rgba(244, 63, 94, 0.20);
+  --omni-border-hover: rgba(244, 63, 94, 0.50);
+  --omni-text-primary: #f4edf2;
+  --omni-text-secondary: #c4aab9;
+  --omni-text-muted: #8b7888;
+  --omni-glow: 0 0 30px rgba(244, 63, 94, 0.22);
 
   /* Status Colors */
   --omni-status-success: #10b981;
-  --omni-status-success-bg: rgba(16, 185, 129, 0.12);
+  --omni-status-success-bg: rgba(16, 185, 129, 0.14);
   --omni-status-warning: #f59e0b;
-  --omni-status-warning-bg: rgba(245, 158, 11, 0.12);
+  --omni-status-warning-bg: rgba(245, 158, 11, 0.14);
   --omni-status-danger: #ef4444;
-  --omni-status-danger-bg: rgba(239, 68, 68, 0.12);
+  --omni-status-danger-bg: rgba(239, 68, 68, 0.14);
   --omni-status-info: #06b6d4;
-  --omni-status-info-bg: rgba(6, 182, 212, 0.12);
+  --omni-status-info-bg: rgba(6, 182, 212, 0.14);
 
-  /* Dark Theme Surfaces (Default) */
-  --omni-bg-app: #0a0f1d;
-  --omni-bg-surface: rgba(15, 23, 42, 0.75);
-  --omni-bg-surface-active: rgba(30, 41, 59, 0.85);
-  --omni-border: rgba(255, 255, 255, 0.10);
-  --omni-border-hover: rgba(0, 240, 255, 0.35);
-  --omni-text-primary: #f8fafc;
-  --omni-text-secondary: #94a3b8;
-  --omni-text-muted: #64748b;
-
-  /* Glassmorphism Dark */
-  --omni-glass-backdrop: blur(20px) saturate(180%) contrast(105%);
-  --omni-glass-specular: inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.22);
-  --omni-glass-specular-subtle: inset 0 1px 1px 0 rgba(255, 255, 255, 0.12);
-  --omni-glass-shadow: 0 20px 50px rgba(0, 0, 0, 0.4), 0 0 30px rgba(0, 240, 255, 0.08);
-  --omni-glass-card-bg: rgba(15, 23, 42, 0.72);
-  --omni-glass-header-bg: rgba(10, 15, 29, 0.75);
+  /* Glassmorphism */
+  --omni-glass-backdrop: blur(22px) saturate(190%) contrast(105%);
+  --omni-glass-specular: inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.20);
+  --omni-glass-specular-subtle: inset 0 1px 1px 0 rgba(255, 255, 255, 0.10);
+  --omni-glass-shadow: 0 20px 50px rgba(0, 0, 0, 0.45), 0 0 30px rgba(244, 63, 94, 0.12);
+  --omni-glass-card-bg: rgba(28, 17, 33, 0.75);
+  --omni-glass-header-bg: rgba(16, 11, 21, 0.85);
 
   /* Typography & Layout */
   --omni-font-family: Vazirmatn, "Segoe UI", -apple-system, BlinkMacSystemFont, Tahoma, sans-serif;
@@ -53,24 +62,89 @@
   --omni-transition-slow: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Light Theme Overrides */
-[data-theme="light"] {
-  --omni-bg-app: #f8fafc;
-  --omni-bg-surface: rgba(255, 255, 255, 0.85);
-  --omni-bg-surface-active: rgba(241, 245, 249, 0.95);
-  --omni-border: rgba(15, 23, 42, 0.10);
-  --omni-border-hover: rgba(13, 148, 136, 0.40);
-  --omni-text-primary: #0f172a;
-  --omni-text-secondary: #475569;
-  --omni-text-muted: #94a3b8;
+/* Palette Overrides: Magenta */
+[data-theme-palette="magenta"] {
+  --omni-brand-primary: #f43f5e;
+  --omni-brand-primary-rgb: 244, 63, 94;
+  --omni-brand-primary-hover: #fb7185;
+  --omni-brand-accent: #d946ef;
+  --omni-brand-accent-rgb: 217, 70, 239;
+  --omni-brand-gradient: linear-gradient(135deg, #f43f5e 0%, #d946ef 100%);
+  --omni-brand-gradient-hover: linear-gradient(135deg, #fb7185 0%, #e879f9 100%);
+  --omni-bg-app: #100b15;
+  --omni-bg-surface: rgba(28, 17, 33, 0.78);
+  --omni-bg-surface-active: rgba(45, 25, 52, 0.88);
+  --omni-border: rgba(244, 63, 94, 0.20);
+  --omni-border-hover: rgba(244, 63, 94, 0.50);
+  --omni-glow: 0 0 30px rgba(244, 63, 94, 0.22);
+}
 
-  /* Glassmorphism Light */
-  --omni-glass-backdrop: blur(24px) saturate(190%) contrast(100%);
-  --omni-glass-specular: inset 0 1.5px 2px 0 rgba(255, 255, 255, 0.95);
-  --omni-glass-specular-subtle: inset 0 1px 1px 0 rgba(255, 255, 255, 0.8);
-  --omni-glass-shadow: 0 18px 45px rgba(15, 23, 42, 0.08), 0 0 25px rgba(13, 148, 136, 0.06);
-  --omni-glass-card-bg: rgba(255, 255, 255, 0.82);
-  --omni-glass-header-bg: rgba(255, 255, 255, 0.88);
+/* Palette Overrides: Cyber Cyan */
+[data-theme-palette="cyan"] {
+  --omni-brand-primary: #00f0ff;
+  --omni-brand-primary-rgb: 0, 240, 255;
+  --omni-brand-primary-hover: #38bdf8;
+  --omni-brand-accent: #00ffaa;
+  --omni-brand-accent-rgb: 0, 255, 170;
+  --omni-brand-gradient: linear-gradient(135deg, #00f0ff 0%, #00ffaa 100%);
+  --omni-brand-gradient-hover: linear-gradient(135deg, #38bdf8 0%, #34d399 100%);
+  --omni-bg-app: #0a0f1d;
+  --omni-bg-surface: rgba(15, 23, 42, 0.75);
+  --omni-bg-surface-active: rgba(30, 41, 59, 0.85);
+  --omni-border: rgba(0, 240, 255, 0.18);
+  --omni-border-hover: rgba(0, 240, 255, 0.45);
+  --omni-glow: 0 0 30px rgba(0, 240, 255, 0.20);
+}
+
+/* Palette Overrides: Emerald */
+[data-theme-palette="emerald"] {
+  --omni-brand-primary: #10b981;
+  --omni-brand-primary-rgb: 16, 185, 129;
+  --omni-brand-primary-hover: #34d399;
+  --omni-brand-accent: #06b6d4;
+  --omni-brand-accent-rgb: 6, 182, 212;
+  --omni-brand-gradient: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+  --omni-brand-gradient-hover: linear-gradient(135deg, #34d399 0%, #22d3ee 100%);
+  --omni-bg-app: #061510;
+  --omni-bg-surface: rgba(11, 29, 23, 0.78);
+  --omni-bg-surface-active: rgba(18, 48, 38, 0.88);
+  --omni-border: rgba(16, 185, 129, 0.20);
+  --omni-border-hover: rgba(16, 185, 129, 0.45);
+  --omni-glow: 0 0 30px rgba(16, 185, 129, 0.20);
+}
+
+/* Palette Overrides: Amber */
+[data-theme-palette="amber"] {
+  --omni-brand-primary: #f59e0b;
+  --omni-brand-primary-rgb: 245, 158, 11;
+  --omni-brand-primary-hover: #fbbf24;
+  --omni-brand-accent: #ef4444;
+  --omni-brand-accent-rgb: 239, 68, 68;
+  --omni-brand-gradient: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+  --omni-brand-gradient-hover: linear-gradient(135deg, #fbbf24 0%, #f87171 100%);
+  --omni-bg-app: #140e06;
+  --omni-bg-surface: rgba(33, 21, 9, 0.78);
+  --omni-bg-surface-active: rgba(51, 32, 14, 0.88);
+  --omni-border: rgba(245, 158, 11, 0.20);
+  --omni-border-hover: rgba(245, 158, 11, 0.45);
+  --omni-glow: 0 0 30px rgba(245, 158, 11, 0.20);
+}
+
+/* Palette Overrides: Cosmic Indigo */
+[data-theme-palette="indigo"] {
+  --omni-brand-primary: #6366f1;
+  --omni-brand-primary-rgb: 99, 102, 241;
+  --omni-brand-primary-hover: #818cf8;
+  --omni-brand-accent: #a855f7;
+  --omni-brand-accent-rgb: 168, 85, 247;
+  --omni-brand-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+  --omni-brand-gradient-hover: linear-gradient(135deg, #818cf8 0%, #c084fc 100%);
+  --omni-bg-app: #0b0c1b;
+  --omni-bg-surface: rgba(19, 21, 46, 0.78);
+  --omni-bg-surface-active: rgba(30, 34, 73, 0.88);
+  --omni-border: rgba(99, 102, 241, 0.20);
+  --omni-border-hover: rgba(99, 102, 241, 0.45);
+  --omni-glow: 0 0 30px rgba(99, 102, 241, 0.20);
 }
 
 /* Shared Utility Classes */
@@ -101,43 +175,6 @@
   -webkit-text-fill-color: transparent;
 }
 
-.omni-cost-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: var(--omni-radius-full);
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.omni-cost-badge.free {
-  background: rgba(16, 185, 129, 0.16);
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.35);
-}
-
-.omni-cost-badge.ultra-low {
-  background: rgba(6, 182, 212, 0.16);
-  color: #38bdf8;
-  border: 1px solid rgba(6, 182, 212, 0.35);
-}
-
-.omni-cost-badge.low {
-  background: rgba(168, 85, 247, 0.16);
-  color: #c084fc;
-  border: 1px solid rgba(168, 85, 247, 0.35);
-}
-
-.omni-cost-badge.standard {
-  background: rgba(245, 158, 11, 0.16);
-  color: #fbbf24;
-  border: 1px solid rgba(245, 158, 11, 0.35);
-}
-
-.omni-cost-badge.premium {
-  background: rgba(239, 68, 68, 0.16);
-  color: #f87171;
-  border: 1px solid rgba(239, 68, 68, 0.35);
+.omni-glow-effect {
+  box-shadow: var(--omni-glow);
 }
