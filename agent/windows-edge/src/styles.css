@@ -34,6 +34,47 @@
   --backdrop-blur: blur(42px) saturate(210%) contrast(106%);
 }
 
+/* Unified Theme Token Overrides for Windows Edge */
+:root, [data-theme-palette="magenta"] {
+  --bg-frame: radial-gradient(135% 100% at 12% 0%, rgba(76, 25, 45, 0.65) 0%, rgba(26, 15, 23, 0.82) 42%, rgba(16, 11, 21, 0.94) 100%);
+  --text-accent: #f43f5e;
+  --text-accent-bright: #fb7185;
+  --glass-glow-mint: rgba(244, 63, 94, 0.35);
+  --frame-shadow: 0 32px 85px -15px rgba(0, 0, 0, 0.78), 0 0 45px -5px rgba(244, 63, 94, 0.22);
+}
+
+[data-theme-palette="cyan"] {
+  --bg-frame: radial-gradient(135% 100% at 12% 0%, rgba(15, 45, 65, 0.65) 0%, rgba(10, 20, 30, 0.82) 42%, rgba(10, 15, 29, 0.94) 100%);
+  --text-accent: #00f0ff;
+  --text-accent-bright: #38bdf8;
+  --glass-glow-mint: rgba(0, 240, 255, 0.35);
+  --frame-shadow: 0 32px 85px -15px rgba(0, 0, 0, 0.78), 0 0 45px -5px rgba(0, 240, 255, 0.22);
+}
+
+[data-theme-palette="emerald"] {
+  --bg-frame: radial-gradient(135% 100% at 12% 0%, rgba(20, 65, 45, 0.65) 0%, rgba(10, 28, 20, 0.82) 42%, rgba(6, 21, 16, 0.94) 100%);
+  --text-accent: #10b981;
+  --text-accent-bright: #34d399;
+  --glass-glow-mint: rgba(16, 185, 129, 0.35);
+  --frame-shadow: 0 32px 85px -15px rgba(0, 0, 0, 0.78), 0 0 45px -5px rgba(16, 185, 129, 0.22);
+}
+
+[data-theme-palette="amber"] {
+  --bg-frame: radial-gradient(135% 100% at 12% 0%, rgba(65, 40, 15, 0.65) 0%, rgba(30, 20, 10, 0.82) 42%, rgba(20, 14, 6, 0.94) 100%);
+  --text-accent: #f59e0b;
+  --text-accent-bright: #fbbf24;
+  --glass-glow-mint: rgba(245, 158, 11, 0.35);
+  --frame-shadow: 0 32px 85px -15px rgba(0, 0, 0, 0.78), 0 0 45px -5px rgba(245, 158, 11, 0.22);
+}
+
+[data-theme-palette="indigo"] {
+  --bg-frame: radial-gradient(135% 100% at 12% 0%, rgba(45, 30, 75, 0.65) 0%, rgba(20, 15, 40, 0.82) 42%, rgba(11, 12, 27, 0.94) 100%);
+  --text-accent: #6366f1;
+  --text-accent-bright: #818cf8;
+  --glass-glow-mint: rgba(99, 102, 241, 0.35);
+  --frame-shadow: 0 32px 85px -15px rgba(0, 0, 0, 0.78), 0 0 45px -5px rgba(99, 102, 241, 0.22);
+}
+
 [data-theme="light"] {
   color: #020617;
   /* True Glassmorphism (Crisp Luminous Acrylic & Mica) Variables - Light Theme */

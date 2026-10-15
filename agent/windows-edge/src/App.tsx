@@ -6,6 +6,12 @@ import { AnimatePresence, motion } from "motion/react";
 import { AgentTasks } from "./AgentTasks";
 import { CustomizationsPanel } from "./CustomizationsPanel";
 import { AgentTools } from "./AgentTools";
+import {
+  applyThemePalette,
+  getActiveThemePalette,
+  OMNI_PALETTES,
+  type OmniThemePalette,
+} from "./design-system/tokens";
 
 type AgentProfile = { id: string; username: string; role: string; status: string; capabilities: string[] };
 type AgentStatus = { connected: boolean; profile: AgentProfile | null };
@@ -58,7 +64,34 @@ export default function App() {
     }
     return "dark";
   });
+  const [palette, setPalette] = useState<OmniThemePalette>(() => getActiveThemePalette());
   const [alwaysOnTop, setAlwaysOnTop] = useState(false);
+
+  useEffect(() => {
+    applyThemePalette(palette);
+  }, [palette]);
+
+  // Sync palette from master server
+  useEffect(() => {
+    const srv = masterUrl.trim() || "http://127.0.0.1:8000";
+    fetch(`${srv.replace(/\/+$/, "")}/api/theme`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.active_palette && data.active_palette in OMNI_PALETTES) {
+          setPalette(data.active_palette as OmniThemePalette);
+          applyThemePalette(data.active_palette);
+        }
+      })
+      .catch(() => undefined);
+  }, [masterUrl, phase]);
+
+  const cyclePalette = () => {
+    const keys: OmniThemePalette[] = ["magenta", "cyan", "emerald", "amber", "indigo"];
+    const idx = keys.indexOf(palette);
+    const next = keys[(idx + 1) % keys.length];
+    setPalette(next);
+    applyThemePalette(next);
+  };
 
   const toggleTheme = () => {
     document.documentElement.classList.add("theme-transitioning");
@@ -405,6 +438,18 @@ export default function App() {
           </div>
           <div className="compact-actions" onMouseDown={(e) => e.stopPropagation()}>
             <button
+              className="compact-sm-btn"
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                cyclePalette();
+              }}
+              title={`طیف رنگ سیستم: ${OMNI_PALETTES[palette]?.name || palette} (کلیک جهت تغییر)`}
+              aria-label="تغییر طیف رنگ"
+            >
+              🎨
+            </button>
+            <button
               className={`compact-sm-btn ${alwaysOnTop ? "pinned" : ""}`}
               type="button"
               onClick={(event) => {
@@ -444,7 +489,48 @@ export default function App() {
           </div>
         </div>
       ) : <>
-      <div className="agent-header" data-tauri-drag-region><div className="agent-heading" data-tauri-drag-region><div className="agent-orb" data-tauri-drag-region aria-hidden="true">✦</div><span data-tauri-drag-region><strong data-tauri-drag-region>OmniOps</strong><small data-tauri-drag-region>بازوی امن ویندوز</small></span></div><div className="agent-window-controls"><span className={`state-dot ${phase === "chat" ? "on" : ""}`} aria-label={phase === "chat" ? "متصل" : "قفل"} /><button className={`agent-close agent-pin-btn ${alwaysOnTop ? "pinned" : ""}`} type="button" title={alwaysOnTop ? "حذف سنجاق (بازگشت به ترتیب استاندارد پنجره‌های ویندوز)" : "سنجاق کردن پنجره روی همهٔ پنجره‌ها (Always on Top)"} aria-label="تغییر وضعیت سنجاق پنجره" disabled={!isTauri()} onClick={() => void toggleAlwaysOnTop()}>📌</button><button className="agent-close agent-theme-btn" type="button" title={theme === "dark" ? "تغییر به تم روشن شیشه‌ای (Light Mica)" : "تغییر به تم تیره نئونی (Dark Acrylic)"} aria-label="تغییر تم ظاهری" onClick={toggleTheme}>{theme === "dark" ? "☀️" : "🌙"}</button><button className="agent-close" type="button" title="پنهان کردن کنار ساعت" aria-label="پنهان کردن کنار ساعت" disabled={!isTauri()} onClick={() => void hideToTray()}>−</button><button className="agent-close" type="button" title="انتخاب پنهان‌کردن یا خروج کامل" aria-label="انتخاب پنهان‌کردن یا خروج کامل" disabled={!isTauri()} onClick={requestExit}>×</button></div></div>
+      <div className="agent-header" data-tauri-drag-region>
+        <div className="agent-heading" data-tauri-drag-region>
+          <div className="agent-orb" data-tauri-drag-region aria-hidden="true">✦</div>
+          <span data-tauri-drag-region>
+            <strong data-tauri-drag-region>OmniOps</strong>
+            <small data-tauri-drag-region>مرکز عملیات و ایجنت ویندوز</small>
+          </span>
+        </div>
+        <div className="agent-window-controls">
+          <span className={`state-dot ${phase === "chat" ? "on" : ""}`} aria-label={phase === "chat" ? "متصل" : "قفل"} />
+          <button
+            className="agent-close agent-palette-btn"
+            type="button"
+            title={`طیف رنگ سیستم: ${OMNI_PALETTES[palette]?.name || palette} (کلیک جهت تغییر)`}
+            aria-label="تغییر طیف رنگ مشترک"
+            onClick={cyclePalette}
+          >
+            🎨
+          </button>
+          <button
+            className={`agent-close agent-pin-btn ${alwaysOnTop ? "pinned" : ""}`}
+            type="button"
+            title={alwaysOnTop ? "حذف سنجاق (بازگشت به ترتیب استاندارد پنجره‌های ویندوز)" : "سنجاق کردن پنجره روی همهٔ پنجره‌ها (Always on Top)"}
+            aria-label="تغییر وضعیت سنجاق پنجره"
+            disabled={!isTauri()}
+            onClick={() => void toggleAlwaysOnTop()}
+          >
+            📌
+          </button>
+          <button
+            className="agent-close agent-theme-btn"
+            type="button"
+            title={theme === "dark" ? "تغییر به تم روشن شیشه‌ای (Light Mica)" : "تغییر به تم تیره نئونی (Dark Acrylic)"}
+            aria-label="تغییر تم ظاهری"
+            onClick={toggleTheme}
+          >
+            {theme === "dark" ? "☀️" : "🌙"}
+          </button>
+          <button className="agent-close" type="button" title="پنهان کردن کنار ساعت" aria-label="پنهان کردن کنار ساعت" disabled={!isTauri()} onClick={() => void hideToTray()}>−</button>
+          <button className="agent-close" type="button" title="انتخاب پنهان‌کردن یا خروج کامل" aria-label="انتخاب پنهان‌کردن یا خروج کامل" disabled={!isTauri()} onClick={requestExit}>×</button>
+        </div>
+      </div>
       <AnimatePresence mode="wait">
         {phase === "locked" || phase === "verifying" ? (
           <motion.section key="pin" className="pair-view" initial={{ opacity: 0, scale: .97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: .95 }} transition={{ duration: .25 }}>
@@ -474,11 +560,73 @@ export default function App() {
         ) : (
           <motion.section key="chat" className="chat-view" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .3 }}>
             <div className="session-line"><div><strong>{profile?.username}</strong><small>{profile?.capabilities.includes("chat") ? "گفت‌وگو فعال" : "پروفایل بدون دسترسی چت"}</small></div><button className="logout-button" onClick={() => void disconnect()}>خروج و قطع ارتباط</button></div>
-            <nav className="agent-tabs" aria-label="بخش‌های ایجنت"><button className={pane === "overview" ? "selected" : ""} onClick={() => setPane("overview")} aria-current={pane === "overview" ? "page" : undefined}>نمای کلی</button><button className={pane === "chat" ? "selected" : ""} onClick={() => setPane("chat")} aria-current={pane === "chat" ? "page" : undefined}>گفت‌وگو</button><button className={pane === "task" ? "selected" : ""} onClick={() => setPane("task")} aria-current={pane === "task" ? "page" : undefined}>وظیفه</button><button className={pane === "tools" ? "selected" : ""} onClick={() => setPane("tools")} aria-current={pane === "tools" ? "page" : undefined}>ابزارها 🛠️</button><button className={pane === "customizations" ? "selected" : ""} onClick={() => setPane("customizations")} aria-current={pane === "customizations" ? "page" : undefined}>سفارشی‌سازی‌ها 📦</button><button className="compact-action" onClick={() => setCompact(true)} aria-label="جمع کردن ایجنت">جمع کردن ↑</button></nav>
-            {pane === "overview" ? <div className="overview-space"><div className="overview-symbol" aria-hidden="true">✦</div><h1>ایجنت آمادهٔ همکاری است</h1><p>نشست {profile?.username} برقرار است. پنجره را جمع کنید یا کنار ساعت پنهان کنید؛ ارتباط در حافظهٔ برنامه می‌ماند.</p><div className="overview-grid"><div className="overview-card"><span className="overview-led" />هستهٔ مرکزی<strong>متصل</strong></div><div className="overview-card" style={{ cursor: "pointer" }} onClick={() => setPane("tools")}><span className="overview-led" />ابزارهای ویندوز<strong>فعال و آماده 🛠️</strong></div></div><div style={{ display: "flex", gap: "10px", marginTop: "12px" }}><button className="overview-chat" onClick={() => setPane("tools")}>باز کردن ابزارها 🛠️</button><button className="overview-chat" onClick={() => setPane("chat")} disabled={!profile?.capabilities.includes("chat")}>رفتن به گفت‌وگو ←</button></div></div> : pane === "task" ? <AgentTasks canRequest={Boolean(profile?.capabilities.includes("action.request"))} /> : pane === "tools" ? <AgentTools onSendToChat={(text) => { setPrompt(text); setPane("chat"); }} masterUrl={masterUrl} profile={profile} /> : pane === "customizations" ? <CustomizationsPanel onSelectSkill={() => setPane("chat")} /> : <><div className="model-row"><label htmlFor="agent-model">مدل</label><select id="agent-model" dir="ltr" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} disabled={sending || !profile?.capabilities.includes("chat")}><option value="auto">هوشمند محلی (مدل مناسب گفت‌وگو)</option>{models.map((model) => <option key={model} value={model}>{model}</option>)}</select><button type="button" onClick={() => { void invoke<ModelList>("list_agent_models").then((result) => { setModels(result.models); setSelectedModel((current) => current === "auto" || result.models.includes(current) ? current : "auto"); setModelError(result.models.length ? "" : "مدل محلی نصب نشده است."); }).catch(() => setModelError("فهرست مدل‌ها در دسترس نیست.")); }} aria-label="به‌روزرسانی فهرست مدل‌ها">↻</button></div>{modelError && <p className="model-error">{modelError}</p>}
+            <nav className="agent-tabs" aria-label="بخش‌های ایجنت">
+              <button className={pane === "overview" ? "selected" : ""} onClick={() => setPane("overview")} aria-current={pane === "overview" ? "page" : undefined}>نمای کلی</button>
+              <button className={pane === "chat" ? "selected" : ""} onClick={() => setPane("chat")} aria-current={pane === "chat" ? "page" : undefined}>گفت‌وگو</button>
+              <button className={pane === "task" ? "selected" : ""} onClick={() => setPane("task")} aria-current={pane === "task" ? "page" : undefined}>پروژه‌ها و وظایف 🚀</button>
+              <button className={pane === "tools" ? "selected" : ""} onClick={() => setPane("tools")} aria-current={pane === "tools" ? "page" : undefined}>ابزارها 🛠️</button>
+              <button className={pane === "customizations" ? "selected" : ""} onClick={() => setPane("customizations")} aria-current={pane === "customizations" ? "page" : undefined}>مهارت‌ها 📦</button>
+              <button className="compact-action" onClick={() => setCompact(true)} aria-label="جمع کردن ایجنت">جمع کردن ↑</button>
+            </nav>
+            {pane === "overview" ? (
+              <div className="overview-space">
+                <div className="overview-symbol" aria-hidden="true">✦</div>
+                <h1>محیط کار عملیاتی ویندوز (Windows Edge Workspace)</h1>
+                <p>مرکز اجرای پروژه‌ها و فرمان‌های محلی سیستم. اتصال برقرار است و ایجنت در حالت آماده‌به‌کار قرار دارد.</p>
+                <div className="overview-grid">
+                  <div className="overview-card">
+                    <span className="overview-led" />
+                    هستهٔ مرکزی
+                    <strong>{masterUrl ? "متصل به هسته" : "آمادهٔ اتصال"}</strong>
+                  </div>
+                  <div className="overview-card" style={{ cursor: "pointer" }} onClick={() => setPane("task")}>
+                    <span className="overview-led" />
+                    پروژه‌ها و فرآیندها
+                    <strong>محیط کار فعال 🚀</strong>
+                  </div>
+                  <div className="overview-card" style={{ cursor: "pointer" }} onClick={() => setPane("tools")}>
+                    <span className="overview-led" />
+                    ابزارهای بومی ویندوز
+                    <strong>PowerShell & System 🛠️</strong>
+                  </div>
+                  <div className="overview-card" style={{ cursor: "pointer" }} onClick={cyclePalette}>
+                    <span className="overview-led" />
+                    طیف رنگی واحد
+                    <strong>{OMNI_PALETTES[palette]?.name || palette} 🎨</strong>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "10px", marginTop: "12px", flexWrap: "wrap" }}>
+                  <button className="overview-chat" onClick={() => setPane("task")}>
+                    🚀 ورود به پروژه‌ها و وظایف
+                  </button>
+                  <button className="overview-chat" onClick={() => setPane("tools")}>
+                    🛠️ ابزارهای ویندوز
+                  </button>
+                  <button className="overview-chat" onClick={() => setPane("chat")} disabled={!profile?.capabilities.includes("chat")}>
+                    💬 گفت‌وگو با هوش مصنوعی ←
+                  </button>
+                </div>
+              </div>
+            ) : pane === "task" ? (
+              <AgentTasks canRequest={Boolean(profile?.capabilities.includes("action.request"))} />
+            ) : pane === "tools" ? (
+              <AgentTools onSendToChat={(text) => { setPrompt(text); setPane("chat"); }} masterUrl={masterUrl} profile={profile} />
+            ) : pane === "customizations" ? (
+              <CustomizationsPanel onSelectSkill={() => setPane("chat")} />
+            ) : (
+              <>
+                <div className="model-row">
+                  <label htmlFor="agent-model">مدل</label>
+                  <select id="agent-model" dir="ltr" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} disabled={sending || !profile?.capabilities.includes("chat")}>
+                    <option value="auto">هوشمند محلی (مدل مناسب گفت‌وگو)</option>
+                    {models.map((model) => <option key={model} value={model}>{model}</option>)}
+                  </select>
+                  <button type="button" onClick={() => { void invoke<ModelList>("list_agent_models").then((result) => { setModels(result.models); setSelectedModel((current) => current === "auto" || result.models.includes(current) ? current : "auto"); setModelError(result.models.length ? "" : "مدل محلی نصب نشده است."); }).catch(() => setModelError("فهرست مدل‌ها در دسترس نیست.")); }} aria-label="به‌روزرسانی فهرست مدل‌ها">↻</button>
+                </div>
+                {modelError && <p className="model-error">{modelError}</p>}
             <div className="agent-memory-controls"><label><input type="checkbox" checked={saveHistory} onChange={event => setSaveHistory(event.target.checked)} /> ذخیرهٔ گفتگوهای بعدی</label><button type="button" disabled={memoryBusy || !profile?.capabilities.includes("chat")} onClick={() => void showMemory()}>{memoryOpen ? "بستن حافظه" : "حافظهٔ من"}</button><button type="button" disabled={memoryBusy || !profile?.capabilities.includes("chat")} onClick={() => void loadHistory()}>تاریخچه</button><button type="button" disabled={memoryBusy || !profile?.capabilities.includes("chat")} onClick={() => void clearHistory()}>پاک‌کردن</button></div>
             {memoryOpen && <section className="agent-memory-panel" aria-label="یادداشت‌های شخصی"><small>یادداشت‌ها فقط در حساب شما هستند و فعلاً به مدل فرستاده نمی‌شوند.</small><form onSubmit={(event) => void addMemory(event)}><input aria-label="یادداشت شخصی" value={memoryDraft} maxLength={500} onChange={event => setMemoryDraft(event.target.value)} placeholder="یک نکته برای پروفایل خود…" /><button disabled={memoryBusy || !memoryDraft.trim()} type="submit">ثبت</button></form><div className="agent-memory-list">{memoryNotes.map(note => <div key={note.id}><span>{note.content}</span><button type="button" disabled={memoryBusy} onClick={() => void removeMemory(note.id)} aria-label="حذف یادداشت">حذف</button></div>)}</div></section>}
-            <div className="chat-lines" aria-live="polite">{lines.length === 0 && <p className="empty-chat">با هسته گفتگو کنید.<br />برای پاسخ هوشمند، یک مدل Ollama باید روی سرور فعال باشد.</p>}{lines.map((line, index) => <div key={index} className={`chat-bubble ${line.sender}`}><p>{line.text}</p>{line.model && <small dir="ltr">{line.model}</small>}</div>)}</div><form className="chat-composer" onSubmit={send}><input aria-label="پیام" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="پیام خود را بنویسید…" disabled={!profile?.capabilities.includes("chat") || sending} /><button disabled={sending || !profile?.capabilities.includes("chat")}>{sending ? "…" : "↵"}</button></form></>}
+            <div className="chat-lines" aria-live="polite">{lines.length === 0 && <p className="empty-chat">با هسته گفتگو کنید.<br />برای پاسخ هوشمند، یک مدل Ollama باید روی سرور فعال باشد.</p>}{lines.map((line, index) => <div key={index} className={`chat-bubble ${line.sender}`}><p>{line.text}</p>{line.model && <small dir="ltr">{line.model}</small>}</div>)}</div><form className="chat-composer" onSubmit={send}><input aria-label="پیام" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="پیام خود را بنویسید…" disabled={!profile?.capabilities.includes("chat") || sending} /><button disabled={sending || !profile?.capabilities.includes("chat")}>{sending ? "…" : "↵"}</button></form></>)}
             {error && <p className="agent-error" role="alert">{error}</p>}
           </motion.section>
         )}
