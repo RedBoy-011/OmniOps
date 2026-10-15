@@ -215,13 +215,17 @@ class MobileAgentGatewayHttpTests(unittest.TestCase):
 
     def _call(self, method, path, payload=None, token=None):
         from urllib.request import Request
+        from urllib.error import HTTPError
         data = None if payload is None else self.json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         req = Request(self.root + path, data=data, headers=headers, method=method)
-        with self.opener.open(req, timeout=10) as resp:
-            return resp.status, self.json.load(resp)
+        try:
+            with self.opener.open(req, timeout=10) as resp:
+                return resp.status, self.json.load(resp)
+        except HTTPError as exc:
+            return exc.code, self.json.loads(exc.read().decode("utf-8"))
 
     def test_http_mobile_command_dispatch_approval_and_execution_lifecycle(self):
         """End-to-end HTTP validation: Mobile app dispatches to Master, operator approves, Windows Agent executes and reports."""
@@ -306,6 +310,32 @@ class MobileAgentGatewayHttpTests(unittest.TestCase):
         self.assertEqual(len(matched), 1)
         self.assertEqual(matched[0]["status"], "completed")
         self.assertIn("24H2 Enterprise", matched[0]["output"])
+
+    def test_mobile_status_and_projects_api(self):
+        """Validates agent status detection, mobile status API, and mobile projects listing/steering."""
+        status, login_res = self._call("POST", "/api/auth/login", {"username": "admin", "password": "a very strong admin password"})
+        self.assertEqual(status, 200)
+        web_token = login_res["token"]
+
+        # Check mobile status endpoint
+        status, status_res = self._call("GET", "/api/mobile/status", token=web_token)
+        self.assertEqual(status, 200)
+        self.assertIn("agent_state", status_res)
+        self.assertIn(status_res["agent_state"], ("available", "busy", "inactive"))
+        self.assertIn("agent_state_label", status_res)
+        self.assertIn("agent_online", status_res)
+
+        # Check mobile projects endpoint
+        status, projects_res = self._call("GET", "/api/mobile/projects", token=web_token)
+        self.assertEqual(status, 200)
+        self.assertIn("agent_state", projects_res)
+        self.assertIn("projects", projects_res)
+        self.assertIn("runs", projects_res)
+
+        # Steer without run_id should fail with 400
+        status, steer_fail = self._call("POST", "/api/mobile/projects/steer", {"action": "continue"}, token=web_token)
+        self.assertEqual(status, 400)
+        self.assertIn("run_id is required", steer_fail["error"]["message"])
 
 
 if __name__ == "__main__":

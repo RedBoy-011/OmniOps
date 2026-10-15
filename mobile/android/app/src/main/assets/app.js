@@ -11,6 +11,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const connPill = document.getElementById("connPill");
   const connDot = document.getElementById("connDot");
   const connStatusText = document.getElementById("connStatusText");
+  const btnMobileTheme = document.getElementById("btnMobileTheme");
+  const agentOfflineBanner = document.getElementById("agentOfflineBanner");
+
+  // Projects Section Elements (Phase 7)
+  const activeProjectsCountBadge = document.getElementById("activeProjectsCountBadge");
+  const activeProjectsContainer = document.getElementById("activeProjectsContainer");
 
   // Auth Elements
   const serverUrlInput = document.getElementById("serverUrlInput");
@@ -67,9 +73,63 @@ document.addEventListener("DOMContentLoaded", () => {
   let pollingInterval = null;
   let pinTimerInterval = null;
   let activePendingApprovalId = null;
+  const AVAILABLE_PALETTES = ["magenta", "cyan", "emerald", "amber", "indigo"];
+  let currentPalette = "magenta";
+  let currentAgentState = "inactive";
+
+  // Theme Management (Phase 1, 2, 8)
+  function applyThemePalette(palette) {
+    if (!palette || !AVAILABLE_PALETTES.includes(palette)) palette = "magenta";
+    currentPalette = palette;
+    document.documentElement.setAttribute("data-theme-palette", palette);
+    try {
+      localStorage.setItem("omniops_theme_palette", palette);
+    } catch (e) {}
+  }
+
+  try {
+    const savedPalette = localStorage.getItem("omniops_theme_palette");
+    if (savedPalette && AVAILABLE_PALETTES.includes(savedPalette)) {
+      applyThemePalette(savedPalette);
+    }
+  } catch (e) {}
+
+  async function syncServerTheme() {
+    try {
+      const res = await fetch(`${currentServerUrl}/api/theme`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.palette && AVAILABLE_PALETTES.includes(data.palette)) {
+          applyThemePalette(data.palette);
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (btnMobileTheme) {
+    btnMobileTheme.addEventListener("click", () => {
+      const idx = AVAILABLE_PALETTES.indexOf(currentPalette);
+      const nextPalette = AVAILABLE_PALETTES[(idx + 1) % AVAILABLE_PALETTES.length];
+      applyThemePalette(nextPalette);
+      if (window.OmniOpsBridge && typeof window.OmniOpsBridge.vibrateDevice === "function") {
+        window.OmniOpsBridge.vibrateDevice(35);
+      }
+      if (currentToken) {
+        fetch(`${currentServerUrl}/api/admin/theme`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${currentToken}`,
+          },
+          body: JSON.stringify({ palette: nextPalette }),
+        }).catch(() => {});
+      }
+    });
+  }
 
   // Initialize from Bridge / LocalStorage
   loadInitialSession();
+  syncServerTheme();
 
   function loadInitialSession() {
     let saved = null;
@@ -317,12 +377,20 @@ document.addEventListener("DOMContentLoaded", () => {
     pollingInterval = null;
   }
 
+  function setLocalControlsDisabled(disabled) {
+    if (btnDispatchCustom) btnDispatchCustom.disabled = disabled;
+    document.querySelectorAll(".quick-action-tile").forEach((tile) => {
+      if (disabled) tile.classList.add("offline-locked");
+      else tile.classList.remove("offline-locked");
+    });
+  }
+
   async function refreshAllData() {
     if (!currentToken) return;
     const startTime = performance.now();
 
     try {
-      // 1. Fetch Status
+      // 1. Fetch Status with explicit agent liveness
       const statusRes = await fetch(`${currentServerUrl}/api/mobile/status`, {
         headers: { Authorization: `Bearer ${currentToken}` },
       });
@@ -338,15 +406,47 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const sData = await statusRes.json();
         targetNodeName.innerText = sData.node_name || "LOUIS-PC";
-        nodeStatusPill.innerText = `🟢 ${sData.status === "online" ? "برخط (Online)" : sData.status}`;
+        currentAgentState = sData.agent_state || (sData.status === "online" ? "available" : "inactive");
+
+        if (currentAgentState === "available") {
+          nodeStatusPill.className = "status-badge-available";
+          nodeStatusPill.innerText = "🟢 در دسترس (Available)";
+          if (agentOfflineBanner) agentOfflineBanner.style.display = "none";
+          setLocalControlsDisabled(false);
+        } else if (currentAgentState === "busy") {
+          nodeStatusPill.className = "status-badge-busy";
+          nodeStatusPill.innerText = "🟡 مشغول (Busy)";
+          if (agentOfflineBanner) agentOfflineBanner.style.display = "none";
+          setLocalControlsDisabled(false);
+        } else {
+          nodeStatusPill.className = "status-badge-inactive";
+          nodeStatusPill.innerText = "🔴 غیرفعال (Offline)";
+          if (agentOfflineBanner) agentOfflineBanner.style.display = "flex";
+          setLocalControlsDisabled(true);
+        }
+
         if (sData.plan_usage) {
           quotaInfo.innerText = `${sData.plan_usage.remaining || "۳۶۰,۰۰۰"} باقیمانده`;
         }
       } else {
         updateConnectionStatus("offline", "خطای ارتباط");
+        currentAgentState = "inactive";
+        if (agentOfflineBanner) agentOfflineBanner.style.display = "flex";
+        setLocalControlsDisabled(true);
       }
 
-      // 2. Fetch Pending Approvals
+      // 2. Fetch Active Projects & Runs (Phase 7)
+      try {
+        const projRes = await fetch(`${currentServerUrl}/api/mobile/projects`, {
+          headers: { Authorization: `Bearer ${currentToken}` },
+        });
+        if (projRes.ok) {
+          const pData = await projRes.json();
+          renderActiveProjects(pData.runs || [], currentAgentState);
+        }
+      } catch (pe) {}
+
+      // 3. Fetch Pending Approvals
       const appRes = await fetch(`${currentServerUrl}/api/mobile/approvals/pending`, {
         headers: { Authorization: `Bearer ${currentToken}` },
       });
@@ -355,7 +455,7 @@ document.addEventListener("DOMContentLoaded", () => {
         renderApprovals(aData.requests || []);
       }
 
-      // 3. Fetch Command History
+      // 4. Fetch Command History
       const cmdRes = await fetch(`${currentServerUrl}/api/mobile/commands/history?limit=25`, {
         headers: { Authorization: `Bearer ${currentToken}` },
       });
@@ -365,6 +465,140 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     } catch (e) {
       updateConnectionStatus("offline", "قطع ارتباط");
+      currentAgentState = "inactive";
+      if (agentOfflineBanner) agentOfflineBanner.style.display = "flex";
+      setLocalControlsDisabled(true);
+    }
+  }
+
+  // Active Projects Rendering & Steering (Phase 7)
+  function renderActiveProjects(runs, agentState) {
+    if (!activeProjectsContainer) return;
+
+    if (agentState === "inactive") {
+      if (activeProjectsCountBadge) {
+        activeProjectsCountBadge.innerText = "ایجنت آفلاین";
+        activeProjectsCountBadge.className = "badge badge-danger";
+      }
+      activeProjectsContainer.innerHTML = `
+        <div class="empty-state">
+          <span>⚠️</span>
+          <p style="color:#f87171; font-weight:700;">ایجنت ویندوز غیرفعال است</p>
+          <p style="font-size:11px; color:#fca5a5;">مشاهده و هدایت پروژه‌ها و فرآیندهای ویندوز فقط هنگام آنلاین بودن ایجنت امکان‌پذیر است.</p>
+        </div>
+      `;
+      return;
+    }
+
+    const activeRuns = (runs || []).filter((r) =>
+      ["in_progress", "planning", "paused_debug", "waiting_approval"].includes(r.status)
+    );
+
+    if (activeProjectsCountBadge) {
+      activeProjectsCountBadge.innerText = `${activeRuns.length} در حال اجرا`;
+      activeProjectsCountBadge.className = activeRuns.length > 0 ? "badge badge-cyan" : "badge";
+    }
+
+    if (activeRuns.length === 0) {
+      activeProjectsContainer.innerHTML = `
+        <div class="empty-state">
+          <span>✨</span>
+          <p>در حال حاضر هیچ فرآیند فعال یا در انتظاری در ایجنت ویندوز وجود ندارد.</p>
+        </div>
+      `;
+      return;
+    }
+
+    activeProjectsContainer.innerHTML = activeRuns
+      .map((run) => {
+        const pName = escapeHtml(run.project_name || "پروژه ویندوز");
+        const prompt = escapeHtml(run.prompt || "فرآیند خودکار ایجنت");
+        const step =
+          run.current_step_index !== undefined ? `گام ${run.current_step_index + 1}` : "در حال پردازش";
+        const statusBadge =
+          run.status === "paused_debug"
+            ? '<span class="badge badge-warning">متوقف موقت</span>'
+            : '<span class="badge badge-cyan">در حال پردازش</span>';
+
+        return `
+          <div class="project-run-card" data-run-id="${run.id}">
+            <div class="run-card-header">
+              <span class="run-card-title">🚀 ${pName}</span>
+              <div style="display:flex; gap:6px; align-items:center;">
+                ${statusBadge}
+                <span class="run-card-step-badge">${step}</span>
+              </div>
+            </div>
+            <p class="run-prompt-preview">${prompt}</p>
+            <div class="run-actions-bar">
+              <button class="btn-steer btn-steer-continue" data-id="${run.id}" title="ادامه گام پروژه">
+                <span>▶️</span><span>ادامه گام</span>
+              </button>
+              <button class="btn-steer btn-steer-pause" data-id="${run.id}" title="توقف موقت">
+                <span>⏸️</span><span>مکث</span>
+              </button>
+              <button class="btn-steer btn-steer-guidance" data-id="${run.id}" title="ارسال هدایت و بازخورد">
+                <span>💬</span><span>هدایت</span>
+              </button>
+              <button class="btn-steer btn-steer-stop" data-id="${run.id}" title="توقف کامل">
+                <span>🛑</span><span>توقف</span>
+              </button>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    activeProjectsContainer.querySelectorAll(".btn-steer-continue").forEach((btn) => {
+      btn.addEventListener("click", () => steerProjectRun(btn.getAttribute("data-id"), "continue"));
+    });
+    activeProjectsContainer.querySelectorAll(".btn-steer-pause").forEach((btn) => {
+      btn.addEventListener("click", () => steerProjectRun(btn.getAttribute("data-id"), "pause"));
+    });
+    activeProjectsContainer.querySelectorAll(".btn-steer-stop").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (confirm("آیا از توقف اضطراری این فرآیند اطمینان دارید؟")) {
+          steerProjectRun(btn.getAttribute("data-id"), "stop");
+        }
+      });
+    });
+    activeProjectsContainer.querySelectorAll(".btn-steer-guidance").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const msg = prompt("دستور هدایت عملیاتی یا بازخورد برای ادامه فرآیند را وارد کنید:");
+        if (msg && msg.trim()) {
+          steerProjectRun(btn.getAttribute("data-id"), "guidance", msg.trim());
+        }
+      });
+    });
+  }
+
+  async function steerProjectRun(runId, action, guidance = "") {
+    if (currentAgentState === "inactive") {
+      alert("ایجنت ویندوز غیرفعال است. امکان هدایت فرآیندها وجود ندارد.");
+      return;
+    }
+    try {
+      const res = await fetch(`${currentServerUrl}/api/mobile/projects/steer`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${currentToken}`,
+        },
+        body: JSON.stringify({ run_id: runId, action, guidance }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error?.message || "خطا در ارسال دستور هدایت فرآیند.");
+      }
+      if (window.OmniOpsBridge && typeof window.OmniOpsBridge.showToast === "function") {
+        window.OmniOpsBridge.showToast("فرمان هدایت به ایجنت ویندوز منتقل گردید.");
+      }
+      if (window.OmniOpsBridge && typeof window.OmniOpsBridge.vibrateDevice === "function") {
+        window.OmniOpsBridge.vibrateDevice(50);
+      }
+      refreshAllData();
+    } catch (err) {
+      alert(err.message);
     }
   }
 
@@ -553,6 +787,10 @@ document.addEventListener("DOMContentLoaded", () => {
   // 6. Quick Action Tiles
   document.querySelectorAll(".quick-action-tile").forEach((tile) => {
     tile.addEventListener("click", () => {
+      if (currentAgentState === "inactive") {
+        alert("ایجنت ویندوز غیرفعال است. اجرای فرامین لوکال فقط هنگام آنلاین بودن ایجنت ویندوز امکان‌پذیر است.");
+        return;
+      }
       const cmd = tile.getAttribute("data-cmd");
       const desc = tile.getAttribute("data-desc");
       const risk = tile.getAttribute("data-risk") || "low";
@@ -562,6 +800,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 7. Custom Command Dispatch
   btnDispatchCustom.addEventListener("click", () => {
+    if (currentAgentState === "inactive") {
+      alert("ایجنت ویندوز غیرفعال است. اجرای فرامین لوکال فقط هنگام آنلاین بودن ایجنت ویندوز امکان‌پذیر است.");
+      return;
+    }
     const cmd = customCmdInput.value.trim();
     if (!cmd) {
       alert("لطفاً یک دستور معتبر وارد نمایید.");
@@ -573,6 +815,10 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   async function dispatchWindowsCommand(command, description, riskLevel) {
+    if (currentAgentState === "inactive") {
+      alert("ایجنت ویندوز غیرفعال است. اجرای فرامین لوکال فقط هنگام آنلاین بودن ایجنت ویندوز امکان‌پذیر است.");
+      return;
+    }
     try {
       const res = await fetch(`${currentServerUrl}/api/mobile/commands/dispatch`, {
         method: "POST",

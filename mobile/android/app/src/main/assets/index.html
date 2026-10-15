@@ -17,11 +17,23 @@
           <span class="brand-subtitle">کنسول همراه کنترل و هدایت ایجنت ویندوزی</span>
         </div>
       </div>
-      <div class="connection-status-pill" id="connPill">
-        <span class="status-dot" id="connDot"></span>
-        <span id="connStatusText">آفلاین</span>
+      <div class="header-right-actions">
+        <button id="btnMobileTheme" class="theme-switch-btn" title="تغییر طیف رنگی تم">🎨</button>
+        <div class="connection-status-pill" id="connPill">
+          <span class="status-dot" id="connDot"></span>
+          <span id="connStatusText">آفلاین</span>
+        </div>
       </div>
     </header>
+
+    <!-- Dedicated Windows Agent Offline Alert Banner -->
+    <div id="agentOfflineBanner" class="agent-offline-alert" style="display: none;">
+      <span class="offline-alert-icon">⚠️</span>
+      <div class="offline-alert-text">
+        <strong class="offline-alert-title">ایجنت ویندوز غیرفعال است</strong>
+        <p class="offline-alert-sub">مرکز اجرای وظایف محلی خاموش است. مشاهده و هدایت فرآیندها و اجرای فرامین متوقف شد.</p>
+      </div>
+    </div>
 
     <!-- VIEW 1: AUTHENTICATION & PAIRING SCREEN -->
     <main id="authView" class="view-section active">
@@ -142,6 +154,25 @@
             <div class="pin-timer-bar">
               <div id="pinProgress" class="pin-progress"></div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Windows Active Projects & Runs Section (Phase 7) -->
+      <section class="card glass-card" id="activeProjectsSection">
+        <div class="card-header">
+          <span class="card-icon">🚀</span>
+          <div class="header-text-group">
+            <h2>فرآیندها و پروژه‌های فعال ویندوز</h2>
+            <span id="activeProjectsCountBadge" class="badge badge-cyan">۰ در حال اجرا</span>
+          </div>
+        </div>
+        <p class="card-desc">مشاهده پروژه‌های جاری در ایجنت ویندوز با امکان ادامه گام، توقف یا ارسال هدایت عملیاتی:</p>
+
+        <div id="activeProjectsContainer" class="projects-container">
+          <div class="empty-state">
+            <span>✨</span>
+            <p>در حال حاضر هیچ فرآیند فعالی در ایجنت ویندوز در حال اجرا نیست.</p>
           </div>
         </div>
       </section>

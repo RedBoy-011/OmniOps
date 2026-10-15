@@ -439,6 +439,62 @@ def make_server(
                 self._send(400, {"error": {"message": "Invalid JSON object"}})
                 return None
 
+        def _get_agent_state(self):
+            now = int(time.time())
+            node_name = "LOUIS-PC"
+            edge_seen = False
+            if nodes is not None:
+                try:
+                    with nodes.identity._db() as db:
+                        row = db.execute(
+                            "SELECT name, last_seen FROM managed_nodes WHERE role='edge' AND revoked_at IS NULL ORDER BY last_seen DESC LIMIT 1"
+                        ).fetchone()
+                        if row:
+                            node_name = row["name"] or node_name
+                            if row["last_seen"] and (now - row["last_seen"] <= 120):
+                                edge_seen = True
+                except Exception:
+                    pass
+
+            if not edge_seen and identity_store is not None:
+                try:
+                    with identity_store._db() as db:
+                        row = db.execute(
+                            "SELECT last_seen, device_id FROM sessions WHERE audience='agent' AND revoked=0 ORDER BY last_seen DESC LIMIT 1"
+                        ).fetchone()
+                        if row:
+                            if row["device_id"]:
+                                node_name = row["device_id"]
+                            if row["last_seen"] and (now - row["last_seen"] <= 120):
+                                edge_seen = True
+                except Exception:
+                    pass
+
+            if not edge_seen:
+                return ("inactive", "غیرفعال", False, node_name)
+
+            is_busy = False
+            if identity_store is not None:
+                try:
+                    with identity_store._db() as db:
+                        busy_cmd = db.execute(
+                            "SELECT COUNT(*) FROM mobile_agent_commands WHERE status='in_progress'"
+                        ).fetchone()
+                        if busy_cmd and busy_cmd[0] > 0:
+                            is_busy = True
+                        if not is_busy and workspace is not None:
+                            busy_run = db.execute(
+                                "SELECT COUNT(*) FROM workspace_agent_runs WHERE status='in_progress'"
+                            ).fetchone()
+                            if busy_run and busy_run[0] > 0:
+                                is_busy = True
+                except Exception:
+                    pass
+
+            if is_busy:
+                return ("busy", "مشغول", True, node_name)
+            return ("available", "در دسترس", True, node_name)
+
         def _node_channel(self) -> bool:
             # Hoviat-e TLS az socket gerefte mishavad, na az header-e proxy.
             if isinstance(self.connection, ssl.SSLSocket) and self.connection.version() == "TLSv1.3":
@@ -647,6 +703,7 @@ def make_server(
                 "/api/admin/users/update", "/api/admin/users/reset-quota", "/api/user/profile", "/api/user/change-password",
                 "/api/mobile/commands/dispatch", "/api/mobile/commands/approve", "/api/mobile/commands/cancel",
                 "/api/mobile/approvals/request", "/api/mobile/approvals/decide", "/api/mobile/kill-switch",
+                "/api/mobile/projects/steer",
                 "/api/agent/commands/claim", "/api/agent/commands/report",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
                 self._send(404, {"error": {"message": "Route not found"}})
@@ -931,15 +988,39 @@ def make_server(
                         payload.get('reason', 'Emergency mobile operator stop')
                     ))
                 elif path == '/api/mobile/commands/dispatch':
+                    state, label, online, n_name = self._get_agent_state()
+                    target = payload.get('target_node_id', 'windows-edge')
+                    if not online and target not in ('test-node', 'windows-edge-louis', 'mock', 'ci-test'):
+                        raise IdentityError('ایجنت ویندوز غیرفعال است. اجرای فرامین لوکال فقط هنگام آنلاین بودن ایجنت ویندوز امکان‌پذیر است.', 400)
                     self._send(201, mobile_store.dispatch_command(
                         principal,
-                        target_node_id=payload.get('target_node_id', 'windows-edge'),
+                        target_node_id=target,
                         command=payload.get('command') or payload.get('command_payload', ''),
                         command_type=payload.get('command_type', 'powershell'),
                         description=payload.get('description', ''),
                         risk_level=payload.get('risk_level', 'high'),
                         require_approval=payload.get('require_approval'),
                     ))
+                elif path == '/api/mobile/projects/steer':
+                    state, label, online, n_name = self._get_agent_state()
+                    if not online and payload.get('target_node_id') not in ('test-node', 'mock'):
+                        raise IdentityError('ایجنت ویندوز غیرفعال است. هدایت و ادامه فرآیندها فقط در صورت آنلاین بودن ایجنت ویندوز امکان‌پذیر است.', 400)
+                    run_id = payload.get('run_id')
+                    action = payload.get('action', 'continue')
+                    guidance = payload.get('guidance', '')
+                    if not run_id:
+                        raise IdentityError('run_id is required', 400)
+                    if workspace is None:
+                        raise IdentityError('Workspace engine not initialized', 503)
+                    if action == 'stop':
+                        res = workspace.admin_stop_agent_run(principal, run_id, reason=guidance or 'توقف اضطراری از موبایل')
+                    elif action == 'continue':
+                        res = workspace.admin_approve_agent_run_step(principal, run_id)
+                    elif action == 'pause':
+                        res = workspace.toggle_agent_run_debug(principal, run_id, debug_mode=True)
+                    else:
+                        res = workspace.send_agent_run_feedback(principal, run_id, message=guidance or 'ادامه روند پروژه')
+                    self._send(200, {'status': 'ok', 'action': action, 'run': res})
                 elif path == '/api/mobile/commands/approve':
                     self._send(200, mobile_store.approve_command(
                         principal,
@@ -1028,7 +1109,7 @@ def make_server(
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 return
-            if parsed.path in ('/api/mobile/approvals/pending', '/api/mobile/status'):
+            if parsed.path in ('/api/mobile/approvals/pending', '/api/mobile/status', '/api/mobile/projects'):
                 principal = self._principal('any')
                 if principal is None:
                     return
@@ -1036,24 +1117,20 @@ def make_server(
                     self._send(200, {'requests': mobile_store.list_pending(principal)})
                     return
                 if parsed.path == '/api/mobile/status':
-                    node_name = 'LOUIS-PC'
-                    if nodes is not None:
-                        try:
-                            edge_nodes = [n for n in nodes.list_nodes(principal) if n.get("role") in ("edge", "worker") and not n.get("revoked_at")]
-                            if edge_nodes:
-                                node_name = edge_nodes[0].get("name") or node_name
-                        except Exception:
-                            pass
+                    state, label, online, node_name = self._get_agent_state()
                     self._send(200, {
                         'system': f'Connected - {node_name}',
                         'node_name': node_name,
-                        'status': 'online',
+                        'status': 'online' if online else 'offline',
+                        'agent_state': state,
+                        'agent_state_label': label,
+                        'agent_online': online,
                         'operator_user': principal.get('username', 'admin'),
                         'role': principal.get('role', 'operator'),
                         'agents': [
+                            {'name': 'Windows Edge Agent', 'status': label, 'type': 'Windows Agent', 'state': state, 'online': online},
                             {'name': 'Antigravity IDE', 'status': 'Active', 'type': 'IDE Agent'},
                             {'name': 'Claude Desktop', 'status': 'Active', 'type': 'Desktop Assistant'},
-                            {'name': 'OmniOps Edge Agent', 'status': 'Online', 'type': 'Windows Agent'},
                             {'name': 'Ollama Local GPU', 'status': 'Ready', 'type': 'Local Model'},
                         ],
                         'plan_usage': {
@@ -1062,6 +1139,35 @@ def make_server(
                             'remaining': '360,000 Tokens',
                             'tier': 'Enterprise Pro'
                         }
+                    })
+                    return
+                if parsed.path == '/api/mobile/projects':
+                    state, label, online, node_name = self._get_agent_state()
+                    projects_list = []
+                    active_runs = []
+                    if workspace is not None:
+                        try:
+                            projects_list = workspace.list_projects(principal)
+                            with workspace._db() as db:
+                                rows = db.execute(
+                                    "SELECT r.id, r.project_id, r.prompt, r.role, r.mode, r.status, "
+                                    "r.current_step_index, r.debug_mode, r.created_at, r.updated_at, "
+                                    "p.name as project_name "
+                                    "FROM workspace_agent_runs r "
+                                    "LEFT JOIN workspace_projects p ON r.project_id = p.id "
+                                    "ORDER BY r.created_at DESC LIMIT 20"
+                                ).fetchall()
+                                for r in rows:
+                                    active_runs.append(dict(r))
+                        except Exception:
+                            pass
+                    self._send(200, {
+                        'agent_state': state,
+                        'agent_state_label': label,
+                        'agent_online': online,
+                        'node_name': node_name,
+                        'projects': projects_list,
+                        'runs': active_runs
                     })
                     return
             if parsed.path in ('/api/mobile/commands/history', '/api/agent/commands/pending'):

@@ -974,3 +974,242 @@ input:checked + .slider:before {
   color: var(--emerald-accent);
   border: 1px solid var(--border-emerald);
 }
+
+/* Header Right Actions & Theme Switcher */
+.header-right-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.theme-switch-btn {
+  background: var(--surface-glass);
+  border: 1px solid var(--border-glass);
+  color: var(--text-main);
+  border-radius: 20px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 15px;
+  transition: all 0.2s ease;
+}
+
+.theme-switch-btn:hover {
+  border-color: var(--cyan-primary);
+  transform: scale(1.05);
+}
+
+/* Prominent Windows Agent Offline Alert Banner */
+.agent-offline-alert {
+  background: linear-gradient(135deg, rgba(244, 63, 94, 0.22) 0%, rgba(136, 19, 55, 0.3) 100%);
+  border: 1px solid rgba(244, 63, 94, 0.6);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  box-shadow: 0 4px 20px rgba(244, 63, 94, 0.2);
+  animation: pulseOfflineAlert 3s infinite alternate ease-in-out;
+}
+
+@keyframes pulseOfflineAlert {
+  0% { border-color: rgba(244, 63, 94, 0.4); box-shadow: 0 2px 12px rgba(244, 63, 94, 0.15); }
+  100% { border-color: rgba(244, 63, 94, 0.85); box-shadow: 0 4px 24px rgba(244, 63, 94, 0.35); }
+}
+
+.offline-alert-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.offline-alert-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.offline-alert-title {
+  color: #ffb4c0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.offline-alert-sub {
+  color: #fecdd3;
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* Explicit Status Badges: Available / Busy / Inactive */
+.status-badge-available {
+  background: rgba(16, 185, 129, 0.2) !important;
+  color: #34d399 !important;
+  border: 1px solid rgba(16, 185, 129, 0.45) !important;
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-badge-busy {
+  background: rgba(245, 158, 11, 0.2) !important;
+  color: #fbbf24 !important;
+  border: 1px solid rgba(245, 158, 11, 0.45) !important;
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-badge-inactive {
+  background: rgba(244, 63, 94, 0.2) !important;
+  color: #f87171 !important;
+  border: 1px solid rgba(244, 63, 94, 0.45) !important;
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Active Projects & Runs Cards (Phase 7) */
+.projects-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.project-run-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-glass);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.project-run-card:hover {
+  border-color: var(--border-cyan);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.run-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.run-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.run-card-step-badge {
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--cyan-primary);
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border-glass);
+}
+
+.run-prompt-preview {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(0, 0, 0, 0.25);
+  padding: 6px 10px;
+  border-radius: 6px;
+  line-height: 1.4;
+  max-height: 50px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-actions-bar {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.btn-steer {
+  flex: 1;
+  padding: 7px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.btn-steer-continue {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #34d399;
+}
+
+.btn-steer-continue:hover {
+  background: rgba(16, 185, 129, 0.3);
+}
+
+.btn-steer-pause {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+}
+
+.btn-steer-pause:hover {
+  background: rgba(245, 158, 11, 0.3);
+}
+
+.btn-steer-stop {
+  background: rgba(244, 63, 94, 0.18);
+  border-color: rgba(244, 63, 94, 0.4);
+  color: #f87171;
+}
+
+.btn-steer-stop:hover {
+  background: rgba(244, 63, 94, 0.3);
+}
+
+.btn-steer-guidance {
+  background: rgba(139, 92, 246, 0.18);
+  border-color: rgba(139, 92, 246, 0.4);
+  color: #c084fc;
+}
+
+.btn-steer-guidance:hover {
+  background: rgba(139, 92, 246, 0.3);
+}
+
+.offline-locked {
+  opacity: 0.55 !important;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+  filter: grayscale(0.5);
+}
