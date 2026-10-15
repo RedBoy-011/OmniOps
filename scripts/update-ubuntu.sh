@@ -297,8 +297,8 @@ trap - EXIT
 [[ "$old_pid" =~ ^[0-9]+$ && "$port" =~ ^[0-9]+$ && -n "$bind_host" ]] || fail 'تنظیمات درگاه معتبر نیست.'
 
 # ۶. به‌روزرسانی کد مخزن
-git fetch --prune origin main
-git merge --ff-only origin/main 2>/dev/null || true
+git fetch --prune origin +refs/heads/main:refs/remotes/origin/main
+git checkout -B main refs/remotes/origin/main 2>/dev/null || git merge --ff-only origin/main 2>/dev/null || true
 
 # ۷. بررسی و نصب خودکار Node.js 24 و nvm در صورت نیاز
 if [[ -f /root/.nvm/nvm.sh ]]; then

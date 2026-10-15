@@ -119,11 +119,14 @@ def parse_scenario(scenario_input: str | dict[str, Any]) -> dict[str, Any]:
         import yaml  # type: ignore
         parsed = yaml.safe_load(cleaned)
         if isinstance(parsed, dict):
-            if "steps" in parsed and isinstance(parsed["steps"], list):
-                parsed["steps"] = [normalize_step(s) if isinstance(s, dict) else s for s in parsed["steps"]]
+            if "steps" not in parsed or not isinstance(parsed["steps"], list):
+                raise PlaywrightWorkerError("Scenario must contain a 'steps' list")
+            parsed["steps"] = [normalize_step(s) if isinstance(s, dict) else s for s in parsed["steps"]]
             return parsed
         if isinstance(parsed, list):
             return {"steps": [normalize_step(s) if isinstance(s, dict) else s for s in parsed]}
+    except PlaywrightWorkerError:
+        raise
     except Exception:
         pass
 
