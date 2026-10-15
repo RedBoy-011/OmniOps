@@ -793,8 +793,10 @@ def make_server(
                     self._send(200, updater.sync_release_assets(repo_root=repo_root))
                 elif path == "/api/admin/theme":
                     palette = payload.get("palette")
+                    updated = store.set_theme_palette(principal, palette)
                     self._send(200, {
-                        "active_palette": store.set_theme_palette(principal, palette)
+                        "active_palette": updated,
+                        "palette": updated,
                     })
                 elif path == "/api/admin/users/update":
                     if principal["role"] != "superadmin":
@@ -1015,7 +1017,16 @@ def make_server(
                     if action == 'stop':
                         res = workspace.admin_stop_agent_run(principal, run_id, reason=guidance or 'توقف اضطراری از موبایل')
                     elif action == 'continue':
-                        res = workspace.admin_approve_agent_run_step(principal, run_id)
+                        with workspace.store._db() as db:
+                            r_row = db.execute("SELECT status FROM workspace_agent_runs WHERE id=?", (run_id,)).fetchone()
+                            r_status = r_row["status"] if r_row else ""
+                        if r_status == 'waiting_approval':
+                            res = workspace.admin_approve_agent_run_step(principal, run_id)
+                        else:
+                            try:
+                                res = workspace.advance_agent_run(principal, run_id)
+                            except Exception:
+                                res = workspace.get_agent_run(principal, run_id)
                     elif action == 'pause':
                         res = workspace.toggle_agent_run_debug(principal, run_id, debug_mode=True)
                     else:
@@ -1148,7 +1159,7 @@ def make_server(
                     if workspace is not None:
                         try:
                             projects_list = workspace.list_projects(principal)
-                            with workspace._db() as db:
+                            with workspace.store._db() as db:
                                 rows = db.execute(
                                     "SELECT r.id, r.project_id, r.prompt, r.role, r.mode, r.status, "
                                     "r.current_step_index, r.debug_mode, r.created_at, r.updated_at, "
@@ -1563,6 +1574,7 @@ def make_server(
                 active = store.theme_palette() if store else "magenta"
                 self._send(200, {
                     "active_palette": active,
+                    "palette": active,
                     "available_palettes": [
                         {"id": "magenta", "name": "قرمز / مجنتا مخملی (پیش‌فرض)", "primary": "#f43f5e", "accent": "#d946ef", "gradient": "linear-gradient(135deg, #f43f5e 0%, #d946ef 100%)"},
                         {"id": "cyan", "name": "سایبرپانک فیروزه‌ای", "primary": "#00f0ff", "accent": "#00ffaa", "gradient": "linear-gradient(135deg, #00f0ff 0%, #00ffaa 100%)"},
