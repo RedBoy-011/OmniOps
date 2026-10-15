@@ -240,7 +240,7 @@ document.addEventListener("DOMContentLoaded", () => {
         window.OmniOpsBridge.showToast("اتصال با کد ۶ رقمی موفقیت‌آمیز بود.");
       }
 
-      saveSession(srv, data.token, data.profile?.username || "paired_operator", data.profile?.role || "operator");
+      saveSession(srv, data.token, data.user?.username || data.profile?.username || "paired_operator", data.user?.role || data.profile?.role || "operator");
       pinInput.value = "";
       showOperatorConsole();
     } catch (err) {
@@ -282,7 +282,7 @@ document.addEventListener("DOMContentLoaded", () => {
         window.OmniOpsBridge.vibrateDevice(60);
       }
 
-      saveSession(srv, data.token, data.profile?.username || user, data.profile?.role || "admin");
+      saveSession(srv, data.token, data.user?.username || data.profile?.username || user, data.user?.role || data.profile?.role || "admin");
       showOperatorConsole();
     } catch (err) {
       showAuthAlert(err.message || "خطا در برقراری ارتباط با سرور.");
