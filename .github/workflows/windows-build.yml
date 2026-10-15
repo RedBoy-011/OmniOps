@@ -118,7 +118,9 @@ jobs:
       - name: Build Android APK
         env:
           PYTHONPATH: .:scripts
-        run: python scripts/build_android_apk.py
+        run: |
+          python scripts/build_android_apk.py
+          ls -lh downloads/
       - uses: actions/download-artifact@v7
         with:
           name: omniops-windows-x64-unsigned-preview

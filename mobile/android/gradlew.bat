@@ -15,7 +15,7 @@ set APP_HOME=%DIRNAME%
 
 set CLASSPATH=%APP_HOME%\gradle\wrapper\gradle-wrapper.jar
 if exist "%CLASSPATH%" (
-    java -Xmx2048m -jar "%CLASSPATH%" %*
+    java -Xmx2048m -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %*
 ) else (
     echo Gradle wrapper jar not found. Please install Gradle.
 )

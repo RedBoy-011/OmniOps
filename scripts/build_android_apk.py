@@ -454,11 +454,11 @@ def try_build_gradle(repo_root: Path) -> bool:
     cmd = None
     if gradlew.exists():
         if os.name == "nt":
-            cmd = [str(gradlew), "assembleDebug", "--no-daemon"]
+            cmd = [str(gradlew), "assembleDebug", "--no-daemon", "--stacktrace"]
         else:
-            cmd = ["bash", str(gradlew), "assembleDebug", "--no-daemon"]
+            cmd = ["bash", str(gradlew), "assembleDebug", "--no-daemon", "--stacktrace"]
     elif shutil.which("gradle"):
-        cmd = ["gradle", "assembleDebug", "--no-daemon"]
+        cmd = ["gradle", "assembleDebug", "--no-daemon", "--stacktrace"]
 
     if not cmd:
         return False
@@ -466,7 +466,12 @@ def try_build_gradle(repo_root: Path) -> bool:
     try:
         print(f"Building real Android APK via Gradle: {' '.join(cmd)} in {android_dir}")
         res = subprocess.run(cmd, cwd=str(android_dir), capture_output=True, text=True)
-        print(res.stdout)
+        if res.stdout:
+            print("--- Gradle STDOUT ---")
+            print(res.stdout)
+        if res.stderr:
+            print("--- Gradle STDERR ---")
+            print(res.stderr)
         if res.returncode == 0:
             candidates = [p for p in android_dir.glob("app/build/outputs/apk/**/*.apk") if not p.name.endswith("-androidTest.apk")]
             if candidates:

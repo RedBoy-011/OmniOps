@@ -16,7 +16,7 @@ fi
 # Try running gradle wrapper jar if exists
 CLASSPATH="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
 if [ -f "$CLASSPATH" ]; then
-    exec java -Xmx2048m -jar "$CLASSPATH" "$@"
+    exec java -Xmx2048m -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
 fi
 
 # Download gradle wrapper jar if needed
@@ -28,7 +28,7 @@ if command -v curl >/dev/null 2>&1; then
 fi
 
 if [ -f "$CLASSPATH" ]; then
-    exec java -Xmx2048m -jar "$CLASSPATH" "$@"
+    exec java -Xmx2048m -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
 fi
 
 echo "Warning: Neither gradle nor gradle-wrapper.jar available." >&2
