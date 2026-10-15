@@ -643,6 +643,7 @@ def make_server(
                 "/api/admin/ollama-endpoint", "/api/admin/providers/save", "/api/admin/providers/test",
                 "/api/admin/providers/test-socks", "/api/admin/providers/socks-health", "/api/admin/providers/enable", "/api/admin/providers/price",
                 "/api/admin/system/backups", "/api/admin/system/update", "/api/admin/system/sync-release-assets",
+                "/api/admin/theme",
                 "/api/admin/users/update", "/api/admin/users/reset-quota", "/api/user/profile", "/api/user/change-password",
                 "/api/mobile/commands/dispatch", "/api/mobile/commands/approve", "/api/mobile/commands/cancel",
                 "/api/mobile/approvals/request", "/api/mobile/approvals/decide", "/api/mobile/kill-switch",
@@ -733,6 +734,11 @@ def make_server(
                         raise IdentityError("Superadmin access required", 403)
                     repo_root = Path(__file__).resolve().parent.parent
                     self._send(200, updater.sync_release_assets(repo_root=repo_root))
+                elif path == "/api/admin/theme":
+                    palette = payload.get("palette")
+                    self._send(200, {
+                        "active_palette": store.set_theme_palette(principal, palette)
+                    })
                 elif path == "/api/admin/users/update":
                     if principal["role"] != "superadmin":
                         raise IdentityError("Superadmin access required", 403)
@@ -1445,6 +1451,20 @@ def make_server(
                 return
             if self.path == "/health":
                 self._send(200, {"status": "up", "mode": "local-development"})
+                return
+            if self.path in ("/api/theme", "/api/admin/theme"):
+                store = self._identity()
+                active = store.theme_palette() if store else "magenta"
+                self._send(200, {
+                    "active_palette": active,
+                    "available_palettes": [
+                        {"id": "magenta", "name": "قرمز / مجنتا مخملی (پیش‌فرض)", "primary": "#f43f5e", "accent": "#d946ef", "gradient": "linear-gradient(135deg, #f43f5e 0%, #d946ef 100%)"},
+                        {"id": "cyan", "name": "سایبرپانک فیروزه‌ای", "primary": "#00f0ff", "accent": "#00ffaa", "gradient": "linear-gradient(135deg, #00f0ff 0%, #00ffaa 100%)"},
+                        {"id": "emerald", "name": "زمردی / نعنایی", "primary": "#10b981", "accent": "#06b6d4", "gradient": "linear-gradient(135deg, #10b981 0%, #06b6d4 100%)"},
+                        {"id": "amber", "name": "کهربایی خورشیدی", "primary": "#f59e0b", "accent": "#ef4444", "gradient": "linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)"},
+                        {"id": "indigo", "name": "کیهانی لاجوردی", "primary": "#6366f1", "accent": "#a855f7", "gradient": "linear-gradient(135deg, #6366f1 0%, #a855f7 100%)"}
+                    ]
+                })
                 return
             if self.path in ('/api/agent/models', '/api/web/models'):
                 principal = self._principal('agent' if self.path == '/api/agent/models' else 'web')

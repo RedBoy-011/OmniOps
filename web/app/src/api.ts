@@ -1035,6 +1035,23 @@ export const api = {
       "POST",
       { node_id, reason }
     ),
+  getTheme: () =>
+    request<ThemeResponse>("/api/theme"),
+  setAdminTheme: (palette: string) =>
+    request<{ active_palette: string }>("/api/admin/theme", "POST", { palette }),
+};
+
+export type ThemePaletteInfo = {
+  id: string;
+  name: string;
+  primary: string;
+  accent: string;
+  gradient: string;
+};
+
+export type ThemeResponse = {
+  active_palette: string;
+  available_palettes: ThemePaletteInfo[];
 };
 
 export type MobileAgentCommand = {

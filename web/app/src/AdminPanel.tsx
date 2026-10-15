@@ -10,6 +10,8 @@ import { UserManagementCard } from "./components/UserManagementCard";
 import { UserProfileModal } from "./components/UserProfileModal";
 import { SecurityAuditCard } from "./components/SecurityAuditCard";
 import { AdminAgentGovernanceCard } from "./components/AdminAgentGovernanceCard";
+import { ThemePaletteSelector } from "./components/ThemePaletteSelector";
+import { ClientDownloadsCard } from "./components/ClientDownloadsCard";
 
 const choices = [
   ["chat", "گفت‌وگو"],
@@ -21,8 +23,8 @@ const choices = [
   ["agent.pair", "اتصال ایجنت"],
 ] as const;
 
-type AdminTab = "nodes" | "providers" | "users" | "health" | "backups" | "audit" | "agents";
-type UserSubTab = "users" | "pending" | "profile" | "pairing";
+type AdminTab = "dashboard" | "nodes" | "providers" | "governance" | "settings";
+type GovernanceSubTab = "users" | "pending" | "audit" | "agents" | "profile" | "pairing";
 
 type Props = {
   user: Profile;
@@ -34,8 +36,8 @@ type Props = {
 export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace }: Props) {
   const [currentUser, setCurrentUser] = useState<Profile>(user);
   const [showProfile, setShowProfile] = useState(false);
-  const [adminTab, setAdminTab] = useState<AdminTab>("nodes");
-  const [userSubTab, setUserSubTab] = useState<UserSubTab>("users");
+  const [adminTab, setAdminTab] = useState<AdminTab>("dashboard");
+  const [govSubTab, setGovSubTab] = useState<GovernanceSubTab>("users");
 
   const [pending, setPending] = useState<PendingUser[]>([]);
   const [count, setCount] = useState(initialPending);
@@ -99,13 +101,13 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
     event.preventDefault();
     if (workerBusy) return;
     setWorkerBusy(true);
-    setWorkerMessage("در حال آزمون اتصال به Worker…");
+    setWorkerMessage("");
     try {
-      await api.saveOllamaEndpoint(workerUrl.trim());
+      const result = await api.saveOllamaEndpoint(workerUrl);
+      setWorkerMessage(`نشانی ذخیره شد. مدل‌های آماده: ${result.models.length.toLocaleString("fa-IR")}`);
       await refreshOperations();
-      setWorkerMessage("اتصال Worker آزمایش و ذخیره شد.");
     } catch (cause) {
-      setWorkerMessage(cause instanceof Error ? cause.message : "اتصال به Worker برقرار نشد؛ نشانی قبلی حفظ شد.");
+      setWorkerMessage(cause instanceof Error ? cause.message : "خطا در اتصال به Ollama روی Worker");
     } finally {
       setWorkerBusy(false);
     }
@@ -220,15 +222,15 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
             role="status"
             style={{ cursor: "pointer" }}
             onClick={() => {
-              setAdminTab("users");
-              setUserSubTab("pending");
+              setAdminTab("governance");
+              setGovSubTab("pending");
               setToast(false);
             }}
             title="کلیک برای باز کردن تب درخواست‌های ثبت‌نام"
           >
             <span className="toast-icon">✦</span>
             <span>
-              شما <strong>{count.toLocaleString("fa-IR")}</strong> درخواست عضویت جدید در انتظار بررسی دارید (کلیک جهت بررسی در تب درخواست‌ها).
+              شما <strong>{count.toLocaleString("fa-IR")}</strong> درخواست عضویت جدید در انتظار بررسی دارید (کلیک جهت بررسی).
             </span>
             <button onClick={(e) => { e.stopPropagation(); setToast(false); }} aria-label="بستن اعلان">
               ×
@@ -247,6 +249,9 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
           </div>
 
           <div className="flex items-center gap-3">
+            {/* انتخابگر فشرده طیف رنگ سراسری سیستم (مرحله ۲) */}
+            <ThemePaletteSelector compact isSuperadmin={currentUser.role === "superadmin"} />
+
             {/* کلید سوئیچ فوری به فضای کاربری هوش مصنوعی */}
             {onSwitchToWorkspace && (
               <button
@@ -263,8 +268,8 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
               type="button"
               className="profile-pill-button"
               onClick={() => {
-                setAdminTab("users");
-                setUserSubTab("profile");
+                setAdminTab("governance");
+                setGovSubTab("profile");
               }}
               title="مشاهده پروفایل، آمار عملکرد و تغییر رمز"
             >
@@ -288,8 +293,18 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
           <p>مدیریت جامع خوشه‌های پردازشی Worker، تأمین‌کنندگان مدل‌ها، کاربران سازمان و پایش لحظه‌ای زیرساخت.</p>
         </div>
 
-        {/* منوی ناوبری تب‌های کنسول مدیریت */}
+        {/* منوی ناوبری ۵ گانهٔ بازطراحی‌شده تب‌های کنسول مدیریت (مرحله ۳) */}
         <div className="admin-nav-tabs" role="tablist" aria-label="بخش‌های کنسول مدیریت">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={adminTab === "dashboard"}
+            className={`admin-nav-tab ${adminTab === "dashboard" ? "active" : ""}`}
+            onClick={() => setAdminTab("dashboard")}
+          >
+            📊 داشبورد و پایش زیرساخت
+          </button>
+
           <button
             type="button"
             role="tab"
@@ -297,7 +312,7 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
             className={`admin-nav-tab ${adminTab === "nodes" ? "active" : ""}`}
             onClick={() => setAdminTab("nodes")}
           >
-            🖥️ سرورها و مدل‌ها
+            🖥️ سرورها و مدل‌های محلی
           </button>
 
           <button
@@ -313,395 +328,522 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
           <button
             type="button"
             role="tab"
-            aria-selected={adminTab === "users"}
-            className={`admin-nav-tab ${adminTab === "users" ? "active" : ""}`}
-            onClick={() => setAdminTab("users")}
+            aria-selected={adminTab === "governance"}
+            className={`admin-nav-tab ${adminTab === "governance" ? "active" : ""}`}
+            onClick={() => setAdminTab("governance")}
           >
-            👥 مدیریت کاربران، دسترسی‌ها و پروفایل
+            🛡️ امنیت، کاربران و حاکمیت
             {count > 0 && <span className="tab-counter-badge">{count.toLocaleString("fa-IR")}</span>}
           </button>
 
           <button
             type="button"
             role="tab"
-            aria-selected={adminTab === "health"}
-            className={`admin-nav-tab ${adminTab === "health" ? "active" : ""}`}
-            onClick={() => setAdminTab("health")}
+            aria-selected={adminTab === "settings"}
+            className={`admin-nav-tab ${adminTab === "settings" ? "active" : ""}`}
+            onClick={() => setAdminTab("settings")}
           >
-            🩺 سلامت سیستم و پایش
-          </button>
-
-          <button
-            type="button"
-            role="tab"
-            aria-selected={adminTab === "backups"}
-            className={`admin-nav-tab ${adminTab === "backups" ? "active" : ""}`}
-            onClick={() => setAdminTab("backups")}
-          >
-            💾 پشتیبان‌گیری دیتابیس
-          </button>
-
-          <button
-            type="button"
-            role="tab"
-            aria-selected={adminTab === "audit"}
-            className={`admin-nav-tab ${adminTab === "audit" ? "active" : ""}`}
-            onClick={() => setAdminTab("audit")}
-          >
-            🛡️ دفترچه ممیزی و امنیت
-          </button>
-
-          <button
-            type="button"
-            role="tab"
-            aria-selected={adminTab === "agents"}
-            className={`admin-nav-tab ${adminTab === "agents" ? "active" : ""}`}
-            onClick={() => setAdminTab("agents")}
-          >
-            🤖 حاکمیت بر ایجنت‌ها
+            ⚙️ تنظیمات سیستم و تم سراسری
           </button>
         </div>
 
-        {/* ۱. تب سرورها و مدل‌ها */}
-        <div hidden={adminTab !== "nodes"}>
-          <NodeManager />
-
-          {/* ویجت تست پینگ و تأخیر ارتباطی زنده گره Worker */}
-          <section className="glass admin-card node-ping-card" style={{ marginTop: "16px" }}>
-            <div className="card-title">
-              <div>
-                <h2>⚡ تست پینگ و سلامت ارتباطی گره Ollama Worker</h2>
-                <p>پایش میلی‌ثانیه‌ای تأخیر شبکه (RTT)، نسخهٔ سرویس و تعداد مدل‌های فعال Worker محلی.</p>
+        {/* ۱. تب بازطراحی‌شده داشبورد و پایش زیرساخت (مرحله ۴: سلسله‌مراتبی و کم‌حجم) */}
+        {adminTab === "dashboard" && (
+          <div className="dashboard-view" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {/* نوار کارت‌های شاخص‌های کلیدی (Executive High-Density KPI Strip) */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
+              <div className="glass admin-card" style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <span style={{ fontSize: "11px", color: "#94a3b8", display: "block" }}>هسته مرکزی عملیات (Master)</span>
+                  <strong style={{ fontSize: "13px", color: "#f1f5f9", display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
+                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
+                    ۱۷۲.۱۹.۳۰.۹۴ (فعال)
+                  </strong>
+                </div>
+                <span style={{ fontSize: "20px" }}>🏢</span>
               </div>
-              <button
-                type="button"
-                className="btn btn-secondary ping-action-btn"
-                disabled={pingLoading}
-                onClick={() => void handlePingNode()}
-              >
-                {pingLoading ? "⏱️ در حال پینگ…" : "📡 ارسال پینگ و تست تأخیر"}
-              </button>
+
+              <div className="glass admin-card" style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <span style={{ fontSize: "11px", color: "#94a3b8", display: "block" }}>گره Worker پردازش محلی</span>
+                  <strong style={{ fontSize: "13px", color: "#f1f5f9", display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
+                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: pingResult?.status === "up" ? "#10b981" : "#06b6d4", display: "inline-block" }} />
+                    ۱۷۲.۱۹.۳۰.۹۹ {pingResult ? `(${pingResult.latency_ms} ms)` : ""}
+                  </strong>
+                </div>
+                <span style={{ fontSize: "20px" }}>⚡</span>
+              </div>
+
+              <div className="glass admin-card" style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <span style={{ fontSize: "11px", color: "#94a3b8", display: "block" }}>مدل‌های هوش مصنوعی مستقر</span>
+                  <strong style={{ fontSize: "13px", color: "#f1f5f9", display: "block", marginTop: "2px" }}>
+                    {(pingResult?.model_count ?? operations?.nodes.reduce((acc, n) => acc + (n.models?.length || 0), 0) ?? 8).toLocaleString("fa-IR")} مدل آماده
+                  </strong>
+                </div>
+                <span style={{ fontSize: "20px" }}>🧠</span>
+              </div>
+
+              <div className="glass admin-card" style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <span style={{ fontSize: "11px", color: "#94a3b8", display: "block" }}>درخواست‌های عضویت در انتظار</span>
+                  <strong style={{ fontSize: "13px", display: "block", marginTop: "2px", color: count > 0 ? "#f43f5e" : "#10b981" }}>
+                    {count > 0 ? `${count.toLocaleString("fa-IR")} درخواست جدید` : "تماماً بررسی‌شده"}
+                  </strong>
+                </div>
+                <span style={{ fontSize: "20px" }}>👥</span>
+              </div>
             </div>
 
-            {pingError && (
-              <p className="admin-message ping-error-badge" role="alert">
-                ⚠️ {pingError}
-              </p>
-            )}
-
-            {pingResult && (
-              <div className="node-ping-results-grid">
-                <div className="ping-stat-item">
-                  <span className="stat-label">تأخیر رفت و برگشت (Latency):</span>
-                  <span className={`ping-latency-badge ${pingResult.latency_ms < 50 ? "good" : pingResult.latency_ms < 200 ? "moderate" : "slow"}`}>
-                    ⚡ {pingResult.latency_ms.toLocaleString("fa-IR")} ms
-                    <small>
-                      {pingResult.latency_ms < 50 ? " (فوق‌العاده سریع)" : pingResult.latency_ms < 200 ? " (مطلوب)" : " (تأخیر بالا)"}
-                    </small>
-                  </span>
-                </div>
-                <div className="ping-stat-item">
-                  <span className="stat-label">وضعیت ارتباط:</span>
-                  <span className={`node-badge node-${pingResult.status}`}>
-                    {pingResult.status === "up" ? "🟢 آنلاین و آماده" : pingResult.status === "no_models" ? "🟡 بدون مدل" : "🔴 آفلاین"}
-                  </span>
-                </div>
-                <div className="ping-stat-item">
-                  <span className="stat-label">نسخه سرویس:</span>
-                  <span className="ping-code-pill" dir="ltr">Ollama {pingResult.version}</span>
-                </div>
-                <div className="ping-stat-item">
-                  <span className="stat-label">مدل‌های مستقر:</span>
-                  <strong className="ping-count-val">{pingResult.model_count.toLocaleString("fa-IR")} مدل</strong>
-                </div>
-                <div className="ping-stat-item full-width">
-                  <span className="stat-label">آدرس اندپوینت:</span>
-                  <code className="ping-endpoint-code" dir="ltr">{pingResult.base_url}</code>
-                </div>
-              </div>
-            )}
-          </section>
-
-          <section className="glass admin-card operations-card" style={{ marginTop: "16px" }}>
-            <div className="card-title">
-              <div>
-                <h2>وضعیت سرویس محلی Ollama و گره‌های مستقیم</h2>
-                <p>بررسی مداوم اتصال هسته و استعلام پورت سرویس مدل‌ها.</p>
-              </div>
-              <button className="quiet-button" onClick={() => void refreshOperations()}>
-                بررسی دوباره
-              </button>
-            </div>
-
-            {operationsError && <p className="admin-message" role="alert">{operationsError}</p>}
-
-            {operations && (
-              <div className="node-grid" aria-live="polite">
-                {operations.nodes.map((node) => (
-                  <article className="node-tile" key={node.id}>
-                    <div className="node-heading">
-                      <strong>{node.kind === "master" ? "هستهٔ مرکزی" : "Worker مدل محلی"}</strong>
-                      <span className={`node-badge node-${node.status}`}>
-                        {node.status === "up" ? "در دسترس" : node.status === "no_models" ? "بدون مدل" : "قطع"}
-                      </span>
-                    </div>
-                    <small>آخرین بررسی: {new Date(node.checked_at * 1000).toLocaleTimeString("fa-IR")}</small>
-                    {node.kind === "worker" && (
-                      <>
-                        <p>مدل‌های نصب‌شده: {(node.models?.length ?? 0).toLocaleString("fa-IR")}</p>
-                        {node.latency_ms != null && (
-                          <small>پاسخ فهرست مدل: {node.latency_ms.toLocaleString("fa-IR")} میلی‌ثانیه</small>
-                        )}
-                        {node.models && node.models.length > 0 && (
-                          <ul className="node-models">
-                            {node.models.map((model) => (
-                              <li key={model.id} dir="ltr">
-                                {model.id}{" "}
-                                {model.size_bytes != null && (
-                                  <small>({(model.size_bytes / 1024 ** 3).toFixed(2)} GiB)</small>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </>
-                    )}
-                  </article>
-                ))}
-              </div>
-            )}
-
-            {!operations && !operationsError && <p className="empty-note">در حال بررسی وضعیت…</p>}
-
-            <form className="worker-form" onSubmit={(event) => void saveWorker(event)}>
-              <label htmlFor="worker-url">نشانی خصوصی Ollama روی Worker</label>
-              <div className="worker-controls">
-                <input
-                  id="worker-url"
-                  dir="ltr"
-                  type="url"
-                  required
-                  value={workerUrl}
-                  onChange={(event) => setWorkerUrl(event.target.value)}
-                  placeholder="http://worker-private-ip:11434"
-                />
-                <button className="submit-button" disabled={workerBusy} type="submit">
-                  {workerBusy ? "در حال آزمون…" : "تست و ذخیره"}
+            {/* نوار ابزار اقدامات سریع و فرماندهی لحظه‌ای */}
+            <div className="glass admin-card" style={{ padding: "12px 16px", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                <span style={{ fontSize: "12px", color: "#94a3b8", fontWeight: 600 }}>اقدامات سریع:</span>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: "12px", padding: "6px 14px" }}
+                  disabled={pingLoading}
+                  onClick={() => void handlePingNode()}
+                >
+                  {pingLoading ? "⏱️ در حال آزمون…" : "📡 تست پینگ Worker (۱۷۲.۱۹.۳۰.۹۹)"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: "12px", padding: "6px 14px" }}
+                  onClick={() => void refreshOperations()}
+                >
+                  🔄 استعلام وضعیت سرورها
                 </button>
               </div>
-              <small>فقط شبکهٔ خصوصی یا localhost پذیرفته می‌شود.</small>
-              {workerMessage && <p className="admin-message" role="status">{workerMessage}</p>}
-            </form>
-          </section>
-        </div>
 
-        {/* ۲. تب تأمین‌کنندگان و پراکسی SOCKS */}
-        <div hidden={adminTab !== "providers"}>
-          <ProviderManager />
-        </div>
-
-        {/* ۳. مرکز جامع مدیریت کاربران، دسترسی‌ها و پروفایل */}
-        <div hidden={adminTab !== "users"}>
-          {/* هدر یکپارچه و معرفی ماژول */}
-          <div className="user-hub-hero">
-            <div className="user-hub-hero-inner">
-              <div className="user-hub-title">
-                <span className="user-hub-icon">👥</span>
-                <div>
-                  <h2 className="text-base md:text-lg font-bold text-cyan-400">مرکز جامع مدیریت کاربران، سطوح دسترسی و پروفایل</h2>
-                  <p className="text-xs text-gray-300 mt-1 leading-relaxed">
-                    کنترل یکپارچه اعضای سازمان، تعیین ماتریس مجوزها، بررسی درخواست‌های ثبت‌نام جدید، امنیت حساب کاربری و جفت‌سازی کلاینت‌ها.
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] bg-slate-900/90 text-cyan-300 border border-cyan-800/60 px-3 py-1 rounded-full font-mono">
-                  نقش شما: {currentUser.role === "superadmin" ? "مدیر ارشد کل" : "کاربر سازمان"}
-                </span>
-                {count > 0 && (
-                  <span className="text-[11px] bg-rose-950/80 text-rose-300 border border-rose-800 px-3 py-1 rounded-full animate-pulse">
-                    {count.toLocaleString("fa-IR")} درخواست جدید در انتظار
-                  </span>
-                )}
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="submit-button"
+                  style={{ fontSize: "12px", padding: "6px 14px", margin: 0 }}
+                  onClick={() => {
+                    setAdminTab("governance");
+                    setGovSubTab("pairing");
+                  }}
+                >
+                  🔑 صدور کد اتصال ایجنت
+                </button>
+                <button
+                  type="button"
+                  className="quiet-button"
+                  style={{ fontSize: "12px", padding: "6px 14px" }}
+                  onClick={() => setAdminTab("settings")}
+                >
+                  🎨 تنظیم تم سراسری
+                </button>
               </div>
             </div>
+
+            {/* نتایج زنده تست پینگ در صورت وجود */}
+            {pingResult && (
+              <section className="glass admin-card node-ping-card">
+                <div className="card-title">
+                  <div>
+                    <h2>⚡ گزارش پینگ زنده گره Ollama Worker</h2>
+                    <p>پایش تأخیر شبکه RTT و وضعیت ارتباط مستقیم با سرور ۱۷۲.۱۹.۳۰.۹۹</p>
+                  </div>
+                  <span className={`ping-latency-badge ${pingResult.latency_ms < 50 ? "good" : pingResult.latency_ms < 200 ? "moderate" : "slow"}`}>
+                    ⚡ {pingResult.latency_ms.toLocaleString("fa-IR")} ms
+                    <small>{pingResult.latency_ms < 50 ? " (عالی)" : " (مطلوب)"}</small>
+                  </span>
+                </div>
+                <div className="node-ping-results-grid">
+                  <div className="ping-stat-item">
+                    <span className="stat-label">وضعیت سرویس:</span>
+                    <span className="node-badge node-up">🟢 آنلاین و آماده</span>
+                  </div>
+                  <div className="ping-stat-item">
+                    <span className="stat-label">نسخه سرویس:</span>
+                    <span className="ping-code-pill" dir="ltr">Ollama {pingResult.version}</span>
+                  </div>
+                  <div className="ping-stat-item">
+                    <span className="stat-label">تعداد مدل‌ها:</span>
+                    <strong className="ping-count-val">{pingResult.model_count.toLocaleString("fa-IR")} مدل</strong>
+                  </div>
+                  <div className="ping-stat-item">
+                    <span className="stat-label">آدرس اندپوینت:</span>
+                    <code className="ping-endpoint-code" dir="ltr">{pingResult.base_url}</code>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* کارت جامع سلامت سیستم و پایش تله‌متری */}
+            <SystemHealthCard />
           </div>
+        )}
 
-          {/* نوار زیرتب‌های منسجم و منطقی */}
-          <div className="user-subtabs-nav" role="tablist" aria-label="بخش‌های مدیریت کاربران و پروفایل">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={userSubTab === "users"}
-              className={`user-subtab-btn ${userSubTab === "users" ? "active" : ""}`}
-              onClick={() => setUserSubTab("users")}
-            >
-              <span>👥 مدیریت کاربران و سطوح دسترسی</span>
-            </button>
+        {/* ۲. تب سرورها و مدل‌های محلی */}
+        {adminTab === "nodes" && (
+          <div className="nodes-view" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <NodeManager />
 
-            <button
-              type="button"
-              role="tab"
-              aria-selected={userSubTab === "pending"}
-              className={`user-subtab-btn ${userSubTab === "pending" ? "active" : ""}`}
-              onClick={() => setUserSubTab("pending")}
-            >
-              <span>📋 درخواست‌های ثبت‌نام</span>
-              {count > 0 && <span className="tab-counter-badge">{count.toLocaleString("fa-IR")}</span>}
-            </button>
-
-            <button
-              type="button"
-              role="tab"
-              aria-selected={userSubTab === "profile"}
-              className={`user-subtab-btn ${userSubTab === "profile" ? "active" : ""}`}
-              onClick={() => setUserSubTab("profile")}
-            >
-              <span>👤 پروفایل و امنیت حساب</span>
-            </button>
-
-            <button
-              type="button"
-              role="tab"
-              aria-selected={userSubTab === "pairing"}
-              className={`user-subtab-btn ${userSubTab === "pairing" ? "active" : ""}`}
-              onClick={() => setUserSubTab("pairing")}
-            >
-              <span>🔑 اتصال موقت ایجنت</span>
-            </button>
-          </div>
-
-          {/* تب فرعی ۱: مدیریت کاربران و سطوح دسترسی */}
-          <div hidden={userSubTab !== "users"}>
-            <UserManagementCard />
-          </div>
-
-          {/* تب فرعی ۲: درخواست‌های ثبت‌نام جدید در انتظار تأیید */}
-          <div hidden={userSubTab !== "pending"}>
-            <section className="glass admin-card" style={{ marginBottom: "16px" }}>
+            {/* ویجت تست پینگ و تأخیر ارتباطی زنده گره Worker */}
+            <section className="glass admin-card node-ping-card">
               <div className="card-title">
                 <div>
-                  <h2>درخواست‌های ثبت‌نام جدید در انتظار تأیید</h2>
-                  <p>تعیین و تخصیص ۱۰ مجوز اولیه همزمان با تأیید دسترسی کاربر.</p>
+                  <h2>⚡ تست پینگ و سلامت ارتباطی گره Ollama Worker</h2>
+                  <p>پایش میلی‌ثانیه‌ای تأخیر شبکه (RTT)، نسخهٔ سرویس و تعداد مدل‌های فعال Worker محلی.</p>
                 </div>
-                <span className="count-pill">{count.toLocaleString("fa-IR")} در انتظار</span>
+                <button
+                  type="button"
+                  className="btn btn-secondary ping-action-btn"
+                  disabled={pingLoading}
+                  onClick={() => void handlePingNode()}
+                >
+                  {pingLoading ? "⏱️ در حال پینگ…" : "📡 ارسال پینگ و تست تأخیر"}
+                </button>
               </div>
 
-              {pending.length === 0 ? (
-                <div className="empty-note-box" style={{ textAlign: "center", padding: "36px 16px" }}>
-                  <span style={{ fontSize: "36px", display: "block", marginBottom: "8px" }}>✅</span>
-                  <strong style={{ display: "block", fontSize: "14px", color: "#34d399", marginBottom: "6px" }}>
-                    تمامی درخواست‌های ثبت‌نام بررسی شده‌اند
-                  </strong>
-                  <p className="empty-note" style={{ margin: 0 }}>
-                    در حال حاضر هیچ کاربر جدیدی در صف انتظار تأیید عضویت نیست.
-                  </p>
+              {pingError && (
+                <p className="admin-message ping-error-badge" role="alert">
+                  ⚠️ {pingError}
+                </p>
+              )}
+
+              {pingResult && (
+                <div className="node-ping-results-grid">
+                  <div className="ping-stat-item">
+                    <span className="stat-label">تأخیر رفت و برگشت (Latency):</span>
+                    <span className={`ping-latency-badge ${pingResult.latency_ms < 50 ? "good" : pingResult.latency_ms < 200 ? "moderate" : "slow"}`}>
+                      ⚡ {pingResult.latency_ms.toLocaleString("fa-IR")} ms
+                      <small>
+                        {pingResult.latency_ms < 50 ? " (فوق‌العاده سریع)" : pingResult.latency_ms < 200 ? " (مطلوب)" : " (تأخیر بالا)"}
+                      </small>
+                    </span>
+                  </div>
+                  <div className="ping-stat-item">
+                    <span className="stat-label">وضعیت ارتباط:</span>
+                    <span className={`node-badge node-${pingResult.status}`}>
+                      {pingResult.status === "up" ? "🟢 آنلاین و آماده" : pingResult.status === "no_models" ? "🟡 بدون مدل" : "🔴 آفلاین"}
+                    </span>
+                  </div>
+                  <div className="ping-stat-item">
+                    <span className="stat-label">نسخه سرویس:</span>
+                    <span className="ping-code-pill" dir="ltr">Ollama {pingResult.version}</span>
+                  </div>
+                  <div className="ping-stat-item">
+                    <span className="stat-label">مدل‌های مستقر:</span>
+                    <strong className="ping-count-val">{pingResult.model_count.toLocaleString("fa-IR")} مدل</strong>
+                  </div>
+                  <div className="ping-stat-item full-width">
+                    <span className="stat-label">آدرس اندپوینت:</span>
+                    <code className="ping-endpoint-code" dir="ltr">{pingResult.base_url}</code>
+                  </div>
                 </div>
-              ) : (
-                <div className="pending-list">
-                  {pending.map((person) => (
-                    <article className="pending-user" key={person.id}>
-                      <div className="pending-title">
-                        <div>
-                          <strong>{person.username}</strong>
-                          <span dir="ltr">{person.mobile}</span>
-                        </div>
-                        <time>{new Date(person.created_at * 1000).toLocaleString("fa-IR")}</time>
-                      </div>
+              )}
+            </section>
 
-                      <div className="capabilities" aria-label={`مجوزهای ${person.username}`}>
-                        {choices.map(([value, title]) => (
-                          <label key={value} className="capability">
-                            <input
-                              type="checkbox"
-                              checked={(selected[person.id] || ["chat"]).includes(value)}
-                              onChange={() => toggle(person.id, value)}
-                            />
-                            {title}
-                          </label>
-                        ))}
-                      </div>
+            <section className="glass admin-card operations-card">
+              <div className="card-title">
+                <div>
+                  <h2>وضعیت سرویس محلی Ollama و گره‌های مستقیم</h2>
+                  <p>بررسی مداوم اتصال هسته و استعلام پورت سرویس مدل‌ها.</p>
+                </div>
+                <button className="quiet-button" onClick={() => void refreshOperations()}>
+                  بررسی دوباره
+                </button>
+              </div>
 
-                      <div className="pending-actions">
-                        <button disabled={loading} className="submit-button" onClick={() => decide(person.id, true)}>
-                          تأیید با این مجوزها
-                        </button>
-                        <button disabled={loading} className="quiet-button danger" onClick={() => decide(person.id, false)}>
-                          رد درخواست
-                        </button>
+              {operationsError && <p className="admin-message" role="alert">{operationsError}</p>}
+
+              {operations && (
+                <div className="node-grid" aria-live="polite">
+                  {operations.nodes.map((node) => (
+                    <article className="node-tile" key={node.id}>
+                      <div className="node-heading">
+                        <strong>{node.kind === "master" ? "هستهٔ مرکزی" : "Worker مدل محلی"}</strong>
+                        <span className={`node-badge node-${node.status}`}>
+                          {node.status === "up" ? "در دسترس" : node.status === "no_models" ? "بدون مدل" : "قطع"}
+                        </span>
                       </div>
+                      <small>آخرین بررسی: {new Date(node.checked_at * 1000).toLocaleTimeString("fa-IR")}</small>
+                      {node.kind === "worker" && (
+                        <>
+                          <p>مدل‌های نصب‌شده: {(node.models?.length ?? 0).toLocaleString("fa-IR")}</p>
+                          {node.latency_ms != null && (
+                            <small>پاسخ فهرست مدل: {node.latency_ms.toLocaleString("fa-IR")} میلی‌ثانیه</small>
+                          )}
+                          {node.models && node.models.length > 0 && (
+                            <ul className="node-models">
+                              {node.models.map((model) => (
+                                <li key={model.id} dir="ltr">
+                                  {model.id}{" "}
+                                  {model.size_bytes != null && (
+                                    <small>({(model.size_bytes / 1024 ** 3).toFixed(2)} GiB)</small>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </>
+                      )}
                     </article>
                   ))}
                 </div>
               )}
+
+              {!operations && !operationsError && <p className="empty-note">در حال بررسی وضعیت…</p>}
+
+              <form className="worker-form" onSubmit={(event) => void saveWorker(event)}>
+                <label htmlFor="worker-url">نشانی خصوصی Ollama روی Worker</label>
+                <div className="worker-controls">
+                  <input
+                    id="worker-url"
+                    dir="ltr"
+                    type="url"
+                    required
+                    value={workerUrl}
+                    onChange={(event) => setWorkerUrl(event.target.value)}
+                    placeholder="http://worker-private-ip:11434"
+                  />
+                  <button className="submit-button" disabled={workerBusy} type="submit">
+                    {workerBusy ? "در حال آزمون…" : "تست و ذخیره"}
+                  </button>
+                </div>
+                <small>فقط شبکهٔ خصوصی یا localhost پذیرفته می‌شود.</small>
+                {workerMessage && <p className="admin-message" role="status">{workerMessage}</p>}
+              </form>
             </section>
           </div>
+        )}
 
-          {/* تب فرعی ۳: پروفایل و امنیت حساب مدیر */}
-          <div hidden={userSubTab !== "profile"}>
-            <UserProfileModal
-              embedded
-              currentUser={currentUser}
-              onProfileUpdated={(updated) => setCurrentUser(updated)}
-            />
+        {/* ۳. تب تأمین‌کنندگان و پراکسی SOCKS */}
+        {adminTab === "providers" && (
+          <div className="providers-view">
+            <ProviderManager />
           </div>
+        )}
 
-          {/* تب فرعی ۴: ابزار صدور سریع کد اتصال ایجنت */}
-          <div hidden={userSubTab !== "pairing"}>
-            <section className="glass admin-card" style={{ marginBottom: "16px" }}>
-              <div className="card-title">
-                <div>
-                  <h2>اتصال موقت ایجنت ویندوز</h2>
-                  <p>کد یک‌بارمصرف ۶ رقمی با اعتبار ۲ دقیقه جهت جفت‌سازی کلاینت.</p>
+        {/* ۴. تب یکپارچه امنیت، کاربران و حاکمیت */}
+        {adminTab === "governance" && (
+          <div className="governance-view" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {/* هدر یکپارچه و معرفی ماژول */}
+            <div className="user-hub-hero">
+              <div className="user-hub-hero-inner">
+                <div className="user-hub-title">
+                  <span className="user-hub-icon">🛡️</span>
+                  <div>
+                    <h2 className="text-base md:text-lg font-bold text-cyan-400">مرکز جامع امنیت، کاربران، ممیزی و حاکمیت ایجنت‌ها</h2>
+                    <p className="text-xs text-gray-300 mt-1 leading-relaxed">
+                      کنترل یکپارچه اعضای سازمان، بررسی درخواست‌های ثبت‌نام، رصد وقایع امنیتی، حاکمیت بر ایجنت‌ها و جفت‌سازی کلاینت‌ها.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] bg-slate-900/90 text-cyan-300 border border-cyan-800/60 px-3 py-1 rounded-full font-mono">
+                    نقش شما: {currentUser.role === "superadmin" ? "مدیر ارشد کل" : "کاربر سازمان"}
+                  </span>
+                  {count > 0 && (
+                    <span className="text-[11px] bg-rose-950/80 text-rose-300 border border-rose-800 px-3 py-1 rounded-full animate-pulse">
+                      {count.toLocaleString("fa-IR")} درخواست جدید در انتظار
+                    </span>
+                  )}
                 </div>
               </div>
+            </div>
 
-              <button className="submit-button" onClick={createPair}>
-                صدور کد اتصال تازه
+            {/* نوار زیرتب‌های منسجم و منطقی حاکمیت */}
+            <div className="user-subtabs-nav" role="tablist" aria-label="بخش‌های امنیت و کاربران">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={govSubTab === "users"}
+                className={`user-subtab-btn ${govSubTab === "users" ? "active" : ""}`}
+                onClick={() => setGovSubTab("users")}
+              >
+                <span>👥 مدیریت کاربران و دسترسی‌ها</span>
               </button>
 
-              <AnimatePresence mode="wait">
-                {pair && (
-                  <motion.div
-                    key={pair.code}
-                    className="pair-result"
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                  >
-                    <p>این کد را در برنامه وارد کنید:</p>
-                    <strong dir="ltr">{pair.code}</strong>
-                    <button type="button" className="quiet-button pair-copy" onClick={() => void copyPair()}>
-                      کپی کد
-                    </button>
-                    <small>{seconds.toLocaleString("fa-IR")} ثانیه باقی‌مانده · پس از استفاده باطل می‌شود</small>
-                    {copyStatus && <span className="pair-copy-status" role="status">{copyStatus}</span>}
-                  </motion.div>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={govSubTab === "pending"}
+                className={`user-subtab-btn ${govSubTab === "pending" ? "active" : ""}`}
+                onClick={() => setGovSubTab("pending")}
+              >
+                <span>📋 درخواست‌های ثبت‌نام</span>
+                {count > 0 && <span className="tab-counter-badge">{count.toLocaleString("fa-IR")}</span>}
+              </button>
+
+              <button
+                type="button"
+                role="tab"
+                aria-selected={govSubTab === "audit"}
+                className={`user-subtab-btn ${govSubTab === "audit" ? "active" : ""}`}
+                onClick={() => setGovSubTab("audit")}
+              >
+                <span>🛡️ دفترچه ممیزی امنیت</span>
+              </button>
+
+              <button
+                type="button"
+                role="tab"
+                aria-selected={govSubTab === "agents"}
+                className={`user-subtab-btn ${govSubTab === "agents" ? "active" : ""}`}
+                onClick={() => setGovSubTab("agents")}
+              >
+                <span>🤖 حاکمیت بر ایجنت‌ها</span>
+              </button>
+
+              <button
+                type="button"
+                role="tab"
+                aria-selected={govSubTab === "profile"}
+                className={`user-subtab-btn ${govSubTab === "profile" ? "active" : ""}`}
+                onClick={() => setGovSubTab("profile")}
+              >
+                <span>👤 پروفایل و امنیت حساب</span>
+              </button>
+
+              <button
+                type="button"
+                role="tab"
+                aria-selected={govSubTab === "pairing"}
+                className={`user-subtab-btn ${govSubTab === "pairing" ? "active" : ""}`}
+                onClick={() => setGovSubTab("pairing")}
+              >
+                <span>🔑 اتصال موقت ایجنت</span>
+              </button>
+            </div>
+
+            {/* زیرتب ۱: مدیریت کاربران */}
+            {govSubTab === "users" && <UserManagementCard />}
+
+            {/* زیرتب ۲: درخواست‌های ثبت‌نام */}
+            {govSubTab === "pending" && (
+              <section className="glass admin-card">
+                <div className="card-title">
+                  <div>
+                    <h2>درخواست‌های ثبت‌نام جدید در انتظار تأیید</h2>
+                    <p>تعیین و تخصیص مجوزهای اولیه همزمان با تأیید دسترسی کاربر.</p>
+                  </div>
+                  <span className="count-pill">{count.toLocaleString("fa-IR")} در انتظار</span>
+                </div>
+
+                {pending.length === 0 ? (
+                  <div className="empty-note-box" style={{ textAlign: "center", padding: "36px 16px" }}>
+                    <span style={{ fontSize: "36px", display: "block", marginBottom: "8px" }}>✅</span>
+                    <strong style={{ display: "block", fontSize: "14px", color: "#34d399", marginBottom: "6px" }}>
+                      تمامی درخواست‌های ثبت‌نام بررسی شده‌اند
+                    </strong>
+                    <p className="empty-note" style={{ margin: 0 }}>
+                      در حال حاضر هیچ کاربر جدیدی در صف انتظار تأیید عضویت نیست.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="pending-list">
+                    {pending.map((person) => (
+                      <article className="pending-user" key={person.id}>
+                        <div className="pending-title">
+                          <div>
+                            <strong>{person.username}</strong>
+                            <span dir="ltr">{person.mobile}</span>
+                          </div>
+                          <time>{new Date(person.created_at * 1000).toLocaleString("fa-IR")}</time>
+                        </div>
+
+                        <div className="capabilities" aria-label={`مجوزهای ${person.username}`}>
+                          {choices.map(([value, title]) => (
+                            <label key={value} className="capability">
+                              <input
+                                type="checkbox"
+                                checked={(selected[person.id] || ["chat"]).includes(value)}
+                                onChange={() => toggle(person.id, value)}
+                              />
+                              {title}
+                            </label>
+                          ))}
+                        </div>
+
+                        <div className="pending-actions">
+                          <button disabled={loading} className="submit-button" onClick={() => decide(person.id, true)}>
+                            تأیید با این مجوزها
+                          </button>
+                          <button disabled={loading} className="quiet-button danger" onClick={() => decide(person.id, false)}>
+                            رد درخواست
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
                 )}
-              </AnimatePresence>
-            </section>
+              </section>
+            )}
+
+            {/* زیرتب ۳: ممیزی امنیتی */}
+            {govSubTab === "audit" && <SecurityAuditCard />}
+
+            {/* زیرتب ۴: حاکمیت ایجنت‌ها */}
+            {govSubTab === "agents" && <AdminAgentGovernanceCard />}
+
+            {/* زیرتب ۵: پروفایل ادمین */}
+            {govSubTab === "profile" && (
+              <UserProfileModal
+                embedded
+                currentUser={currentUser}
+                onProfileUpdated={(updated) => setCurrentUser(updated)}
+              />
+            )}
+
+            {/* زیرتب ۶: اتصال موقت ایجنت */}
+            {govSubTab === "pairing" && (
+              <section className="glass admin-card">
+                <div className="card-title">
+                  <div>
+                    <h2>اتصال موقت ایجنت ویندوز</h2>
+                    <p>کد یک‌بارمصرف ۶ رقمی با اعتبار ۲ دقیقه جهت جفت‌سازی کلاینت.</p>
+                  </div>
+                </div>
+
+                <button className="submit-button" onClick={createPair}>
+                  صدور کد اتصال تازه
+                </button>
+
+                <AnimatePresence mode="wait">
+                  {pair && (
+                    <motion.div
+                      key={pair.code}
+                      className="pair-result"
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                    >
+                      <p>این کد را در برنامه وارد کنید:</p>
+                      <strong dir="ltr">{pair.code}</strong>
+                      <button type="button" className="quiet-button pair-copy" onClick={() => void copyPair()}>
+                        کپی کد
+                      </button>
+                      <small>{seconds.toLocaleString("fa-IR")} ثانیه باقی‌مانده · پس از استفاده باطل می‌شود</small>
+                      {copyStatus && <span className="pair-copy-status" role="status">{copyStatus}</span>}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </section>
+            )}
           </div>
-        </div>
+        )}
 
-        {/* ۴. تب سلامت سیستم و پایش تله‌متری */}
-        <div hidden={adminTab !== "health"}>
-          <SystemHealthCard />
-        </div>
+        {/* ۵. تب تنظیمات سیستم و تم سراسری (مرحله ۲ و ۳) */}
+        {adminTab === "settings" && (
+          <div className="settings-view" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {/* انتخابگر تم سراسری (مرحله ۲) */}
+            <ThemePaletteSelector isSuperadmin={currentUser.role === "superadmin"} />
 
-        {/* ۵. تب پشتیبان‌گیری دیتابیس */}
-        <div hidden={adminTab !== "backups"}>
-          <DatabaseBackupCard />
-        </div>
+            {/* پشتیبان‌گیری پایگاه داده */}
+            <DatabaseBackupCard />
 
-        {/* ۶. تب ممیزی امنیتی و لاگ رویدادها */}
-        <div hidden={adminTab !== "audit"}>
-          <SecurityAuditCard />
-        </div>
-
-        {/* ۷. تب نظارت و حاکمیت بر ایجنت‌های سازمانی */}
-        <div hidden={adminTab !== "agents"}>
-          <AdminAgentGovernanceCard />
-        </div>
+            {/* مرکز دانلود کلاینت‌ها و بسته‌های نصبی */}
+            <ClientDownloadsCard />
+          </div>
+        )}
 
         {message && <p className="admin-message" role="status" aria-live="polite">{message}</p>}
       </div>

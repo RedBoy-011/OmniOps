@@ -156,6 +156,26 @@ class IdentityStore:
                        ("ollama_endpoint", endpoint, principal["id"], int(self.clock())))
             self._audit(db, principal["id"], "ollama_endpoint_changed", None)
 
+    def theme_palette(self) -> str:
+        with self._db() as db:
+            row = db.execute("SELECT value FROM settings WHERE name=?", ("theme_palette",)).fetchone()
+            val = row["value"] if row else None
+            return val if val in ("magenta", "cyan", "emerald", "amber", "indigo") else "magenta"
+
+    def set_theme_palette(self, principal: dict, palette: str) -> str:
+        if principal.get("role") != "superadmin":
+            raise IdentityError("Superadmin permission required to change system theme", 403)
+        p = str(palette or "").strip().lower()
+        if p not in ("magenta", "cyan", "emerald", "amber", "indigo"):
+            raise IdentityError("Invalid theme palette", 400)
+        with self._lock, self._db() as db:
+            db.execute("INSERT INTO settings (name, value, changed_by, changed_at) VALUES (?, ?, ?, ?) "
+                       "ON CONFLICT(name) DO UPDATE SET value=excluded.value, "
+                       "changed_by=excluded.changed_by, changed_at=excluded.changed_at",
+                       ("theme_palette", p, principal["id"], int(self.clock())))
+            self._audit(db, principal["id"], "theme_palette_changed", p)
+        return p
+
     def bootstrap_admin(self, username: str, password: str, mobile: str) -> str:
         display, key = _normalize_username(username)
         number = _normalize_mobile(mobile)

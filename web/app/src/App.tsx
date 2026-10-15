@@ -3,6 +3,7 @@ import { AuthPage } from "./AuthPage";
 import { AdminPanel } from "./AdminPanel";
 import { UserWorkspace } from "./UserWorkspace";
 import { api, forgetSession, keepSessionInMemory, getStoredToken, type LoginResult } from "./api";
+import { applyThemePalette, getActiveThemePalette } from "./design-system/tokens";
 
 export default function App() {
   const [session, setSession] = useState<LoginResult | null>(() => {
@@ -19,6 +20,18 @@ export default function App() {
   });
 
   const [plane, setPlane] = useState<"admin" | "workspace">("workspace");
+
+  // Sync global theme on startup from backend or saved storage
+  useEffect(() => {
+    applyThemePalette(getActiveThemePalette());
+    api.getTheme()
+      .then((res) => {
+        if (res.active_palette) {
+          applyThemePalette(res.active_palette);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
 
   // Sync plane when session is initialized or user role changes
   useEffect(() => {
