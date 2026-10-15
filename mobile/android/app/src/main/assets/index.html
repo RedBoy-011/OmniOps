@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>OmniOps Coucou Companion</title>
+  <title>OmniOps Mobile Operator</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,73 +14,258 @@
         <span class="brand-badge">⚡</span>
         <div>
           <h1 class="brand-title">OmniOps Coucou</h1>
-          <span class="brand-subtitle">مرکز پایش و کنترل همراه ایجنت‌ها</span>
+          <span class="brand-subtitle">کنسول همراه کنترل و هدایت ایجنت ویندوزی</span>
         </div>
       </div>
       <div class="connection-status-pill" id="connPill">
-        <span class="status-dot"></span>
-        <span id="connStatusText">حالت محلی (آفلاین)</span>
+        <span class="status-dot" id="connDot"></span>
+        <span id="connStatusText">آفلاین</span>
       </div>
     </header>
 
-    <!-- Master Connection Card -->
-    <section class="card glass-card">
-      <div class="card-header">
-        <span class="card-icon">🌐</span>
-        <h2>اتصال به هسته OmniOps Master</h2>
-      </div>
-      <p class="card-desc">آدرس سرور مستر (Localhost یا IP شبکه محلی) را وارد نمایید:</p>
-      <div class="input-group">
-        <input type="text" id="serverUrlInput" placeholder="http://192.168.1.100:9000" dir="ltr">
-        <button id="btnConnect" class="btn btn-primary">اتصال و ذخیره</button>
-      </div>
-    </section>
-
-    <!-- Biometric Command Approval Gate -->
-    <section class="card glass-card">
-      <div class="card-header">
-        <span class="card-icon">🔒</span>
-        <h2>درگاه تأیید بایومتریک فرامین</h2>
-      </div>
-      <p class="card-desc">تأیید امنیتی اقدامات حساس با اثر انگشت یا شناسایی چهره:</p>
-      <div class="approval-box">
-        <div class="cmd-info">
-          <span class="badge badge-warning">دستور معلق: powershell</span>
-          <p class="cmd-text" dir="ltr">Get-Service -Name OmniOpsAgent | Restart-Service</p>
+    <!-- VIEW 1: AUTHENTICATION & PAIRING SCREEN -->
+    <main id="authView" class="view-section active">
+      <!-- Server Endpoint Config -->
+      <section class="card glass-card">
+        <div class="card-header">
+          <span class="card-icon">🌐</span>
+          <h2>آدرس سرور مستر (Master URL)</h2>
         </div>
-        <button id="btnBiometricAuth" class="btn btn-emerald">
-          <span>👆</span>
-          <span>تأیید هویت با اثر انگشت</span>
+        <p class="card-desc">نشانی سرور مرکزی هسته OmniOps در شبکه محلی یا اینترنت:</p>
+        <div class="input-group">
+          <input type="text" id="serverUrlInput" value="http://172.19.30.94:9000" placeholder="http://172.19.30.94:9000" dir="ltr">
+        </div>
+      </section>
+
+      <!-- Auth Tabs: 6-Digit PIN vs Password -->
+      <section class="card glass-card">
+        <div class="tab-switcher">
+          <button id="tabPinBtn" class="tab-btn active">🔑 کد ۶ رقمی جفت‌سازی</button>
+          <button id="tabLoginBtn" class="tab-btn">👤 ورود کاربری</button>
+        </div>
+
+        <!-- Tab 1: 6-Digit PIN Pairing -->
+        <div id="tabPinContent" class="tab-content active">
+          <p class="card-desc">کد ۶ رقمی موقت صادر شده از پنل هسته را جهت اتصال مستقیم به محیط اپراتور وارد کنید:</p>
+          <div class="pin-input-container">
+            <input type="text" id="pinInput" class="pin-input" maxlength="6" pattern="\d{6}" placeholder="------" inputmode="numeric" dir="ltr">
+          </div>
+          <button id="btnRedeemPin" class="btn btn-primary btn-block">
+            <span>⚡</span>
+            <span>اتصال و احراز هویت با کد ۶ رقمی</span>
+          </button>
+        </div>
+
+        <!-- Tab 2: Username & Password Login -->
+        <div id="tabLoginContent" class="tab-content">
+          <p class="card-desc">ورود با نام کاربری و کلمه عبور مدیر سیستم:</p>
+          <div class="form-group">
+            <label class="form-label" for="loginUsername">نام کاربری:</label>
+            <input type="text" id="loginUsername" class="text-input" value="admin" dir="ltr">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="loginPassword">کلمه عبور:</label>
+            <input type="password" id="loginPassword" class="text-input" value="admin" dir="ltr">
+          </div>
+          <button id="btnLogin" class="btn btn-primary btn-block">
+            <span>🚀</span>
+            <span>ورود به کنسول عملیاتی</span>
+          </button>
+        </div>
+
+        <div id="authAlert" class="auth-alert" style="display: none;"></div>
+      </section>
+    </main>
+
+    <!-- VIEW 2: DEDICATED MOBILE OPERATOR CONSOLE -->
+    <main id="operatorView" class="view-section">
+      <!-- Operator Session Bar -->
+      <section class="session-bar glass-card">
+        <div class="session-info">
+          <span class="user-avatar">👤</span>
+          <div>
+            <div class="user-name-row">
+              <span id="sessionUsername" class="user-name">admin</span>
+              <span id="sessionRole" class="badge badge-cyan">اپراتور ارشد</span>
+            </div>
+            <span id="sessionServer" class="server-endpoint-text" dir="ltr">172.19.30.94:9000</span>
+          </div>
+        </div>
+        <div class="session-actions">
+          <button id="btnRefreshStatus" class="btn-icon" title="بروزرسانی داده‌ها">🔄</button>
+          <button id="btnLogout" class="btn-icon btn-icon-danger" title="خروج / قطع اتصال">🚪</button>
+        </div>
+      </section>
+
+      <!-- Windows Agent Node Card -->
+      <section class="card glass-card">
+        <div class="card-header">
+          <span class="card-icon">💻</span>
+          <div class="header-text-group">
+            <h2>گره ایجنت ویندوز (Windows Agent)</h2>
+            <span id="nodeStatusPill" class="status-badge-pulse">🟢 برخط (Online)</span>
+          </div>
+        </div>
+
+        <div class="node-meta-grid">
+          <div class="meta-box">
+            <span class="meta-label">نام گره هدف:</span>
+            <span id="targetNodeName" class="meta-value" dir="ltr">LOUIS-PC</span>
+          </div>
+          <div class="meta-box">
+            <span class="meta-label">سهمیه توکن:</span>
+            <span id="quotaInfo" class="meta-value">۳۶۰,۰۰۰ توکن باقیمانده</span>
+          </div>
+        </div>
+
+        <div class="active-ecosystem-strip">
+          <span class="eco-badge">⚡ Antigravity IDE</span>
+          <span class="eco-badge">🧠 Claude Desktop</span>
+          <span class="eco-badge">🛡️ Edge Agent</span>
+          <span class="eco-badge">🚀 Ollama GPU</span>
+        </div>
+
+        <!-- Issue 6-Digit Pairing PIN for Windows Agent -->
+        <div class="pair-issuer-box">
+          <button id="btnGeneratePin" class="btn btn-secondary btn-block">
+            <span>🔑</span>
+            <span>صدور کد ۶ رقمی اتصال برای ایجنت ویندوز</span>
+          </button>
+          
+          <div id="pinDisplayCard" class="pin-display-card" style="display: none;">
+            <span class="pin-display-title">کد جفت‌سازی ۶ رقمی جدید:</span>
+            <div class="pin-code-row">
+              <span id="generatedPinCode" class="generated-pin" dir="ltr">------</span>
+              <button id="btnCopyPin" class="btn-copy" title="کپی کد">📋 کپی</button>
+            </div>
+            <p class="pin-hint">این کد را در برنامه نصبی ایجنت ویندوز وارد کنید (اعتبار: ۵ دقیقه).</p>
+            <div class="pin-timer-bar">
+              <div id="pinProgress" class="pin-progress"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Live Biometric Approval Gate -->
+      <section class="card glass-card" id="approvalGateSection">
+        <div class="card-header">
+          <span class="card-icon">🔒</span>
+          <h2>درگاه تأیید زنده فرامین ویندوز (Approval Gate)</h2>
+        </div>
+        <p class="card-desc">تأیید امنیتی اقدامات حساس با اسکن اثر انگشت یا احراز بایومتریک:</p>
+        
+        <div id="pendingApprovalsList" class="approvals-container">
+          <div class="empty-state">
+            <span>✨</span>
+            <p>در حال حاضر فرمانی در انتظار تأیید نیست. تمامی پردازش‌های ویندوز با امنیت بالا در جریانند.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Windows Task Dispatcher -->
+      <section class="card glass-card">
+        <div class="card-header">
+          <span class="card-icon">⚡</span>
+          <h2>ارسال و ادامه فرآیندهای ویندوز (Task Dispatcher)</h2>
+        </div>
+        <p class="card-desc">فرمان‌ها و عملیات سیستمی زیر را مستقیماً از گوشی روی ویندوز اجرا کنید:</p>
+
+        <!-- Quick Action Tiles -->
+        <div class="quick-actions-grid">
+          <button class="quick-action-tile" data-cmd="Restart-Service -Name OmniOpsAgent" data-desc="راه‌اندازی مجدد سرویس ایجنت ویندوز" data-risk="high">
+            <span class="tile-icon">🔄</span>
+            <span class="tile-title">راه‌اندازی ایجنت</span>
+          </button>
+          <button class="quick-action-tile" data-cmd="git status --short" data-desc="بررسی وضعیت شاخه و تغییرات گیت" data-risk="low">
+            <span class="tile-icon">📦</span>
+            <span class="tile-title">وضعیت گیت</span>
+          </button>
+          <button class="quick-action-tile" data-cmd="Remove-Item -Recurse -Force $env:TEMP\*" data-desc="پاکسازی پوشه حافظه موقت ویندوز" data-risk="medium">
+            <span class="tile-icon">🧹</span>
+            <span class="tile-title">پاکسازی کش</span>
+          </button>
+          <button class="quick-action-tile" data-cmd="Get-Process | Sort-Object CPU -Descending | Select-Object -First 10" data-desc="نمایش پردازش‌های سنگین ویندوز" data-risk="low">
+            <span class="tile-icon">📊</span>
+            <span class="tile-title">مصرف CPU</span>
+          </button>
+        </div>
+
+        <!-- Custom Command Dispatch Form -->
+        <div class="custom-cmd-box">
+          <label class="form-label" for="customCmdInput">دستور پاورشل یا خط فرمان سفارشی:</label>
+          <div class="input-with-button">
+            <input type="text" id="customCmdInput" placeholder="Get-Service | Where-Object Status -eq 'Running'" dir="ltr">
+            <select id="customCmdRisk" class="risk-select">
+              <option value="low">کم‌ریسک (فوری)</option>
+              <option value="high" selected>حساس (با تأیید)</option>
+            </select>
+          </div>
+          <button id="btnDispatchCustom" class="btn btn-cyan btn-block">
+            <span>🚀</span>
+            <span>ارسال دستور به ایجنت ویندوز</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Command Execution Stream & Logs -->
+      <section class="card glass-card">
+        <div class="card-header">
+          <span class="card-icon">📋</span>
+          <h2>تاریخچه و خروجی فرامین ارسالی</h2>
+        </div>
+        <div id="commandHistoryList" class="history-container">
+          <p class="loading-text">در حال بارگذاری لاگ فرامین...</p>
+        </div>
+      </section>
+
+      <!-- Emergency Kill Switch -->
+      <section class="card glass-card card-danger">
+        <div class="card-header">
+          <span class="card-icon">🛑</span>
+          <h2>سوئیچ توقف اضطراری (Emergency Kill-Switch)</h2>
+        </div>
+        <p class="card-desc">توقف فوری کلیه ایجنت‌ها، فرآیندهای پس‌زمینه و فرامین در حال اجرا بر روی ویندوز و هسته:</p>
+        <button id="btnKillSwitch" class="btn btn-danger btn-block">
+          <span>🛑</span>
+          <span>توقف فوری و کامل تمام فرآیندها</span>
         </button>
-        <div id="authResult" class="auth-result"></div>
-      </div>
-    </section>
+      </section>
 
-    <!-- Coucou Floating Companion Island -->
-    <section class="card glass-card">
-      <div class="card-header">
-        <span class="card-icon">🛸</span>
-        <h2>جزیره شناور (Coucou Floating Island)</h2>
-      </div>
-      <p class="card-desc">نمایش ویجت شناور کپسولی ایجنت روی سایر برنامه‌های اندروید:</p>
-      <div class="toggle-row">
-        <span>فعال‌سازی سرویس شناور برخط</span>
-        <label class="switch">
-          <input type="checkbox" id="floatingToggle">
-          <span class="slider"></span>
-        </label>
-      </div>
-    </section>
+      <!-- Companion Options -->
+      <section class="card glass-card card-options">
+        <div class="toggle-row">
+          <div>
+            <span class="toggle-title">ویجت کپسولی شناور (Coucou Floating Island)</span>
+            <span class="toggle-subtitle">نمایش ابزار شناور روی سایر برنامه‌های گوشی</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="floatingToggle">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="desktop-link-row">
+          <button id="btnOpenDesktop" class="btn-link">
+            <span>🌐</span>
+            <span>مشاهده نسخه وب دسکتاپ هسته (Admin Dashboard) ↗</span>
+          </button>
+        </div>
+      </section>
+    </main>
 
-    <!-- Emergency Kill Switch -->
-    <section class="card glass-card card-danger">
-      <div class="card-header">
-        <span class="card-icon">🛑</span>
-        <h2>سوئیچ توقف اضطراری (Kill Switch)</h2>
+    <!-- Modal for Terminal Output -->
+    <div id="outputModal" class="modal-overlay" style="display: none;">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 id="modalCmdTitle">خروجی ترمینال فرمان</h3>
+          <button id="btnCloseModal" class="btn-close">✕</button>
+        </div>
+        <div class="modal-meta-row">
+          <span id="modalCmdStatus" class="badge">وضعیت: تکمیل شده</span>
+          <span id="modalCmdTime" class="meta-time">مدت زمان: 120ms</span>
+        </div>
+        <pre id="modalCmdOutput" class="terminal-view" dir="ltr">بدون خروجی</pre>
       </div>
-      <p class="card-desc">توقف فوری کلیه ایجنت‌ها و تسک‌های فعال در کل شبکه:</p>
-      <button id="btnKillSwitch" class="btn btn-danger">توقف فوری تمام ایجنت‌ها</button>
-    </section>
+    </div>
   </div>
 
   <script src="app.js"></script>

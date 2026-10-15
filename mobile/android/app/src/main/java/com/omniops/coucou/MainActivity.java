@@ -18,9 +18,15 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
+import org.json.JSONObject;
+
 public class MainActivity extends AppCompatActivity {
     private static final String PREFS_NAME = "omniops_mobile_prefs";
     private static final String KEY_SERVER_URL = "server_url";
+    private static final String KEY_AUTH_TOKEN = "auth_token";
+    private static final String KEY_USERNAME = "username";
+    private static final String KEY_ROLE = "role";
+    private static final String DEFAULT_SERVER_URL = "http://172.19.30.94:9000";
 
     private WebView webView;
     private SwipeRefreshLayout swipeRefresh;
@@ -62,7 +68,7 @@ public class MainActivity extends AppCompatActivity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                // Fallback to bundled offline dashboard
+                // Fallback to bundled dedicated mobile operator console
                 view.loadUrl("file:///android_asset/index.html");
             }
         });
@@ -71,11 +77,22 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadInitialContent() {
-        String savedUrl = prefs.getString(KEY_SERVER_URL, "");
-        if (!savedUrl.isEmpty()) {
-            webView.loadUrl(savedUrl);
-        } else {
+        // ALWAYS keep the app inside the dedicated Mobile Operator Console
+        webView.loadUrl("file:///android_asset/index.html");
+    }
+
+    @Override
+    public void onBackPressed() {
+        String currentUrl = webView.getUrl();
+        if (currentUrl != null && !currentUrl.startsWith("file:///android_asset/")) {
+            // Return from external web view back to the dedicated mobile operator console
             webView.loadUrl("file:///android_asset/index.html");
+            return;
+        }
+        if (webView.canGoBack()) {
+            webView.goBack();
+        } else {
+            super.onBackPressed();
         }
     }
 
@@ -104,17 +121,68 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
+        public boolean hasBiometric() {
+            return BiometricHelper.isBiometricAvailable(MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public void saveSession(String serverUrl, String token, String username, String role) {
+            prefs.edit()
+                .putString(KEY_SERVER_URL, serverUrl != null ? serverUrl.trim() : "")
+                .putString(KEY_AUTH_TOKEN, token != null ? token.trim() : "")
+                .putString(KEY_USERNAME, username != null ? username.trim() : "")
+                .putString(KEY_ROLE, role != null ? role.trim() : "")
+                .apply();
+        }
+
+        @JavascriptInterface
+        public String getSession() {
+            JSONObject obj = new JSONObject();
+            try {
+                obj.put("serverUrl", prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL));
+                obj.put("token", prefs.getString(KEY_AUTH_TOKEN, ""));
+                obj.put("username", prefs.getString(KEY_USERNAME, ""));
+                obj.put("role", prefs.getString(KEY_ROLE, ""));
+            } catch (Exception ignored) {}
+            return obj.toString();
+        }
+
+        @JavascriptInterface
+        public void clearSession() {
+            prefs.edit()
+                .remove(KEY_AUTH_TOKEN)
+                .remove(KEY_USERNAME)
+                .remove(KEY_ROLE)
+                .apply();
+        }
+
+        @JavascriptInterface
         public void setServerUrl(String url) {
-            prefs.edit().putString(KEY_SERVER_URL, url).apply();
+            prefs.edit().putString(KEY_SERVER_URL, url != null ? url.trim() : "").apply();
             runOnUiThread(() -> {
-                Toast.makeText(MainActivity.this, "آدرس سرور ذخیره شد: " + url, Toast.LENGTH_SHORT).show();
-                webView.loadUrl(url);
+                Toast.makeText(MainActivity.this, "آدرس سرور ذخیره شد", Toast.LENGTH_SHORT).show();
             });
         }
 
         @JavascriptInterface
         public String getServerUrl() {
-            return prefs.getString(KEY_SERVER_URL, "");
+            return prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL);
+        }
+
+        @JavascriptInterface
+        public void openDesktopWeb(String url) {
+            runOnUiThread(() -> {
+                if (url != null && !url.isEmpty()) {
+                    webView.loadUrl(url);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void returnToMobileOperator() {
+            runOnUiThread(() -> {
+                webView.loadUrl("file:///android_asset/index.html");
+            });
         }
 
         @JavascriptInterface

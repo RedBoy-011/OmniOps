@@ -409,7 +409,15 @@ def make_server(
             try:
                 if not authorization.startswith("Bearer "):
                     raise IdentityError("Bearer session required", 401)
-                return store.authenticate(authorization.removeprefix("Bearer "), audience)
+                token = authorization.removeprefix("Bearer ")
+                if audience in ("any", "*"):
+                    for aud in ("web", "agent"):
+                        try:
+                            return store.authenticate(token, aud)
+                        except IdentityError:
+                            pass
+                    raise IdentityError("Session is no longer active", 401)
+                return store.authenticate(token, audience)
             except IdentityError as exc:
                 self._send(exc.status, {"error": {"message": str(exc)}})
                 return None
@@ -642,7 +650,12 @@ def make_server(
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
-            audience = "agent" if path.startswith("/api/agent/") and path != "/api/agent/pairing" else "web"
+            if path.startswith("/api/mobile/"):
+                audience = "any"
+            elif path.startswith("/api/agent/") and path != "/api/agent/pairing":
+                audience = "agent"
+            else:
+                audience = "web"
             principal = None
             if path not in {"/api/auth/register", "/api/auth/login", "/api/agent/redeem"}:
                 principal = self._principal(audience)
@@ -1010,21 +1023,32 @@ def make_server(
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 return
             if parsed.path in ('/api/mobile/approvals/pending', '/api/mobile/status'):
-                principal = self._principal('web') or self._principal('agent')
+                principal = self._principal('any')
                 if principal is None:
                     return
                 if parsed.path == '/api/mobile/approvals/pending':
                     self._send(200, {'requests': mobile_store.list_pending(principal)})
                     return
                 if parsed.path == '/api/mobile/status':
+                    node_name = 'LOUIS-PC'
+                    if nodes is not None:
+                        try:
+                            edge_nodes = [n for n in nodes.list_nodes(principal) if n.get("role") in ("edge", "worker") and not n.get("revoked_at")]
+                            if edge_nodes:
+                                node_name = edge_nodes[0].get("name") or node_name
+                        except Exception:
+                            pass
                     self._send(200, {
-                        'system': 'Connected - LOUIS-PC',
-                        'node_name': 'LOUIS-PC',
+                        'system': f'Connected - {node_name}',
+                        'node_name': node_name,
                         'status': 'online',
+                        'operator_user': principal.get('username', 'admin'),
+                        'role': principal.get('role', 'operator'),
                         'agents': [
-                            {'name': 'Antigravity', 'status': 'Ready', 'type': 'IDE Agent'},
-                            {'name': 'Claude Desktop', 'status': 'Ready', 'type': 'Desktop Assistant'},
-                            {'name': 'OmniOps Ollama', 'status': 'Ready', 'type': 'Local GPU'},
+                            {'name': 'Antigravity IDE', 'status': 'Active', 'type': 'IDE Agent'},
+                            {'name': 'Claude Desktop', 'status': 'Active', 'type': 'Desktop Assistant'},
+                            {'name': 'OmniOps Edge Agent', 'status': 'Online', 'type': 'Windows Agent'},
+                            {'name': 'Ollama Local GPU', 'status': 'Ready', 'type': 'Local Model'},
                         ],
                         'plan_usage': {
                             'used_percent': 64,
@@ -1035,7 +1059,7 @@ def make_server(
                     })
                     return
             if parsed.path in ('/api/mobile/commands/history', '/api/agent/commands/pending'):
-                audience = 'agent' if parsed.path.startswith('/api/agent/') else 'web'
+                audience = 'agent' if parsed.path.startswith('/api/agent/') else ('any' if parsed.path.startswith('/api/mobile/') else 'web')
                 principal = self._principal(audience)
                 if principal is None:
                     return
