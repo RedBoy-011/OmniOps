@@ -43,8 +43,8 @@ def _unb64(data: str) -> bytes:
 
 
 def _password_hash(password: str) -> str:
-    if not isinstance(password, str) or not 12 <= len(password) <= 1024:
-        raise IdentityError("Password must contain 12–1024 characters")
+    if not isinstance(password, str) or not 4 <= len(password) <= 1024:
+        raise IdentityError("Password must contain 4–1024 characters")
     salt = secrets.token_bytes(16)
     digest = hashlib.scrypt(
         password.encode(), salt=salt, n=PASSWORD_N, r=PASSWORD_R,

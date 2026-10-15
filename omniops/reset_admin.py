@@ -153,8 +153,8 @@ def main():
                 print("\nعملیات لغو شد.", file=sys.stderr)
                 sys.exit(1)
 
-    if len(password) < 12:
-        print("خطا: رمز عبور باید حداقل ۱۲ نویسه باشد.", file=sys.stderr)
+    if len(password) < 4:
+        print("خطا: رمز عبور باید حداقل ۴ نویسه باشد.", file=sys.stderr)
         sys.exit(1)
 
     # 5. Execute reset

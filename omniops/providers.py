@@ -32,6 +32,35 @@ def _cipher(signing_key):
     return Fernet(base64.urlsafe_b64encode(derived))
 
 
+def _parse_keys(key):
+    if key is None:
+        return []
+    if isinstance(key, list):
+        keys = [str(k).strip() for k in key if str(k).strip()]
+    elif isinstance(key, str):
+        keys = [k.strip() for k in re.split(r'[\r\n,;]+', key) if k.strip()]
+    else:
+        raise IdentityError('Invalid API key')
+    if not keys:
+        raise IdentityError('Invalid API key')
+    for k in keys:
+        if not 8 <= len(k) <= 1024 or re.search(r'[^\x21-\x7e]', k):
+            raise IdentityError('Invalid API key')
+    return keys
+
+
+def _extract_keys(raw: str) -> list[str]:
+    raw = raw.strip() if isinstance(raw, str) else ''
+    if raw.startswith('[') and raw.endswith(']'):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return [str(k).strip() for k in parsed if str(k).strip()]
+        except Exception:
+            pass
+    return [raw] if raw else []
+
+
 def _admin(principal):
     if principal.get('role') != 'superadmin' or 'provider.manage' not in principal.get('capabilities', []):
         raise IdentityError('Superadmin provider permission required', 403)
@@ -309,6 +338,14 @@ class ProviderRegistry:
             for row in db.execute('SELECT * FROM provider_prices'):
                 prices.setdefault(row['kind'], {})[row['model']] = {
                     'input': row['input_usd_per_million'], 'output': row['output_usd_per_million']}
+            cipher = _cipher(self.identity.signing_key)
+            keys_count = {}
+            for kind_name, acc in accounts.items():
+                try:
+                    dec = cipher.decrypt(acc['secret'].encode()).decode()
+                    keys_count[kind_name] = len(_extract_keys(dec))
+                except Exception:
+                    keys_count[kind_name] = 1
         return [{'kind': kind, 'configured': kind in accounts,
                  'enabled': bool(accounts[kind]['enabled']) if kind in accounts else False,
                  'network_mode': accounts[kind]['network_mode'] if kind in accounts else 'direct',
@@ -316,29 +353,33 @@ class ProviderRegistry:
                  'models': json.loads(accounts[kind]['models_json']) if kind in accounts else [],
                  'tested_at': accounts[kind]['tested_at'] if kind in accounts else None,
                  'prices': prices.get(kind, {}),
-                 'catalog_prices': json.loads(accounts[kind]['catalog_prices_json']) if kind in accounts else {}} for kind in ENDPOINTS]
+                 'catalog_prices': json.loads(accounts[kind]['catalog_prices_json']) if kind in accounts else {},
+                 'keys_count': keys_count.get(kind, 0)} for kind in ENDPOINTS]
 
     def save(self, principal, kind, key, mode, proxy_url):
         _admin(principal)
         if kind not in ENDPOINTS:
             raise IdentityError('Unsupported provider')
         proxy_url = _proxy(proxy_url, mode)
-        if key is not None and (not isinstance(key, str) or not 8 <= len(key) <= 1024 or re.search(r'[^\x21-\x7e]', key)):
-            raise IdentityError('Invalid API key')
+        parsed_keys = _parse_keys(key) if key is not None else None
         with self.identity._lock, self.identity._db() as db:
             db.execute('BEGIN IMMEDIATE')
             existing = db.execute('SELECT secret FROM provider_accounts WHERE kind=?', (kind,)).fetchone()
             if key is None and not existing:
                 raise IdentityError('API key required for new provider')
             cipher = _cipher(self.identity.signing_key)
-            secret = cipher.encrypt(key.encode()).decode() if key is not None else existing['secret']
+            if parsed_keys is not None:
+                key_payload = json.dumps(parsed_keys) if len(parsed_keys) > 1 else parsed_keys[0]
+                secret = cipher.encrypt(key_payload.encode()).decode()
+            else:
+                secret = existing['secret']
             db.execute('''INSERT INTO provider_accounts (kind,secret,network_mode,proxy_url,updated_at)
                 VALUES (?,?,?,?,?) ON CONFLICT(kind) DO UPDATE SET secret=excluded.secret,
                 network_mode=excluded.network_mode,proxy_url=excluded.proxy_url,
                 enabled=0,models_json='[]',catalog_prices_json='{}',tested_at=NULL,updated_at=excluded.updated_at''',
                 (kind, secret, mode, proxy_url, int(self.identity.clock())))
             self.identity._audit(db, principal['id'], 'provider_configured', kind)
-        return {'status': 'saved'}
+        return {'status': 'saved', 'keys_count': len(parsed_keys) if parsed_keys is not None else 1}
 
     def test(self, principal, kind):
         _admin(principal)
@@ -350,8 +391,12 @@ class ProviderRegistry:
             raise IdentityError('Configure provider first', 404)
         from cryptography.fernet import InvalidToken
         try:
-            key = _cipher(self.identity.signing_key).decrypt(row['secret'].encode()).decode()
-        except (InvalidToken, UnicodeError) as exc:
+            raw_secret = _cipher(self.identity.signing_key).decrypt(row['secret'].encode()).decode()
+            keys = _extract_keys(raw_secret)
+            if not keys:
+                raise ValueError('No API keys found')
+            key = keys[0]
+        except (InvalidToken, UnicodeError, ValueError) as exc:
             raise IdentityError('Provider key cannot be decrypted; enter a new API key', 409) from exc
         if kind == 'openrouter':
             models, catalog_prices = fetch_models(kind, key, row['network_mode'], row['proxy_url'], with_prices=True)
@@ -366,7 +411,7 @@ class ProviderRegistry:
             if updated.rowcount != 1:
                 raise IdentityError('Provider changed during test; retry', 409)
             self.identity._audit(db, principal['id'], 'provider_tested', kind)
-        return {'models': models, 'network_mode': row['network_mode']}
+        return {'models': models, 'network_mode': row['network_mode'], 'keys_count': len(keys)}
 
     def test_socks(self, principal, proxy_url=None, kind=None):
         _admin(principal)
@@ -479,33 +524,54 @@ class ProviderRegistry:
             raise IdentityError('External model is not enabled and verified', 404)
         from cryptography.fernet import InvalidToken
         try:
-            key = _cipher(self.identity.signing_key).decrypt(row['secret'].encode()).decode()
-        except (InvalidToken, UnicodeError) as exc:
+            raw_secret = _cipher(self.identity.signing_key).decrypt(row['secret'].encode()).decode()
+            keys = _extract_keys(raw_secret)
+            if not keys:
+                raise ValueError('No API keys found')
+        except (InvalidToken, UnicodeError, ValueError) as exc:
             raise IdentityError('Provider key cannot be decrypted', 409) from exc
         with self.identity._lock, self.identity._db() as db:
             self.identity._audit(db, principal['id'], 'external_chat_requested', requested)
-        if kind == 'gemini':
-            document = _provider_post(ENDPOINTS[kind][0], '/v1beta/models/' + quote(model, safe='') + ':generateContent',
-                                      key, row['network_mode'], row['proxy_url'],
-                                      {'contents': [{'role': 'user', 'parts': [{'text': prompt.strip()}]}],
-                                       'generationConfig': {'maxOutputTokens': 256}})
+
+        if not hasattr(self, '_key_rotation'):
+            self._key_rotation = {}
+        start_idx = self._key_rotation.get(kind, 0) % len(keys)
+        self._key_rotation[kind] = (start_idx + 1) % len(keys)
+        ordered_keys = keys[start_idx:] + keys[:start_idx]
+
+        last_error = None
+        for key in ordered_keys:
             try:
-                parts = document['candidates'][0]['content']['parts']
-                text = ''.join(part['text'] for part in parts if isinstance(part.get('text'), str))
-            except (KeyError, IndexError, TypeError) as exc:
-                raise IdentityError('Gemini returned no text response', 502) from exc
-        else:
-            document = _provider_post(ENDPOINTS[kind][0], '/api/v1/chat/completions',
-                                      key, row['network_mode'], row['proxy_url'],
-                                      {'model': model, 'messages': [{'role': 'user', 'content': prompt.strip()}],
-                                       'max_tokens': 256, 'stream': False})
-            try:
-                text = document['choices'][0]['message']['content']
-            except (KeyError, IndexError, TypeError) as exc:
-                raise IdentityError('OpenRouter returned no text response', 502) from exc
-        if not isinstance(text, str) or not text.strip():
-            raise IdentityError('Provider returned an empty text response', 502)
-        return {'reply': text, 'model': requested}
+                if kind == 'gemini':
+                    document = _provider_post(ENDPOINTS[kind][0], '/v1beta/models/' + quote(model, safe='') + ':generateContent',
+                                              key, row['network_mode'], row['proxy_url'],
+                                              {'contents': [{'role': 'user', 'parts': [{'text': prompt.strip()}]}],
+                                               'generationConfig': {'maxOutputTokens': 256}})
+                    try:
+                        parts = document['candidates'][0]['content']['parts']
+                        text = ''.join(part['text'] for part in parts if isinstance(part.get('text'), str))
+                    except (KeyError, IndexError, TypeError) as exc:
+                        raise IdentityError('Gemini returned no text response', 502) from exc
+                else:
+                    document = _provider_post(ENDPOINTS[kind][0], '/api/v1/chat/completions',
+                                              key, row['network_mode'], row['proxy_url'],
+                                              {'model': model, 'messages': [{'role': 'user', 'content': prompt.strip()}],
+                                               'max_tokens': 256, 'stream': False})
+                    try:
+                        text = document['choices'][0]['message']['content']
+                    except (KeyError, IndexError, TypeError) as exc:
+                        raise IdentityError('OpenRouter returned no text response', 502) from exc
+                if not isinstance(text, str) or not text.strip():
+                    raise IdentityError('Provider returned an empty text response', 502)
+                return {'reply': text, 'model': requested}
+            except IdentityError as exc:
+                last_error = exc
+                err_text = str(exc).lower()
+                if len(ordered_keys) > 1 and any(tok in err_text for tok in ('429', 'quota', 'rate limit', 'resource_exhausted')):
+                    continue
+                raise
+        if last_error:
+            raise last_error
 
     def fallback_model(self, principal):
         models = self.chat_models(principal)

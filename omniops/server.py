@@ -660,11 +660,12 @@ def make_server(
                 return
             try:
                 if path.startswith('/api/admin/providers/'):
-                    if not self._node_channel():
-                        return
                     if providers is None:
                         raise IdentityError('Provider registry unavailable', 503)
                     if path.endswith('/save'):
+                        if not (isinstance(self.connection, ssl.SSLSocket) and self.connection.version() == "TLSv1.3"):
+                            self._send(426, {"error": {"message": "Direct TLS 1.3 is required for provider credentials"}})
+                            return
                         result = providers.save(principal, payload.get('kind'), payload.get('api_key'),
                                                 payload.get('network_mode'), payload.get('proxy_url'))
                     elif path.endswith('/test-socks'):

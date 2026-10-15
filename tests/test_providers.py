@@ -353,4 +353,50 @@ class ProviderTests(unittest.TestCase):
             self.assertIsNone(down['latency_ms'])
             self.assertIn('خطا در برقراری ارتباط', down['message'])
 
+    def test_multi_api_key_pool_save_rotation_and_failover(self):
+        # 1. Save two keys separated by newline
+        keys_input = "key-alpha-12345678\nkey-bravo-12345678"
+        save_res = self.providers.save(self.admin, 'gemini', keys_input, 'direct', '')
+        self.assertEqual(save_res['keys_count'], 2)
+
+        # 2. Check list
+        item = next(p for p in self.providers.list(self.admin) if p['kind'] == 'gemini')
+        self.assertEqual(item['keys_count'], 2)
+
+        # 3. Test provider
+        with patch('omniops.providers.fetch_models', return_value=['gemini-2.5-flash']) as fetch:
+            test_res = self.providers.test(self.admin, 'gemini')
+            self.assertEqual(test_res['keys_count'], 2)
+            fetch.assert_called_once_with('gemini', 'key-alpha-12345678', 'direct', '')
+
+        self.providers.enable(self.admin, 'gemini', True)
+
+        # 4. Rotation across requests
+        recorded_keys = []
+        def fake_post(host, path, key, mode, proxy_url, payload):
+            recorded_keys.append(key)
+            return {'candidates': [{'content': {'parts': [{'text': f'from {key}'}]}}]}
+
+        with patch('omniops.providers._provider_post', side_effect=fake_post):
+            r1 = self.providers.complete(self.admin, 'gemini/gemini-2.5-flash', 'hello 1')
+            r2 = self.providers.complete(self.admin, 'gemini/gemini-2.5-flash', 'hello 2')
+        self.assertEqual(recorded_keys, ['key-alpha-12345678', 'key-bravo-12345678'])
+        self.assertEqual(r1['reply'], 'from key-alpha-12345678')
+        self.assertEqual(r2['reply'], 'from key-bravo-12345678')
+
+        # 5. Failover when first key hits HTTP 429 rate limit
+        failover_keys = []
+        def failover_post(host, path, key, mode, proxy_url, payload):
+            failover_keys.append(key)
+            if key == 'key-alpha-12345678':
+                raise IdentityError('Provider chat returned HTTP 429; quota exceeded', 502)
+            return {'candidates': [{'content': {'parts': [{'text': 'failover success'}]}}]}
+
+        # Reset rotation index to 0
+        self.providers._key_rotation['gemini'] = 0
+        with patch('omniops.providers._provider_post', side_effect=failover_post):
+            res = self.providers.complete(self.admin, 'gemini/gemini-2.5-flash', 'retry test')
+        self.assertEqual(failover_keys, ['key-alpha-12345678', 'key-bravo-12345678'])
+        self.assertEqual(res['reply'], 'failover success')
+
 

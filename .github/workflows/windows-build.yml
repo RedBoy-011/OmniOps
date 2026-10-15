@@ -138,6 +138,12 @@ jobs:
           if [ -f windows-artifacts/SHA256SUMS.txt ]; then
             cp -f windows-artifacts/SHA256SUMS.txt release-assets/
           fi
+      - name: Purge legacy release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete-asset "${{ github.ref_name }}" OmniOps-Coucou-v1.0.apk --yes 2>/dev/null || true
+          gh release delete-asset main OmniOps-Coucou-v1.0.apk --yes 2>/dev/null || true
       - name: Release to GitHub
         uses: softprops/action-gh-release@v2
         with:
