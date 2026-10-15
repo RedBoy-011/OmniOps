@@ -223,7 +223,8 @@ def make_server(
                         fc = item.get('content')[:48000]
                         doc_blocks.append(f"--- پیوست سند [{idx}]: {fn} ---\n```\n{fc}\n```")
                 if doc_blocks:
-                    effective_prompt = f"{'\n\n'.join(doc_blocks)}\n\n{prompt.strip()}"
+                    joined_docs = "\n\n".join(doc_blocks)
+                    effective_prompt = f"{joined_docs}\n\n{prompt.strip()}"
             elif isinstance(attached, dict) and isinstance(attached.get('name'), str) and isinstance(attached.get('content'), str):
                 fname = attached.get('name')[:120]
                 fcontent = attached.get('content')[:48000]

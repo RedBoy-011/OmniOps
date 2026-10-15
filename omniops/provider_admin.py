@@ -1,4 +1,4 @@
-﻿"""Read one provider key from stdin in a root-only session; never pass secrets as arguments."""
+"""Read one provider key from stdin in a root-only session; never pass secrets as arguments."""
 
 import argparse
 import os

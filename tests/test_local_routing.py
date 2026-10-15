@@ -1,4 +1,4 @@
-﻿import unittest
+import unittest
 
 from omniops.local_routing import choose_local_chat_model
 from omniops.ollama import LocalModel
