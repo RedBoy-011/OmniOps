@@ -28,6 +28,26 @@ export function UserProfileModal({ currentUser, onClose, onProfileUpdated, embed
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passBusy, setPassBusy] = useState(false);
 
+  // Server URL copy
+  const [originUrl, setOriginUrl] = useState("");
+  const [copiedUrl, setCopiedUrl] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setOriginUrl(window.location.origin);
+    }
+  }, []);
+
+  const handleCopyOriginUrl = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(originUrl);
+        setCopiedUrl(true);
+        setTimeout(() => setCopiedUrl(false), 2500);
+      }
+    } catch {}
+  };
+
   async function loadProfile() {
     setLoading(true);
     setError("");
@@ -229,6 +249,22 @@ export function UserProfileModal({ currentUser, onClose, onProfileUpdated, embed
                       <span>
                         {new Date(report.user.created_at * 1000).toLocaleString("fa-IR")}
                       </span>
+                    </div>
+                    <div className="info-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px", paddingTop: "8px", borderTop: "1px dashed rgba(255,255,255,0.1)" }}>
+                      <span style={{ fontWeight: 600, color: "#94a3b8" }}>نشانی اتصال کلاینت‌ها (سرور):</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <code dir="ltr" style={{ color: "#38bdf8", fontWeight: "bold", background: "rgba(15, 23, 42, 0.7)", padding: "4px 8px", borderRadius: "6px" }}>
+                          {originUrl}
+                        </code>
+                        <button
+                          type="button"
+                          className="quiet-button"
+                          style={{ padding: "4px 10px", fontSize: "11px", margin: 0, borderColor: copiedUrl ? "#10b981" : "#0284c7" }}
+                          onClick={() => void handleCopyOriginUrl()}
+                        >
+                          {copiedUrl ? "✓ کپی شد" : "📋 کپی نشانی"}
+                        </button>
+                      </div>
                     </div>
                   </div>
 

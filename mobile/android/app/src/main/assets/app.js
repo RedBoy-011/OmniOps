@@ -66,10 +66,54 @@ document.addEventListener("DOMContentLoaded", () => {
   const modalCmdOutput = document.getElementById("modalCmdOutput");
   const btnCloseModal = document.getElementById("btnCloseModal");
 
+  // Helper: Convert Persian/Arabic digits to ASCII 0-9
+  function toAsciiDigits(str) {
+    if (!str || typeof str !== "string") return "";
+    return str
+      .replace(/[۰-۹]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 1776 + 48))
+      .replace(/[٠-٩]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 1632 + 48));
+  }
+
+  // Helper: Bridge or Native Fetch fallback
+  function universalFetch(url, options = {}) {
+    if (window.OmniOpsBridge && typeof window.OmniOpsBridge.httpRequest === "function") {
+      return new Promise((resolve, reject) => {
+        const callbackName = "__omniops_cb_" + Math.random().toString(36).slice(2);
+        const method = options.method || "GET";
+        const headers = options.headers || {};
+        const body = options.body || "";
+
+        window[callbackName] = (status, responseText) => {
+          delete window[callbackName];
+          if (status === -1) {
+            reject(new Error(responseText || "خطا در اتصال شبکه به سرور"));
+          } else {
+            resolve({
+              ok: status >= 200 && status < 300,
+              status: status,
+              text: async () => responseText,
+              json: async () => {
+                try {
+                  return JSON.parse(responseText);
+                } catch {
+                  return { raw: responseText };
+                }
+              },
+            });
+          }
+        };
+
+        window.OmniOpsBridge.httpRequest(url, method, JSON.stringify(headers), body, callbackName);
+      });
+    }
+
+    return fetch(url, options);
+  }
+
   // Helper: Smart URL Normalization
   function normalizeServerUrl(rawUrl) {
     if (!rawUrl || typeof rawUrl !== "string") return "";
-    let clean = rawUrl.trim();
+    let clean = toAsciiDigits(rawUrl.trim());
     if (!clean) return "";
     clean = clean.replace(/\/+$/, "");
     if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
@@ -121,7 +165,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const srv = normalizeServerUrl(currentServerUrl || (serverUrlInput ? serverUrlInput.value : ""));
     if (!srv) return;
     try {
-      const res = await fetch(`${srv}/api/theme`);
+      const res = await universalFetch(`${srv}/api/theme`);
       if (res.ok) {
         const data = await res.json();
         if (data.palette && AVAILABLE_PALETTES.includes(data.palette)) {
@@ -140,7 +184,7 @@ document.addEventListener("DOMContentLoaded", () => {
         window.OmniOpsBridge.vibrateDevice(35);
       }
       if (currentToken && currentServerUrl) {
-        fetch(`${currentServerUrl}/api/admin/theme`, {
+        universalFetch(`${currentServerUrl}/api/admin/theme`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -285,7 +329,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Auto-format PIN input
   pinInput.addEventListener("input", (e) => {
-    e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6);
+    const raw = toAsciiDigits(e.target.value);
+    e.target.value = raw.replace(/\D/g, "").slice(0, 6);
     if (e.target.value.length === 6) {
       redeemPairingCode(e.target.value);
     }
@@ -293,7 +338,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 1. Redeem 6-Digit PIN Pairing
   btnRedeemPin.addEventListener("click", () => {
-    const pin = pinInput.value.trim();
+    const pin = toAsciiDigits(pinInput.value.trim()).replace(/\D/g, "");
     if (pin.length !== 6) {
       showAuthAlert("لطفاً یک کد ۶ رقمی معتبر وارد نمایید.");
       return;
@@ -302,6 +347,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   async function redeemPairingCode(pin) {
+    const cleanPin = toAsciiDigits(pin).replace(/\D/g, "");
     const rawSrv = (serverUrlInput ? serverUrlInput.value.trim() : "") || currentServerUrl;
     const srv = normalizeServerUrl(rawSrv);
     if (!srv) {
@@ -318,16 +364,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const deviceId = "mobile-op-" + Math.floor(Math.random() * 899999 + 100000);
 
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
-
-      const resp = await fetch(`${srv}/api/agent/redeem`, {
+      const resp = await universalFetch(`${srv}/api/agent/redeem`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: pin, device_id: deviceId }),
-        signal: controller.signal,
+        body: JSON.stringify({ code: cleanPin, device_id: deviceId }),
       });
-      clearTimeout(timeoutId);
 
       const data = await resp.json();
       if (!resp.ok) {
@@ -341,15 +382,11 @@ document.addEventListener("DOMContentLoaded", () => {
         window.OmniOpsBridge.showToast("اتصال با کد ۶ رقمی موفقیت‌آمیز بود.");
       }
 
-      saveSession(srv, data.token, data.user?.username || data.profile?.username || "paired_operator", data.user?.role || data.profile?.role || "operator");
+      saveSession(srv, data.token, data.profile?.username || data.user?.username || "paired_operator", data.profile?.role || data.user?.role || "operator");
       pinInput.value = "";
       showOperatorConsole();
     } catch (err) {
-      if (err.name === "AbortError") {
-        showAuthAlert(`مهلت اتصال به سرور در نشانی ${srv} به پایان رسید. از روشن بودن سرور و درستی پورت اطمینان حاصل کنید.`);
-      } else {
-        showAuthAlert(err.message || `خطا در اتصال به سرور در نشانی ${srv}.`);
-      }
+      showAuthAlert(err.message || `خطا در اتصال به سرور در نشانی ${srv}.`);
     } finally {
       btnRedeemPin.disabled = false;
       btnRedeemPin.innerHTML = `<span>⚡</span><span>اتصال و احراز هویت با کد ۶ رقمی</span>`;
@@ -360,8 +397,8 @@ document.addEventListener("DOMContentLoaded", () => {
   btnLogin.addEventListener("click", async () => {
     const rawSrv = (serverUrlInput ? serverUrlInput.value.trim() : "") || currentServerUrl;
     const srv = normalizeServerUrl(rawSrv);
-    const user = loginUsername.value.trim();
-    const pass = loginPassword.value;
+    const user = toAsciiDigits(loginUsername.value.trim());
+    const pass = toAsciiDigits(loginPassword.value);
 
     if (!srv) {
       showAuthAlert("لطفاً نشانی سرور را وارد نمایید (مثال: 192.168.1.50:9000 یا 172.19.30.94:9443).");
@@ -380,16 +417,11 @@ document.addEventListener("DOMContentLoaded", () => {
     btnLogin.innerText = "در حال اعتبارسنجی...";
 
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
-
-      const resp = await fetch(`${srv}/api/auth/login`, {
+      const resp = await universalFetch(`${srv}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: user, password: pass }),
-        signal: controller.signal,
       });
-      clearTimeout(timeoutId);
 
       const data = await resp.json();
       if (!resp.ok) {
@@ -403,11 +435,7 @@ document.addEventListener("DOMContentLoaded", () => {
       saveSession(srv, data.token, data.user?.username || data.profile?.username || user, data.user?.role || data.profile?.role || "admin");
       showOperatorConsole();
     } catch (err) {
-      if (err.name === "AbortError") {
-        showAuthAlert(`مهلت اتصال به سرور در نشانی ${srv} به پایان رسید. از روشن بودن سرور و درستی پورت اطمینان حاصل کنید.`);
-      } else {
-        showAuthAlert(err.message || `خطا در اتصال به سرور در نشانی ${srv}.`);
-      }
+      showAuthAlert(err.message || `خطا در اتصال به سرور در نشانی ${srv}.`);
     } finally {
       btnLogin.disabled = false;
       btnLogin.innerHTML = `<span>🚀</span><span>ورود به کنسول عملیاتی</span>`;
@@ -453,7 +481,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
       // 1. Fetch Status with explicit agent liveness
-      const statusRes = await fetch(`${currentServerUrl}/api/mobile/status`, {
+      const statusRes = await universalFetch(`${currentServerUrl}/api/mobile/status`, {
         headers: { Authorization: `Bearer ${currentToken}` },
       });
 
@@ -499,7 +527,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // 2. Fetch Active Projects & Runs (Phase 7)
       try {
-        const projRes = await fetch(`${currentServerUrl}/api/mobile/projects`, {
+        const projRes = await universalFetch(`${currentServerUrl}/api/mobile/projects`, {
           headers: { Authorization: `Bearer ${currentToken}` },
         });
         if (projRes.ok) {
@@ -509,7 +537,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch (pe) {}
 
       // 3. Fetch Pending Approvals
-      const appRes = await fetch(`${currentServerUrl}/api/mobile/approvals/pending`, {
+      const appRes = await universalFetch(`${currentServerUrl}/api/mobile/approvals/pending`, {
         headers: { Authorization: `Bearer ${currentToken}` },
       });
       if (appRes.ok) {
@@ -518,7 +546,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       // 4. Fetch Command History
-      const cmdRes = await fetch(`${currentServerUrl}/api/mobile/commands/history?limit=25`, {
+      const cmdRes = await universalFetch(`${currentServerUrl}/api/mobile/commands/history?limit=25`, {
         headers: { Authorization: `Bearer ${currentToken}` },
       });
       if (cmdRes.ok) {
@@ -640,7 +668,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     try {
-      const res = await fetch(`${currentServerUrl}/api/mobile/projects/steer`, {
+      const res = await universalFetch(`${currentServerUrl}/api/mobile/projects/steer`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -752,7 +780,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function decideApproval(requestId, approved, authMethod) {
     try {
-      const res = await fetch(`${currentServerUrl}/api/mobile/approvals/decide`, {
+      const res = await universalFetch(`${currentServerUrl}/api/mobile/approvals/decide`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -788,7 +816,7 @@ document.addEventListener("DOMContentLoaded", () => {
     btnGeneratePin.innerText = "در حال تولید کد ۶ رقمی...";
 
     try {
-      const res = await fetch(`${currentServerUrl}/api/agent/pairing`, {
+      const res = await universalFetch(`${currentServerUrl}/api/agent/pairing`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -882,7 +910,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     try {
-      const res = await fetch(`${currentServerUrl}/api/mobile/commands/dispatch`, {
+      const res = await universalFetch(`${currentServerUrl}/api/mobile/commands/dispatch`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -999,7 +1027,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     try {
-      const res = await fetch(`${currentServerUrl}/api/mobile/kill-switch`, {
+      const res = await universalFetch(`${currentServerUrl}/api/mobile/kill-switch`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

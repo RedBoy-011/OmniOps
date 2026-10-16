@@ -133,9 +133,18 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
                 >
                   {copyStatus || 'کپی'}
                 </button>
+                <button
+                  type="button"
+                  onClick={onGeneratePair}
+                  className="text-xs bg-[#1e293b] hover:bg-[#334155] text-amber-300 border border-amber-500/40 px-2.5 py-1.5 rounded-lg transition font-medium flex items-center gap-1"
+                  title="دریافت فوری کد جدید و ابطال کد فعلی بدون نیاز به صبر کردن"
+                >
+                  <span>🔄</span>
+                  <span>کد جدید</span>
+                </button>
               </div>
               <span className="text-[11px] text-gray-400">
-                اعتبار تا: <strong className="text-amber-400 font-mono">{seconds}</strong> ثانیه دیگر
+                اعتبار تا: <strong className="text-amber-400 font-mono">{seconds}</strong> ثانیه دیگر · امکان دریافت کد جدید در هر لحظه
               </span>
             </div>
           ) : (

@@ -843,9 +843,25 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
                   </div>
                 </div>
 
-                <button className="submit-button" onClick={createPair}>
-                  صدور کد اتصال تازه
-                </button>
+                <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap", marginBottom: "16px" }}>
+                  <button className="submit-button" onClick={createPair} style={{ margin: 0 }}>
+                    {pair ? "🔄 صدور مجدد کد اتصال (تغییر فوری کد)" : "🔑 صدور کد اتصال تازه"}
+                  </button>
+                  <button
+                    type="button"
+                    className="quiet-button"
+                    style={{ margin: 0, padding: "8px 14px" }}
+                    onClick={() => {
+                      if (navigator.clipboard?.writeText) {
+                        void navigator.clipboard.writeText(window.location.origin);
+                        setMessage("نشانی سرور در کلیپ‌بورد کپی شد.");
+                        setTimeout(() => setMessage(""), 3000);
+                      }
+                    }}
+                  >
+                    📋 کپی نشانی سرور ({typeof window !== "undefined" ? window.location.host : ""})
+                  </button>
+                </div>
 
                 <AnimatePresence mode="wait">
                   {pair && (
@@ -858,10 +874,21 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
                     >
                       <p>این کد را در برنامه وارد کنید:</p>
                       <strong dir="ltr">{pair.code}</strong>
-                      <button type="button" className="quiet-button pair-copy" onClick={() => void copyPair()}>
-                        کپی کد
-                      </button>
-                      <small>{seconds.toLocaleString("fa-IR")} ثانیه باقی‌مانده · پس از استفاده باطل می‌شود</small>
+                      <div style={{ display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap", marginTop: "10px" }}>
+                        <button type="button" className="quiet-button pair-copy" onClick={() => void copyPair()} style={{ margin: 0 }}>
+                          📋 کپی کد
+                        </button>
+                        <button
+                          type="button"
+                          className="submit-button"
+                          style={{ padding: "6px 14px", fontSize: "12px", margin: 0, background: "linear-gradient(135deg, #0284c7, #2563eb)" }}
+                          onClick={() => void createPair()}
+                          title="دریافت فوری کد جدید و ابطال کد قبلی بدون نیاز به صبر کردن"
+                        >
+                          🔄 تغییر کد اتصال (دریافت کد جدید)
+                        </button>
+                      </div>
+                      <small style={{ marginTop: "10px", display: "block" }}>{seconds.toLocaleString("fa-IR")} ثانیه باقی‌مانده · امکان دریافت کد جدید در هر لحظه</small>
                       {copyStatus && <span className="pair-copy-status" role="status">{copyStatus}</span>}
                     </motion.div>
                   )}
@@ -881,7 +908,13 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
             <DatabaseBackupCard />
 
             {/* مرکز دانلود کلاینت‌ها و بسته‌های نصبی */}
-            <ClientDownloadsCard />
+            <ClientDownloadsCard
+              pair={pair}
+              seconds={seconds}
+              copyStatus={copyStatus}
+              onGeneratePair={createPair}
+              onCopyPair={() => void copyPair()}
+            />
           </div>
         )}
 

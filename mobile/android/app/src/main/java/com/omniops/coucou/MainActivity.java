@@ -20,6 +20,15 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
+
 public class MainActivity extends AppCompatActivity {
     private static final String PREFS_NAME = "omniops_mobile_prefs";
     private static final String KEY_SERVER_URL = "server_url";
@@ -62,6 +71,8 @@ public class MainActivity extends AppCompatActivity {
         settings.setLoadWithOverviewMode(true);
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
+        settings.setAllowFileAccessFromFileURLs(true);
+        settings.setAllowUniversalAccessFromFileURLs(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
         webView.setWebChromeClient(new WebChromeClient());
@@ -214,6 +225,61 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 stopService(serviceIntent);
             }
+        }
+
+        @JavascriptInterface
+        public void httpRequest(String urlStr, String method, String headersJson, String bodyJson, String callbackJs) {
+            new Thread(() -> {
+                HttpURLConnection conn = null;
+                try {
+                    URL url = new URL(urlStr);
+                    conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod(method != null ? method.toUpperCase() : "GET");
+                    conn.setConnectTimeout(10000);
+                    conn.setReadTimeout(15000);
+                    conn.setDoInput(true);
+
+                    if (headersJson != null && !headersJson.isEmpty()) {
+                        JSONObject headers = new JSONObject(headersJson);
+                        Iterator<String> keys = headers.keys();
+                        while (keys.hasNext()) {
+                            String k = keys.next();
+                            conn.setRequestProperty(k, headers.getString(k));
+                        }
+                    }
+
+                    if (bodyJson != null && !bodyJson.isEmpty() && !"GET".equalsIgnoreCase(method)) {
+                        conn.setDoOutput(true);
+                        try (OutputStream os = conn.getOutputStream()) {
+                            os.write(bodyJson.getBytes(StandardCharsets.UTF_8));
+                        }
+                    }
+
+                    int code = conn.getResponseCode();
+                    InputStream is = (code >= 200 && code < 400) ? conn.getInputStream() : conn.getErrorStream();
+                    String responseBody = "";
+                    if (is != null) {
+                        try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                            StringBuilder sb = new StringBuilder();
+                            String line;
+                            while ((line = reader.readLine()) != null) {
+                                sb.append(line);
+                            }
+                            responseBody = sb.toString();
+                        }
+                    }
+
+                    String escapedBody = responseBody.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "");
+                    triggerJs(callbackJs + "(" + code + ", '" + escapedBody + "')");
+                } catch (Exception e) {
+                    String err = e.getMessage() != null ? e.getMessage().replace("'", "\\'") : "Network error";
+                    triggerJs(callbackJs + "(-1, '" + err + "')");
+                } finally {
+                    if (conn != null) {
+                        conn.disconnect();
+                    }
+                }
+            }).start();
         }
 
         private void triggerJs(String code) {
