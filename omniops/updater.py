@@ -12,6 +12,7 @@ import json
 import logging
 import shutil
 import subprocess
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -240,9 +241,16 @@ def apply_update(repo_root: Path | str | None = None, branch: str = "main") -> d
     # Step 4: Sync release assets into the core downloads directory (replace outdated binaries)
     sync_res = sync_release_assets(root, branch, force=True)
 
+    status_str = "updated" if prev_commit != new_commit else "already_latest"
+    msg = (
+        "سرور با موفقیت به آخرین نسخه گیت‌هاب به‌روزرسانی شد، باینری‌های کلاینت‌ها همگام شدند و فرانت‌اند بازسازی گردید."
+        if prev_commit != new_commit
+        else "سرور در آخرین نسخه قرار دارد. باینری‌های کلاینت‌ها همگام و فرانت‌اند آماده است."
+    )
+
     return {
-        "status": "updated",
-        "message": "سرور با موفقیت به آخرین نسخه گیت‌هاب به‌روزرسانی شد و فایل‌های انتشار به هسته کپی شدند.",
+        "status": status_str,
+        "message": msg,
         "previous_commit": prev_commit[:7],
         "new_commit": new_commit[:7],
         "rebuilt_frontend": rebuilt_frontend,
@@ -250,7 +258,25 @@ def apply_update(repo_root: Path | str | None = None, branch: str = "main") -> d
         "synced_files": sync_res.get("synced_files", []),
         "pull_output": pull_res.stdout.strip(),
         "restart_recommended": True,
+        "restarting": True,
+        "reload_delay": 3,
     }
+
+
+def schedule_service_restart(delay_seconds: float = 1.5) -> None:
+    """Schedule a delayed restart of omniops services in background thread so HTTP response can finish cleanly."""
+    if subprocess.os.name == "nt":
+        return
+
+    def _restart() -> None:
+        time.sleep(delay_seconds)
+        try:
+            subprocess.run(["systemctl", "restart", "omniops-master", "omniops-master-tls"], check=False)
+        except Exception as exc:
+            logger.error("Failed to restart systemd services: %s", exc)
+
+    thread = threading.Thread(target=_restart, daemon=True)
+    thread.start()
 
 
 def compute_file_sha256(path: Path | str) -> str:

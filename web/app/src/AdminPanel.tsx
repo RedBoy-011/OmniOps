@@ -5,7 +5,7 @@ import { NodeManager } from "./NodeManager";
 import { ProviderManager } from "./ProviderManager";
 import { SystemHealthCard } from "./components/SystemHealthCard";
 import { DatabaseBackupCard } from "./components/DatabaseBackupCard";
-import { UpdateNotificationBanner } from "./components/UpdateNotificationBanner";
+import { SystemUpdateCenterCard } from "./components/SystemUpdateCenterCard";
 import { UserManagementCard } from "./components/UserManagementCard";
 import { UserProfileModal } from "./components/UserProfileModal";
 import { SecurityAuditCard } from "./components/SecurityAuditCard";
@@ -288,9 +288,6 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
           </div>
         </header>
 
-        {/* بنر سیستم به‌روزرسانی هوشمند گیت‌هاب */}
-        <UpdateNotificationBanner />
-
         {/* هدر معرفی کنسول مدیریت */}
         <div className="admin-hero">
           <span className="form-eyebrow">MISSION CONTROL / INFRASTRUCTURE</span>
@@ -433,6 +430,17 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
                 >
                   🔄 استعلام وضعیت سرورها
                 </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: "12px", padding: "6px 14px", borderColor: "#0891b2", color: "#67e8f9" }}
+                  onClick={() => {
+                    const el = document.querySelector(".system-update-center-card");
+                    if (el) el.scrollIntoView({ behavior: "smooth" });
+                  }}
+                >
+                  🚀 مرکز به‌روزرسانی
+                </button>
               </div>
 
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
@@ -457,6 +465,9 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
                 </button>
               </div>
             </div>
+
+            {/* مرکز مستقل و یکپارچه به‌روزرسانی سامانه (هسته + برنامه‌ها + فرانت‌اند) */}
+            <SystemUpdateCenterCard />
 
             {/* نتایج زنده تست پینگ در صورت وجود */}
             {pingResult && (

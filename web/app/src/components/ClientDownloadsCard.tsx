@@ -23,8 +23,6 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
   const [originUrl, setOriginUrl] = useState('');
   const [downloadsInfo, setDownloadsInfo] = useState<DownloadsInfoResponse | null>(null);
   const [copiedChecksum, setCopiedChecksum] = useState<string | null>(null);
-  const [syncingAssets, setSyncingAssets] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   useEffect(() => {
     void api.downloadsInfo().then(setDownloadsInfo).catch(() => {});
@@ -38,22 +36,6 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
         setTimeout(() => setCopiedChecksum(null), 2500);
       }
     } catch {}
-  };
-
-  const handleSyncAssets = async () => {
-    setSyncingAssets(true);
-    setSyncMessage(null);
-    try {
-      const res = await api.syncReleaseAssets();
-      setSyncMessage(res.message);
-      const updated = await api.downloadsInfo();
-      setDownloadsInfo(updated);
-      setTimeout(() => setSyncMessage(null), 5000);
-    } catch (err) {
-      setSyncMessage(err instanceof Error ? err.message : 'خطا در همگام‌سازی فایل‌های انتشار');
-    } finally {
-      setSyncingAssets(false);
-    }
   };
 
   const getFile = (filename: string): CoreDownloadFile | undefined => {
@@ -122,25 +104,8 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
           >
             <span>📦 انتشارها (Releases)</span>
           </a>
-          <button
-            type="button"
-            onClick={handleSyncAssets}
-            disabled={syncingAssets}
-            className="flex items-center gap-1.5 text-[11px] bg-cyan-950/70 hover:bg-cyan-900/90 text-cyan-300 border border-cyan-700/60 px-3 py-1 rounded-full transition shadow-sm cursor-pointer disabled:opacity-50"
-            title="کپی و دانلود آخرین فایل‌های اجرایی از گیت‌هاب به حافظه محلی هسته جهت دانلود پرسرعت و پایدار در شبکه داخلی"
-          >
-            <span>🔄</span>
-            <span>{syncingAssets ? 'در حال همگام‌سازی...' : 'همگام‌سازی باینری‌ها در هسته'}</span>
-          </button>
         </div>
       </div>
-
-      {syncMessage && (
-        <div className="p-3 bg-cyan-950/60 border border-cyan-800/80 rounded-xl text-xs text-cyan-200 animate-fade-in flex items-center justify-between">
-          <span>{syncMessage}</span>
-          <button type="button" onClick={() => setSyncMessage(null)} className="text-cyan-400 hover:text-white mr-2">✕</button>
-        </div>
-      )}
 
       {/* ۲. کد پین موقت اتصال دوطرفه (Direct Pairing Gateway) */}
       <div className="p-5 rounded-2xl bg-gradient-to-r from-[#171e29] to-[#131922] border border-[#2d3748] flex flex-col md:flex-row justify-between items-center gap-4">

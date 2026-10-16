@@ -292,13 +292,17 @@ export type ProjectSteeringResponse = {
 };
 
 export type UpdateResult = {
-  status: "updated" | "error";
+  status: "updated" | "already_latest" | "error";
   message: string;
   previous_commit?: string;
   new_commit?: string;
   rebuilt_frontend?: boolean;
   pull_output?: string;
   restart_recommended?: boolean;
+  release_assets_synced?: boolean;
+  synced_files?: string[];
+  restarting?: boolean;
+  reload_delay?: number;
 };
 
 export type AuditLog = {

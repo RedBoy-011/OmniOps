@@ -791,7 +791,10 @@ def make_server(
                     if principal["role"] != "superadmin":
                         raise IdentityError("Superadmin access required", 403)
                     repo_root = Path(__file__).resolve().parent.parent
-                    self._send(200, updater.apply_update(repo_root=repo_root))
+                    update_res = updater.apply_update(repo_root=repo_root)
+                    self._send(200, update_res)
+                    if update_res.get("status") in ("updated", "already_latest"):
+                        updater.schedule_service_restart(delay_seconds=1.5)
                 elif path == "/api/admin/system/sync-release-assets":
                     if principal["role"] != "superadmin":
                         raise IdentityError("Superadmin access required", 403)
