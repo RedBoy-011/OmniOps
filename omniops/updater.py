@@ -165,7 +165,7 @@ def apply_update(repo_root: Path | str | None = None, branch: str = "main") -> d
 
     # Step 1: git fetch
     fetch_res = subprocess.run(
-        ["git", "fetch", "origin", branch],
+        ["git", "fetch", "origin", f"refs/heads/{branch}:refs/remotes/origin/{branch}"],
         cwd=str(root),
         capture_output=True,
         text=True,
@@ -180,7 +180,7 @@ def apply_update(repo_root: Path | str | None = None, branch: str = "main") -> d
 
     # Step 2: git pull
     pull_res = subprocess.run(
-        ["git", "pull", "--ff-only", "origin", branch],
+        ["git", "pull", "--ff-only", "origin", f"refs/heads/{branch}"],
         cwd=str(root),
         capture_output=True,
         text=True,
@@ -189,7 +189,7 @@ def apply_update(repo_root: Path | str | None = None, branch: str = "main") -> d
     if pull_res.returncode != 0:
         # Fallback to normal pull if fast-forward fails
         pull_res = subprocess.run(
-            ["git", "pull", "origin", branch],
+            ["git", "pull", "origin", f"refs/heads/{branch}"],
             cwd=str(root),
             capture_output=True,
             text=True,

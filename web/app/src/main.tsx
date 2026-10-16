@@ -4,18 +4,13 @@ import App from "./App";
 import "vazirmatn/Vazirmatn-Variable-font-face.css";
 import "./styles.css";
 
-// Register Service Worker for Universal PWA
+// PWA disabled as requested: Unregister any legacy Service Worker
 if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker
-      .register("/sw.js")
-      .then((reg) => {
-        console.log("[OmniOps PWA] Service Worker registered:", reg.scope);
-      })
-      .catch((err) => {
-        console.warn("[OmniOps PWA] Service Worker registration failed:", err);
-      });
-  });
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    for (const registration of registrations) {
+      registration.unregister();
+    }
+  }).catch(() => undefined);
 }
 
 createRoot(document.getElementById("root")!).render(

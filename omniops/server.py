@@ -726,9 +726,12 @@ def make_server(
                     store.revoke(principal)
                 self._send(200, {"status": "ok"})
                 return
-            payload = self._body()
-            if payload is None:
-                return
+            if path in {"/api/admin/system/update", "/api/admin/system/sync-release-assets", "/api/admin/system/backups"} and int(self.headers.get("Content-Length", 0) or 0) < 1:
+                payload = {}
+            else:
+                payload = self._body()
+                if payload is None:
+                    return
             try:
                 if path.startswith('/api/admin/providers/'):
                     if providers is None:

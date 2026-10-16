@@ -19,15 +19,8 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
   onCopyPair,
 }) => {
   const [showOrchestratorDemo, setShowOrchestratorDemo] = useState(false);
-  const [mobileUrlCopied, setMobileUrlCopied] = useState(false);
   const [apkUrlCopied, setApkUrlCopied] = useState(false);
   const [originUrl, setOriginUrl] = useState('');
-  const [mobileMode, setMobileMode] = useState<'pwa' | 'apk'>('pwa');
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [isInstallable, setIsInstallable] = useState(false);
-  const [isStandalone, setIsStandalone] = useState(false);
-  const [showPwaGuide, setShowPwaGuide] = useState(false);
-  const [guideBrowser, setGuideBrowser] = useState<'chrome' | 'samsung' | 'safari'>('chrome');
   const [downloadsInfo, setDownloadsInfo] = useState<DownloadsInfoResponse | null>(null);
   const [copiedChecksum, setCopiedChecksum] = useState<string | null>(null);
   const [syncingAssets, setSyncingAssets] = useState(false);
@@ -70,52 +63,12 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setOriginUrl(window.location.origin);
-
-      const standalone =
-        window.matchMedia('(display-mode: standalone)').matches ||
-        (window.navigator as any).standalone;
-      setIsStandalone(!!standalone);
-
-      const handleBeforeInstall = (e: any) => {
-        e.preventDefault();
-        setDeferredPrompt(e);
-        setIsInstallable(true);
-      };
-
-      window.addEventListener('beforeinstallprompt', handleBeforeInstall);
-      return () => {
-        window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
-      };
     }
   }, []);
 
-  const pwaLaunchUrl = originUrl ? `${originUrl}/?source=pwa_mobile` : '/?source=pwa_mobile';
   const apkDownloadUrl = originUrl
     ? `${originUrl}/downloads/OmniOps-Mobile.apk`
     : '/downloads/OmniOps-Mobile.apk';
-
-  const handleInstallClick = async () => {
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      const choice = await deferredPrompt.userChoice;
-      if (choice?.outcome === 'accepted') {
-        setIsInstallable(false);
-        setDeferredPrompt(null);
-      }
-    } else {
-      setShowPwaGuide(true);
-    }
-  };
-
-  const handleCopyMobileUrl = async () => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(pwaLaunchUrl);
-        setMobileUrlCopied(true);
-        setTimeout(() => setMobileUrlCopied(false), 2500);
-      }
-    } catch {}
-  };
 
   const handleCopyApkUrl = async () => {
     try {
@@ -139,7 +92,7 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
             </h2>
           </div>
           <p className="text-xs text-gray-400 mt-1 leading-relaxed">
-            استقرار سریع روی ویندوز دسکتاپ و اپلیکیشن همراه یونیورسال (Coucou) جهت کنترل و نظارت بیومتریک از راه دور بر روی ۱۰۰٪ تلفن‌های همراه
+            استقرار مستقیم ایجنت تمام‌عیار ویندوز (مرکز اصلی اجرا) و اپلیکیشن همراه اندروید (کنترل و هدایت از راه دور با PIN)
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -148,115 +101,107 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 text-[11px] bg-slate-900/90 hover:bg-slate-800 text-cyan-300 border border-cyan-800/60 px-3 py-1 rounded-full transition shadow-sm"
-            title="مشاهده وضعیت بیلد خودکار در GitHub Actions"
           >
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span className="font-mono font-bold">CI/CD: GitHub Actions (Pass)</span>
+            <span>⚡ بیلد ویندوز (GitHub Actions)</span>
           </a>
-          <span className="text-[11px] bg-cyan-950/80 text-cyan-300 border border-cyan-800 px-3 py-1 rounded-full font-mono font-bold">
-            نسخه هسته: {downloadsInfo?.version || 'v1.21.0'}
-          </span>
+          <a
+            href="https://github.com/RedBoy-011/OmniOps/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-[11px] bg-slate-900/90 hover:bg-slate-800 text-emerald-300 border border-emerald-800/60 px-3 py-1 rounded-full transition shadow-sm"
+          >
+            <span>📦 انتشارها (Releases)</span>
+          </a>
           <button
             type="button"
             onClick={handleSyncAssets}
             disabled={syncingAssets}
-            className="flex items-center gap-1.5 text-[11px] bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-800 px-3 py-1 rounded-full transition cursor-pointer disabled:opacity-50"
-            title="کپی و همگام‌سازی فایل‌های انتشار از گیت‌هاب و بیلدها به داخل هسته سرور"
+            className="flex items-center gap-1.5 text-[11px] bg-cyan-950/70 hover:bg-cyan-900/90 text-cyan-300 border border-cyan-700/60 px-3 py-1 rounded-full transition shadow-sm cursor-pointer disabled:opacity-50"
+            title="کپی و دانلود آخرین فایل‌های اجرایی از گیت‌هاب به حافظه محلی هسته جهت دانلود پرسرعت و پایدار در شبکه داخلی"
           >
-            <span>{syncingAssets ? '⏳' : '🔄'}</span>
-            <span>{syncingAssets ? 'در حال کپی به هسته…' : 'کپی فایل‌ها به هسته'}</span>
+            <span>🔄</span>
+            <span>{syncingAssets ? 'در حال همگام‌سازی...' : 'همگام‌سازی باینری‌ها در هسته'}</span>
           </button>
         </div>
       </div>
 
       {syncMessage && (
-        <div className="bg-emerald-950/70 border border-emerald-500/50 rounded-xl p-3 text-xs text-emerald-200 flex items-center justify-between animate-fade-in">
-          <div className="flex items-center gap-2">
-            <span>✅</span>
-            <span>{syncMessage}</span>
-          </div>
-          <button type="button" onClick={() => setSyncMessage(null)} className="text-emerald-400 hover:text-white text-xs px-2">✕</button>
+        <div className="p-3 bg-cyan-950/60 border border-cyan-800/80 rounded-xl text-xs text-cyan-200 animate-fade-in flex items-center justify-between">
+          <span>{syncMessage}</span>
+          <button type="button" onClick={() => setSyncMessage(null)} className="text-cyan-400 hover:text-white mr-2">✕</button>
         </div>
       )}
 
-      {/* ۲. بخش پین‌کد اختصاصی اتصال و جفت‌سازی */}
-      <div className="bg-[#0b0e14] border border-[#222936] rounded-xl p-4 flex flex-wrap justify-between items-center gap-4">
-        <div className="space-y-1">
-          <span className="text-gray-400 block text-xs font-medium">
-            کد پین اختصاصی ۶ رقمی جفت‌سازی (Pairing PIN):
-          </span>
-          {pair && seconds > 0 ? (
-            <div className="flex items-center gap-3">
-              <span className="text-xl md:text-2xl font-bold text-amber-400 font-mono tracking-widest bg-[#171c26] px-3 py-1 rounded-lg border border-amber-500/30">
-                {pair.code}
-              </span>
-              <span className="text-xs text-amber-300/80">
-                ⏱ {seconds.toLocaleString('fa-IR')} ثانیه باقی‌مانده · یک‌بارمصرف
+      {/* ۲. کد پین موقت اتصال دوطرفه (Direct Pairing Gateway) */}
+      <div className="p-5 rounded-2xl bg-gradient-to-r from-[#171e29] to-[#131922] border border-[#2d3748] flex flex-col md:flex-row justify-between items-center gap-4">
+        <div className="space-y-1 text-center md:text-right">
+          <div className="flex items-center justify-center md:justify-start gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+            <span className="font-bold text-sm text-gray-200">کد موقت اتصال ایجنت ویندوز و اپلیکیشن اندروید (Pairing PIN)</span>
+          </div>
+          <p className="text-xs text-gray-400 leading-relaxed max-w-xl">
+            برای اتصال ایمن و احراز هویت ایجنت ویندوز یا اپلیکیشن اندروید، این کد یک‌بارمصرف ۶ رقمی را درون کلاینت وارد کنید. توکن اختصاصی در RAM مستقر شده و روی دیسک ذخیره نمی‌شود.
+          </p>
+        </div>
+
+        <div className="flex flex-col items-center gap-2">
+          {pair ? (
+            <div className="flex flex-col items-center gap-1">
+              <div className="flex items-center gap-2 bg-[#0b0e14] border border-[#3b4556] px-4 py-2 rounded-xl">
+                <span className="font-mono text-2xl font-bold tracking-widest text-emerald-400 select-all">
+                  {pair.code}
+                </span>
+                <button
+                  type="button"
+                  onClick={onCopyPair}
+                  className="text-xs bg-[#222b3a] hover:bg-[#2d374a] text-cyan-300 px-2.5 py-1.5 rounded-lg transition font-medium"
+                >
+                  {copyStatus || 'کپی'}
+                </button>
+              </div>
+              <span className="text-[11px] text-gray-400">
+                اعتبار تا: <strong className="text-amber-400 font-mono">{seconds}</strong> ثانیه دیگر
               </span>
             </div>
           ) : (
-            <span className="text-xs text-gray-500 italic block">
-              هنوز کد اتصالی صادر نشده است. روی دکمهٔ مقابل بزنید تا کد ۲ دقیقه‌ای یک‌بارمصرف ایجاد شود.
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2">
-          {pair && seconds > 0 && onCopyPair ? (
-            <button
-              type="button"
-              onClick={onCopyPair}
-              className="bg-[#1f2633] hover:bg-[#2b3547] text-gray-200 border border-[#3b475c] px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
-            >
-              <span>📋</span>
-              <span>کپی کد پین</span>
-            </button>
-          ) : null}
-
-          {onGeneratePair ? (
             <button
               type="button"
               onClick={onGeneratePair}
-              className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-cyan-950 flex items-center gap-1.5"
+              className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold px-5 py-2.5 rounded-xl text-xs transition shadow-lg shadow-cyan-950 flex items-center gap-2"
             >
               <span>🔑</span>
-              <span>{pair && seconds > 0 ? 'صدور مجدد کد' : 'صدور کد اتصال ۶ رقمی'}</span>
+              <span>تولید کد موقت اتصال کلاینت‌ها</span>
             </button>
-          ) : null}
+          )}
         </div>
-        {copyStatus && (
-          <div className="w-full text-xs text-emerald-400 pt-1 font-medium" role="status">
-            {copyStatus}
-          </div>
-        )}
       </div>
 
-      {/* ۳. گرید استقرار: ویندوز و اندروید */}
+      {/* ۳. شبکه دانلود کلاینت‌ها (۲ ستونه: ویندوز و اندروید) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* کارت ۱: ایجنت ویندوز دسکتاپ */}
+        {/* کارت ۱: ایجنت قدرتمند ویندوز */}
         <div className="p-5 rounded-2xl bg-[#0d1117] border border-[#21262d] flex flex-col justify-between space-y-4 hover:border-cyan-500/40 transition">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <span className="text-3xl">🖥️</span>
                 <div>
-                  <h3 className="font-bold text-sm text-gray-100">ایجنت ویندوز دسکتاپ</h3>
-                  <span className="text-[11px] text-cyan-400 font-mono">OmniOps Desktop Edge (x64)</span>
+                  <h3 className="font-bold text-sm text-gray-100">ایجنت ویندوز (مرکز اجرای پروژه‌ها)</h3>
+                  <span className="text-[11px] text-cyan-400 font-mono">OmniOps Windows Native Agent</span>
                 </div>
               </div>
-              <span className="text-[10px] bg-[#161b22] text-gray-400 px-2.5 py-1 rounded-md border border-[#30363d] font-mono">
-                Windows 10 / 11
+              <span className="text-[10px] bg-cyan-950/80 text-cyan-300 border border-cyan-800/80 px-2.5 py-1 rounded-md font-bold">
+                نسخه رسمی نصاب x64
               </span>
             </div>
 
             <p className="text-xs text-gray-300 leading-relaxed">
-              پنجرهٔ شناور سبک کپسولی با کلید میانبر سراسری <code className="text-cyan-300 font-mono bg-cyan-950/60 px-1.5 py-0.5 rounded">Alt + Space</code>، تله‌متری زنده و سد تأیید دستورات ترمینال بدون نیاز به نصب پایتون.
+              مرکز اجرای اصلی وظایف و کارهای لوکال. کلاینت بومی ویندوز که با کلید میانبر <strong className="text-cyan-300">Alt + Space</strong> فراخوانی می‌شود و دارای قابلیت اجرای دستورات شل، مرورگر امن، ترمینال و مدیریت تسک‌هاست.
             </p>
 
-            {/* راهنمای راه‌اندازی سریع در ۳ مرحله */}
-            <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-3 text-xs space-y-2">
-              <span className="font-bold text-gray-300 block text-[11px] text-cyan-400">
-                ⚡ راهنمای راه‌اندازی سریع ویندوز در ۳ گام:
+            {/* راهنمای ۳ مرحله‌ای */}
+            <div className="bg-[#161b22] p-3 rounded-xl border border-[#30363d] space-y-1.5">
+              <span className="text-xs font-bold text-gray-200 block">
+                مراحل اتصال ۳۰ ثانیه‌ای:
               </span>
               <ol className="list-decimal list-inside space-y-1 text-gray-400 text-[11px] leading-relaxed">
                 <li>فایل نصاب <span className="font-mono text-gray-200">OmniOps-Edge-Setup.exe</span> را دانلود و اجرا نمایید.</li>
@@ -289,7 +234,7 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
                       {edgeFile?.available_locally ? '🟢 موجود در هسته سرور (دانلود مستقیم)' : '🟡 هدایت به گیت‌هاب (Fallback)'}
                     </span>
                     <span className="text-gray-400 font-mono text-[10px]">
-                      نسخه: {edgeFile?.version || downloadsInfo?.version || 'v1.21.0'} {edgeFile?.size_formatted ? `· ${edgeFile.size_formatted}` : ''}
+                      نسخه: {edgeFile?.version || downloadsInfo?.version || 'v1.25.0'} {edgeFile?.size_formatted ? `· ${edgeFile.size_formatted}` : ''}
                     </span>
                   </div>
 
@@ -348,327 +293,146 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
           </div>
         </div>
 
-        {/* کارت ۲: اپلیکیشن اندروید ارکستراتور سیار (نسخه جامع یونیورسال) */}
+        {/* کارت ۲: اپلیکیشن بومی اندروید (APK اختصاصی - کاملاً نیتیو بدون PWA) */}
         <div className="p-5 rounded-2xl bg-[#0d1117] border border-[#21262d] flex flex-col justify-between space-y-4 hover:border-emerald-500/40 transition">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <span className="text-3xl">📱</span>
                 <div>
-                  <h3 className="font-bold text-sm text-gray-100">ارکستراتور سیار Coucou</h3>
-                  <span className="text-[11px] text-emerald-400 font-mono">OmniOps Mobile Companion</span>
+                  <h3 className="font-bold text-sm text-gray-100">اپلیکیشن اندروید (کنترلر و ارکستراتور همراه)</h3>
+                  <span className="text-[11px] text-emerald-400 font-mono">OmniOps Android Native Companion</span>
                 </div>
               </div>
               <span className="text-[10px] bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 px-2.5 py-1 rounded-md font-bold">
-                سازگار با ۱۰۰٪ گوشی‌ها
+                پکیج رسمی نصاب APK
               </span>
             </div>
 
-            {/* سوئیچر حالت نسخه یونیورسال vs فایل خام APK */}
-            <div className="flex p-1 bg-slate-950/70 border border-slate-800 rounded-xl gap-1">
-              <button
-                type="button"
-                onClick={() => setMobileMode('pwa')}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-                  mobileMode === 'pwa'
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <span>🌟 نسخه یونیورسال (توصیه‌شده)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setMobileMode('apk')}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-                  mobileMode === 'apk'
-                    ? 'bg-slate-800 text-slate-200 border border-slate-700'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <span>📦 فایل خام APK</span>
-              </button>
+            <p className="text-xs text-gray-300 leading-relaxed">
+              اپلیکیشن نیتیو اندروید به عنوان کنترل‌کننده از راه دور ایجنت ویندوز عمل می‌کند. فقط در صورت آنلاین بودن ایجنت ویندوز، فرآیندها و مأموریت‌ها در گوشی نمایش یافته و امکان هدایت یا توقف اضطراری (Kill-Switch) فراهم است.
+            </p>
+
+            {/* ویژگی‌های کلیدی اپ اندروید */}
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div className="bg-[#161b22] p-2.5 rounded-xl border border-[#30363d] flex items-center gap-2">
+                <span className="text-lg">🔐</span>
+                <div>
+                  <strong className="block text-emerald-300 text-[10px]">اتصال امن با PIN موقت</strong>
+                  <span className="text-gray-400 text-[10px]">همگام‌سازی بدون نیاز به رمز دائمی</span>
+                </div>
+              </div>
+              <div className="bg-[#161b22] p-2.5 rounded-xl border border-[#30363d] flex items-center gap-2">
+                <span className="text-lg">⚡</span>
+                <div>
+                  <strong className="block text-cyan-300 text-[10px]">پایش وضعیت ایجنت</strong>
+                  <span className="text-gray-400 text-[10px]">در دسترس / مشغول / غیرفعال</span>
+                </div>
+              </div>
+              <div className="bg-[#161b22] p-2.5 rounded-xl border border-[#30363d] flex items-center gap-2">
+                <span className="text-lg">🛑</span>
+                <div>
+                  <strong className="block text-red-300 text-[10px]">کلید Kill-Switch</strong>
+                  <span className="text-gray-400 text-[10px]">توقف اضطراری مأموریت‌های حساس</span>
+                </div>
+              </div>
+              <div className="bg-[#161b22] p-2.5 rounded-xl border border-[#30363d] flex items-center gap-2">
+                <span className="text-lg">🚀</span>
+                <div>
+                  <strong className="block text-amber-300 text-[10px]">تایید دو‌مرحله‌ای فرآیندها</strong>
+                  <span className="text-gray-400 text-[10px]">تاییدیه اجرای دستورات از راه دور</span>
+                </div>
+              </div>
             </div>
 
-            {mobileMode === 'pwa' ? (
-              <>
-                <p className="text-xs text-gray-300 leading-relaxed">
-                  نسخه مستقل و نیتیو وب‌اپلیکیشن (Universal Standalone App) که <strong className="text-emerald-300">روی تمام نسخه‌های اندروید (۸ تا ۱۵)</strong> بدون نیاز به فعال‌سازی منبع ناشناس یا خطای پارس، مستقیماً با یک لمس روی صفحه اصلی نصب می‌شود.
+            {/* بخش اسکن QR Code برای دانلود مستقیم APK */}
+            <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-3 flex items-center gap-4">
+              <div className="shrink-0 bg-white p-1 rounded-lg">
+                <QrCodeSvg value={apkDownloadUrl} size={95} />
+              </div>
+              <div className="space-y-1">
+                <span className="font-bold text-xs text-gray-200 block">
+                  دانلود مستقیم با دوربین گوشی:
+                </span>
+                <p className="text-[10px] text-gray-400 leading-relaxed">
+                  دوربین گوشی را مقابل این بارکد بگیرید تا فایل نصاب APK مستقیماً در حافظه دستگاه شما ذخیره شود.
                 </p>
-
-                {/* ویژگی‌های شاخص نسخه یونیورسال */}
-                <div className="grid grid-cols-2 gap-2 text-[11px]">
-                  <div className="bg-[#161b22] p-2.5 rounded-xl border border-[#30363d] flex items-center gap-2">
-                    <span className="text-lg">👆</span>
-                    <div>
-                      <strong className="block text-amber-300 text-[10px]">دروازه اثر انگشت</strong>
-                      <span className="text-gray-400 text-[10px]">تأییدیه بیومتریک و Biometric Gate</span>
-                    </div>
-                  </div>
-                  <div className="bg-[#161b22] p-2.5 rounded-xl border border-[#30363d] flex items-center gap-2">
-                    <span className="text-lg">⚡</span>
-                    <div>
-                      <strong className="block text-emerald-300 text-[10px]">سرعت لود زیر ۱ ثانیه</strong>
-                      <span className="text-gray-400 text-[10px]">کشینگ آفلاین Service Worker</span>
-                    </div>
-                  </div>
-                  <div className="bg-[#161b22] p-2.5 rounded-xl border border-[#30363d] flex items-center gap-2">
-                    <span className="text-lg">✨</span>
-                    <div>
-                      <strong className="block text-cyan-300 text-[10px]">طراحی شیشه‌ای کامل</strong>
-                      <span className="text-gray-400 text-[10px]">حالت تمام‌صفحه بدون نوار آدرس</span>
-                    </div>
-                  </div>
-                  <div className="bg-[#161b22] p-2.5 rounded-xl border border-[#30363d] flex items-center gap-2">
-                    <span className="text-lg">🛑</span>
-                    <div>
-                      <strong className="block text-red-300 text-[10px]">Kill-Switch امنیتی</strong>
-                      <span className="text-gray-400 text-[10px]">توقف اضطراری مأموریت‌های پرخطر</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* بخش اسکن QR Code جهت نصب یونیورسال */}
-                <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-3 flex items-center gap-4">
-                  <div className="shrink-0 bg-white p-1 rounded-lg">
-                    <QrCodeSvg value={pwaLaunchUrl} size={105} />
-                  </div>
-                  <div className="space-y-1">
-                    <span className="font-bold text-xs text-gray-200 block">
-                      اسکن مستقیم با دوربین گوشی:
-                    </span>
-                    <p className="text-[10px] text-gray-400 leading-relaxed">
-                      دوربین هر گوشی (سامسونگ، شیائومی، هواوی، پیکسل و...) را مقابل این کد بگیرید تا برنامه فوراً روی صفحه اصلی نصب شود.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleCopyMobileUrl}
-                      className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-bold pt-1 transition"
-                    >
-                      <span>{mobileUrlCopied ? '✅ کپی شد' : '📋 کپی لینک مستقیم ورود برای موبایل'}</span>
-                    </button>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="text-xs text-gray-300 leading-relaxed">
-                  بسته‌های نصبی خام اندروید برای کاربرانی که مایل به آزمایش مستقیم فایل APK یا کامپایل با گریدل هستند:
-                </p>
-                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-[11px] text-amber-300 space-y-1">
-                  <strong>⚠️ توجه درباره فایل‌های خام APK:</strong>
-                  <p className="text-amber-200/80 leading-relaxed">
-                    فایل‌های خام APK در برخی نسخه‌های اندروید به دلیل سیاست‌های امنیتی گوگل نیاز به فعال‌سازی Developer Options دارند. برای اجرای بی‌دردسر، از «نسخه یونیورسال» استفاده نمایید.
-                  </p>
-                </div>
-                <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-3 flex items-center gap-4">
-                  <div className="shrink-0 bg-white p-1 rounded-lg">
-                    <QrCodeSvg value={apkDownloadUrl} size={95} />
-                  </div>
-                  <div className="space-y-1">
-                    <span className="font-bold text-xs text-gray-200 block">
-                      دانلود مستقیم فایل APK:
-                    </span>
-                    <p className="text-[10px] text-gray-400 leading-relaxed">
-                      اسکن برای دانلود فایل فشرده باینری روی حافظه گوشی.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleCopyApkUrl}
-                      className="text-[10px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-bold pt-1 transition"
-                    >
-                      <span>{apkUrlCopied ? '✅ کپی شد' : '📋 کپی لینک دانلود فایل APK'}</span>
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
+                <button
+                  type="button"
+                  onClick={handleCopyApkUrl}
+                  className="text-[10px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-bold pt-1 transition cursor-pointer"
+                >
+                  <span>{apkUrlCopied ? '✅ کپی شد' : '📋 کپی لینک مستقیم دانلود APK'}</span>
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="space-y-2 pt-2">
-            {mobileMode === 'pwa' ? (
-              <div className="flex flex-col sm:flex-row gap-2">
-                <button
-                  type="button"
-                  onClick={handleInstallClick}
-                  className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold py-2.5 rounded-xl text-xs text-center transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950"
-                >
-                  <span>📲</span>
-                  <span>{isStandalone ? 'برنامه نصب شده و آماده است' : isInstallable ? 'نصب فوری اپلیکیشن روی گوشی (آماده نصب)' : 'نصب مستقیم اپلیکیشن روی تلفن همراه'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowPwaGuide(true)}
-                  className="bg-[#1a202c] hover:bg-[#252d3d] text-emerald-300 border border-emerald-800/60 py-2.5 px-4 rounded-xl text-xs text-center transition flex items-center justify-center gap-1.5"
-                >
-                  <span>📖</span>
-                  <span>راهنمای ۳ ثانیه‌ای نصب</span>
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {(() => {
-                  const activeFile = getFile('OmniOps-Mobile.apk');
-                  return (
-                    <>
-                      <div className="flex items-center justify-between text-[11px] pb-1">
-                        <span className="text-emerald-400 font-bold flex items-center gap-1.5">
-                          <span className={`w-2 h-2 rounded-full ${activeFile?.available_locally ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
-                          {activeFile?.available_locally ? '🟢 موجود در هسته سرور (دانلود مستقیم)' : '🟡 هدایت به گیت‌هاب (Fallback)'}
-                        </span>
-                        <span className="text-gray-400 font-mono text-[10px]">
-                          نسخه: {activeFile?.version || downloadsInfo?.version || 'v1.22.0'} {activeFile?.size_formatted ? `· ${activeFile.size_formatted}` : ''}
-                        </span>
+            {(() => {
+              const activeFile = getFile('OmniOps-Mobile.apk');
+              return (
+                <>
+                  <div className="flex items-center justify-between text-[11px] pb-1">
+                    <span className="text-emerald-400 font-bold flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${activeFile?.available_locally ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+                      {activeFile?.available_locally ? '🟢 موجود در هسته سرور (دانلود مستقیم محلی)' : '🟡 هدایت به گیت‌هاب (Fallback)'}
+                    </span>
+                    <span className="text-gray-400 font-mono text-[10px]">
+                      نسخه: {activeFile?.version || downloadsInfo?.version || 'v1.25.0'} {activeFile?.size_formatted ? `· ${activeFile.size_formatted}` : ''}
+                    </span>
+                  </div>
+
+                  {activeFile?.sha256 && (
+                    <div className="bg-[#12161f] border border-[#2b3547] rounded-xl p-2.5 text-[11px] space-y-1">
+                      <div className="flex items-center justify-between text-gray-400">
+                        <span className="font-mono text-emerald-400 font-bold">SHA-256 Checksum:</span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyChecksum(activeFile.sha256, 'apk')}
+                          className="text-emerald-300 hover:text-emerald-200 transition text-[10px] flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>{copiedChecksum === 'apk' ? '✅ کپی شد' : '📋 کپی Checksum'}</span>
+                        </button>
                       </div>
+                      <div className="font-mono text-[10px] text-emerald-200/90 truncate bg-black/50 p-1.5 rounded select-all" dir="ltr">
+                        {activeFile.sha256}
+                      </div>
+                    </div>
+                  )}
 
-                      {activeFile?.sha256 && (
-                        <div className="bg-[#12161f] border border-[#2b3547] rounded-xl p-2.5 text-[11px] space-y-1">
-                          <div className="flex items-center justify-between text-gray-400">
-                            <span className="font-mono text-emerald-400 font-bold">SHA-256 Checksum:</span>
-                            <button
-                              type="button"
-                              onClick={() => handleCopyChecksum(activeFile.sha256, 'apk')}
-                              className="text-emerald-300 hover:text-emerald-200 transition text-[10px] flex items-center gap-1 cursor-pointer"
-                            >
-                              <span>{copiedChecksum === 'apk' ? '✅ کپی شد' : '📋 کپی Checksum'}</span>
-                            </button>
-                          </div>
-                          <div className="font-mono text-[10px] text-emerald-200/90 truncate bg-black/50 p-1.5 rounded select-all" dir="ltr">
-                            {activeFile.sha256}
-                          </div>
-                        </div>
-                      )}
+                  <a
+                    href="/downloads/OmniOps-Mobile.apk"
+                    download="OmniOps-Mobile.apk"
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs text-center transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950"
+                  >
+                    <span>⬇️</span>
+                    <span>دانلود مستقیم فایل نصاب OmniOps-Mobile.apk از سرور</span>
+                  </a>
 
-                      <a
-                        href="/downloads/OmniOps-Mobile.apk"
-                        download="OmniOps-Mobile.apk"
-                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs text-center transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950"
-                      >
-                        <span>⬇️</span>
-                        <span>دانلود مستقیم اپلیکیشن OmniOps-Mobile.apk از هسته</span>
-                      </a>
-
-                      <a
-                        href="https://github.com/RedBoy-011/OmniOps/releases/latest/download/OmniOps-Mobile.apk"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-full bg-[#1a202c] hover:bg-[#252d3d] text-gray-300 border border-[#30363d] py-2 rounded-xl text-[11px] text-center transition flex items-center justify-center gap-1.5"
-                        title="دانلود پشتیبان از مخزن رسمی گیت‌هاب در صورت بروز مشکل"
-                      >
-                        <span>🔗</span>
-                        <span>دانلود پشتیبان از گیت‌هاب (Fallback)</span>
-                      </a>
-                    </>
-                  );
-                })()}
-              </div>
-            )}
+                  <a
+                    href="https://github.com/RedBoy-011/OmniOps/releases/latest/download/OmniOps-Mobile.apk"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full bg-[#1a202c] hover:bg-[#252d3d] text-gray-300 border border-[#30363d] py-2 rounded-xl text-[11px] text-center transition flex items-center justify-center gap-1.5"
+                    title="دانلود پشتیبان از مخزن رسمی گیت‌هاب در صورت بروز مشکل"
+                  >
+                    <span>🔗</span>
+                    <span>دانلود پشتیبان از گیت‌هاب (GitHub Releases)</span>
+                  </a>
+                </>
+              );
+            })()}
           </div>
         </div>
       </div>
-
-      {/* مدال راهنمای نصب Universal PWA */}
-      {showPwaGuide && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in" dir="rtl">
-          <div className="relative w-full max-w-lg bg-slate-900 border border-emerald-500/40 rounded-2xl p-6 shadow-2xl text-slate-100 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <span className="text-xl">📲</span>
-                <h3 className="font-bold text-sm text-emerald-300">
-                  راهنمای نصب نسخه یونیورسال روی صفحه اصلی گوشی
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowPwaGuide(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="flex p-1 bg-slate-950 border border-slate-800 rounded-xl gap-1 text-xs">
-              <button
-                type="button"
-                onClick={() => setGuideBrowser('chrome')}
-                className={`flex-1 py-1.5 rounded-lg transition-all font-semibold ${
-                  guideBrowser === 'chrome'
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                    : 'text-slate-400'
-                }`}
-              >
-                گوگل کروم (اندروید)
-              </button>
-              <button
-                type="button"
-                onClick={() => setGuideBrowser('samsung')}
-                className={`flex-1 py-1.5 rounded-lg transition-all font-semibold ${
-                  guideBrowser === 'samsung'
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                    : 'text-slate-400'
-                }`}
-              >
-                سامسونگ اینترنت
-              </button>
-              <button
-                type="button"
-                onClick={() => setGuideBrowser('safari')}
-                className={`flex-1 py-1.5 rounded-lg transition-all font-semibold ${
-                  guideBrowser === 'safari'
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                    : 'text-slate-400'
-                }`}
-              >
-                سافاری (آیفون)
-              </button>
-            </div>
-
-            <div className="p-4 bg-slate-950/70 border border-slate-800 rounded-xl text-xs space-y-3 leading-relaxed">
-              {guideBrowser === 'chrome' && (
-                <ol className="list-decimal list-inside space-y-2 text-slate-300">
-                  <li>در مرورگر کروم گوشی، آدرس این پنل را باز کنید (یا QR code را اسکن نمایید).</li>
-                  <li>روی منوی <strong className="text-emerald-300">سه نقطه (⋮)</strong> در گوشه بالای صفحه بزنید.</li>
-                  <li>گزینه <strong className="text-emerald-300">«نصب برنامه»</strong> یا <strong className="text-emerald-300">«افزودن به صفحه اصلی» (Add to Home screen)</strong> را انتخاب کنید.</li>
-                  <li>در پنجره ظاهر شده دکمه «نصب» (Install) را لمس کنید. برنامه مانند نرم‌افزار نیتیو در گوشی ذخیره می‌شود.</li>
-                </ol>
-              )}
-              {guideBrowser === 'samsung' && (
-                <ol className="list-decimal list-inside space-y-2 text-slate-300">
-                  <li>در مرورگر Samsung Internet این صفحه را باز کنید.</li>
-                  <li>روی دکمه منو <strong className="text-emerald-300">سه خط افقی (≡)</strong> در پایین صفحه بزنید.</li>
-                  <li>گزینه <strong className="text-emerald-300">«افزودن صفحه به» (Add page to)</strong> را انتخاب کنید.</li>
-                  <li>گزینه <strong className="text-emerald-300">«صفحه اصلی» (Home screen)</strong> را لمس نمایید.</li>
-                </ol>
-              )}
-              {guideBrowser === 'safari' && (
-                <ol className="list-decimal list-inside space-y-2 text-slate-300">
-                  <li>در مرورگر سافاری آیفون، این صفحه را باز کنید.</li>
-                  <li>دکمه <strong className="text-emerald-300">اشتراک‌گذاری (Share - آیکون مربع با فلش رو به بالا)</strong> در پایین صفحه را بزنید.</li>
-                  <li>به پایین اسکرول کرده و گزینه <strong className="text-emerald-300">«Add to Home Screen»</strong> را لمس نمایید.</li>
-                  <li>در بالا سمت راست روی دکمه «Add» بزنید.</li>
-                </ol>
-              )}
-            </div>
-
-            <div className="flex justify-end pt-2">
-              <button
-                type="button"
-                onClick={() => setShowPwaGuide(false)}
-                className="px-5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-md"
-              >
-                متوجه شدم
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ۴. بخش شبیه‌ساز ارکستراتور سیار و دروازه بیومتریک (Coucou) */}
       <div className="pt-4 border-t border-[#2b3240] flex flex-col gap-3">
         <button
           type="button"
           onClick={() => setShowOrchestratorDemo(!showOrchestratorDemo)}
-          className="text-xs text-amber-400 hover:text-amber-300 flex items-center justify-center gap-2 py-2 bg-[#1b212c] hover:bg-[#242c3b] border border-[#2b3547] rounded-xl transition font-bold"
+          className="text-xs text-amber-400 hover:text-amber-300 flex items-center justify-center gap-2 py-2 bg-[#1b212c] hover:bg-[#242c3b] border border-[#2b3547] rounded-xl transition font-bold cursor-pointer"
         >
           <span>{showOrchestratorDemo ? '▲ بستن نمای شبیه‌ساز ارکستراتور سیار' : '▼ آزمایش زنده شبیه‌ساز دروازه تایید بیومتریک و جزیره پویا (Coucou)'}</span>
         </button>
