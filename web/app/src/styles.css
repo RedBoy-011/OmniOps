@@ -66,11 +66,12 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 .auth-footer { text-align: center; color: #b996a6; font-size: 11px; margin-top: 25px; }
 .admin-scene { padding: 30px 22px 60px; }
 .admin-wrap { width: min(1170px, 100%); margin: 0 auto; }
-.glass { border: 1px solid #e99ab638; background: #2c1827ad; backdrop-filter: blur(26px); box-shadow: 0 18px 65px #06040b67; border-radius: 24px; }
-.admin-header { min-height: 72px; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.admin-hero { padding: 55px 8px 30px; }
-.admin-hero h1 { font-size: clamp(24px, 3vw, 36px); font-weight: 800; margin: 6px 0; }
-.admin-hero p { font-size: 13px; color: #ceb8c5; line-height: 2; }
+.glass { border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(16px); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35); border-radius: 12px; }
+.admin-header { min-height: 48px; height: 48px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-radius: 10px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.admin-header::-webkit-scrollbar { display: none; }
+.admin-hero { padding: 14px 4px 10px; }
+.admin-hero h1 { font-size: clamp(17px, 2.2vw, 24px); font-weight: 750; margin: 2px 0 4px; }
+.admin-hero p { font-size: 11.5px; color: #94a3b8; line-height: 1.6; margin: 0; }
 .admin-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .75fr); gap: 18px; align-items: start; }
 .admin-card { padding: 24px; min-width: 0; }
 .card-title { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 25px; }
@@ -117,12 +118,15 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
   .mobile-switch { display: flex; gap: 8px; padding: 5px 24px 14px; }
   .mobile-switch button { flex: 1; min-height: 38px; color: #f2d0de; border: 1px solid #f5a1bd6b; border-radius: 10px; }
   .mobile-switch button[aria-pressed="true"] { background: #bb4b727a; border-color: #f6a9c2; }
-  .admin-scene { padding: 12px; }
-  .admin-header { padding: 12px; flex-wrap: wrap; }
+  .admin-scene { padding: 10px; }
+  .admin-header { padding: 8px 12px; flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; }
+  .admin-header::-webkit-scrollbar { display: none; }
   .admin-header .text-sm { display: none; }
-  .admin-hero { padding: 34px 4px 16px; }
-  .admin-card { padding: 17px; }
-  .pending-toast { left: 12px; top: 12px; }
+  .admin-hero { padding: 12px 2px 8px; }
+  .admin-hero h1 { font-size: 17px; margin: 2px 0 4px; }
+  .admin-hero p { font-size: 11px; line-height: 1.5; }
+  .admin-card { padding: 14px; }
+  .pending-toast { left: 10px; top: 10px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .tech-grid, .ambient { animation: none; }
@@ -178,7 +182,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 /* Crimson glass surfaces shared by the provider and chat workspaces. */
 .admin-scene .glass { background: linear-gradient(142deg, #422338c9, #241827d9 46%, #251525d1); border-color: #ffc0d237; box-shadow: 0 30px 80px #08030fc2, inset 0 1px #fff2; backdrop-filter: blur(30px) saturate(145%); }
-.admin-scene .admin-header { background: linear-gradient(115deg, #50283cae, #281827cb); }
+.admin-scene .admin-header { background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(255, 255, 255, 0.08); }
 .provider-manager { overflow: hidden; }
 .provider-manager .card-title { margin-bottom: 17px; }
 .provider-shared-proxy { display: flex; gap: 18px; align-items: center; justify-content: space-between; padding: 16px 18px; border: 1px solid #ffadc44c; border-radius: 18px; background: linear-gradient(120deg, #d7497524, #ffffff07); margin-bottom: 20px; }
@@ -278,9 +282,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 .chat-memory-item { justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 6px; overflow-wrap: anywhere; }
 .chat-history-options label { display: inline-flex; align-items: center; gap: 7px; margin-inline-end: auto; }
 @media (max-width: 600px) { .chat-memory-form, .chat-history-options { width: 100%; } .chat-memory-tools { padding: 12px; } }
-.workspace-switch { display:flex; flex-wrap:wrap; gap:6px; width:max-content; max-width:100%; margin-block:18px 8px; border:1px solid #ffffff26; border-radius:16px; padding:5px; background:#161c20c9; }
-.workspace-switch button { border:0; border-radius:12px; padding:8px 20px; background:transparent; color:#c5d4d3; transition:all 0.2s; }
-.workspace-switch button.active { background:#702c40; color:#fff; box-shadow:0 4px 20px #7a204a55; }
+.workspace-switch { display:flex; flex-wrap:nowrap; gap:4px; width:100%; max-width:100%; margin-block:10px 14px; border:1px solid rgba(255, 255, 255, 0.08); border-radius:10px; padding:4px; background:rgba(15, 23, 42, 0.8); overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; scroll-snap-type:x mandatory; }
+.workspace-switch::-webkit-scrollbar { display:none; }
+.workspace-switch button { border:0; border-radius:7px; padding:7px 13px; font-size:12px; font-weight:500; background:transparent; color:#94a3b8; transition:all 0.2s ease; white-space:nowrap !important; flex-shrink:0 !important; display:inline-flex; align-items:center; gap:6px; font-family:inherit; scroll-snap-align:start; }
+.workspace-switch button:hover { background:rgba(255, 255, 255, 0.05); color:#f1f5f9; }
+.workspace-switch button.active { background:var(--brand-primary, #0ea5e9) !important; color:#ffffff !important; font-weight:600; box-shadow:0 2px 10px rgba(0, 0, 0, 0.35); }
 .agent-download-cta { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.08); font-size:12px; color:#a8bbbc; }
 .agent-download-cta button { font-size:11px; font-weight:bold; color:#5eead4; background:rgba(94,234,212,0.1); border:1px solid rgba(94,234,212,0.25); border-radius:8px; padding:5px 12px; cursor:pointer; transition:all 0.2s ease; }
 .agent-download-cta button:hover { background:rgba(94,234,212,0.2); color:#fff; }
@@ -297,7 +303,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 .workspace-task-item p { white-space:pre-wrap; overflow-wrap:anywhere; margin:0 0 9px; }
 .workspace-task-item small { color:#a8bbbc; }
 .workspace-task-item button { margin-inline-start:12px; }
-@media(max-width:600px) { .workspace-project-form > div { flex-wrap:wrap; } .workspace-switch { width:100%; } .workspace-switch button { flex:1; } }
+@media(max-width:600px) { .workspace-project-form > div { flex-wrap:wrap; } .workspace-switch { width:100%; } .workspace-switch button { flex:0 0 auto !important; } }
 
 .workspace-attachment-panel { display:grid; gap:10px; padding:14px; border:1px solid #ffffff25; border-radius:16px; background:#161d239c; }
 .workspace-attachment-panel h3, .workspace-attachment-panel p { margin:0; }
@@ -2582,30 +2588,32 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
   padding-top: 14px;
 }
 
-/* User Profile Header Pill Button */
+/* User Profile Header Pill Button (Flat & Compact) */
 .profile-pill-button {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 9999px;
-  padding: 6px 14px;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  height: 32px;
+  padding: 0 9px;
   color: #f1f5f9;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
   transition: all 0.2s ease;
 }
 
 .profile-pill-button:hover {
-  background: rgba(99, 102, 241, 0.15);
-  border-color: rgba(129, 140, 248, 0.4);
-  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .profile-pill-icon {
-  font-size: 14px;
+  font-size: 13px;
 }
 
 /* User Management Card */
@@ -3250,81 +3258,175 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 }
 
 /* ========================================================
-   Dual-Plane Navigation: Admin Console & User Workspace
+   Dual-Plane Navigation: Admin Console & User Workspace (Flat & Responsive)
    ======================================================== */
+.admin-flat-header {
+  min-height: 48px;
+  height: 48px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.88) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3) !important;
+  flex-wrap: nowrap !important;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.admin-flat-header::-webkit-scrollbar {
+  display: none;
+}
+
+.admin-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.brand-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, var(--brand-primary, #6366f1), #8b5cf6);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.brand-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f8fafc;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.admin-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .admin-badge-tag {
-  background: rgba(168, 85, 247, 0.15);
-  border: 1px solid rgba(168, 85, 247, 0.35);
-  color: #d8b4fe;
+  background: rgba(168, 85, 247, 0.12);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  color: #c084fc;
   font-size: 11px;
   font-weight: 600;
-  padding: 3px 9px;
-  border-radius: 999px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  white-space: nowrap !important;
 }
 
 .workspace-badge-tag {
-  background: rgba(56, 189, 248, 0.15);
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  color: #7dd3fc;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: #38bdf8;
   font-size: 11px;
   font-weight: 600;
-  padding: 3px 9px;
-  border-radius: 999px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  white-space: nowrap !important;
 }
 
 .workspace-switch-pill {
-  background: rgba(56, 189, 248, 0.12);
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  color: #38bdf8;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 14px;
-  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.1) !important;
+  border: 1px solid rgba(56, 189, 248, 0.3) !important;
+  color: #38bdf8 !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  height: 32px !important;
+  padding: 0 10px !important;
+  border-radius: 8px !important;
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
   transition: all 0.2s ease;
 }
 
 .workspace-switch-pill:hover {
-  background: rgba(56, 189, 248, 0.25);
-  color: #fff;
-  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.22) !important;
+  color: #fff !important;
+  border-color: #38bdf8 !important;
 }
 
 .admin-switch-pill {
-  background: rgba(168, 85, 247, 0.15);
-  border: 1px solid rgba(168, 85, 247, 0.4);
-  color: #c084fc;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 14px;
-  border-radius: 999px;
+  background: rgba(168, 85, 247, 0.1) !important;
+  border: 1px solid rgba(168, 85, 247, 0.3) !important;
+  color: #c084fc !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  height: 32px !important;
+  padding: 0 10px !important;
+  border-radius: 8px !important;
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
   transition: all 0.2s ease;
 }
 
 .admin-switch-pill:hover {
-  background: rgba(168, 85, 247, 0.3);
-  color: #fff;
-  border-color: #c084fc;
+  background: rgba(168, 85, 247, 0.22) !important;
+  color: #fff !important;
+  border-color: #c084fc !important;
 }
 
-/* Admin Mission Control Tabs */
+.logout-button {
+  min-height: 32px !important;
+  height: 32px !important;
+  padding: 0 10px !important;
+  border-radius: 8px !important;
+  border: 1px solid rgba(244, 63, 94, 0.3) !important;
+  background: rgba(244, 63, 94, 0.08) !important;
+  color: #fb7185 !important;
+  font-size: 11.5px !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.logout-button:hover {
+  background: rgba(244, 63, 94, 0.22) !important;
+  border-color: #f43f5e !important;
+  color: #fff !important;
+}
+
+/* Admin Mission Control Tabs (Flat Segmented Control) */
+.admin-nav-tabs-container {
+  width: 100%;
+  margin: 10px 0 16px;
+  position: relative;
+}
+
 .admin-nav-tabs {
   display: flex;
-  gap: 8px;
+  gap: 4px;
   overflow-x: auto;
-  padding: 6px;
-  margin: 16px 0 24px;
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
+  padding: 4px;
+  background: rgba(15, 23, 42, 0.8) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 10px !important;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x mandatory;
 }
 
 .admin-nav-tabs::-webkit-scrollbar {
@@ -3332,32 +3434,36 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 }
 
 .admin-nav-tab {
-  background: transparent;
-  border: 1px solid transparent;
-  color: #94a3b8;
-  font-size: 12.5px;
-  font-weight: 600;
-  padding: 10px 18px;
-  border-radius: 10px;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: #94a3b8 !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  height: 34px !important;
+  padding: 0 12px !important;
+  border-radius: 7px !important;
   cursor: pointer;
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  transition: all 0.2s ease;
-  font-family: inherit;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  transition: all 0.2s ease !important;
+  font-family: inherit !important;
+  scroll-snap-align: start;
 }
 
 .admin-nav-tab:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #f1f5f9 !important;
 }
 
 .admin-nav-tab.active {
-  background: rgba(124, 58, 237, 0.25);
-  border-color: rgba(168, 85, 247, 0.5);
-  color: #fff;
-  box-shadow: 0 0 16px rgba(124, 58, 237, 0.25);
+  background: var(--brand-primary, #6366f1) !important;
+  border-color: transparent !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35) !important;
 }
 
 .tab-counter-badge {
@@ -3365,9 +3471,26 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
   color: #fff;
   font-size: 10px;
   font-weight: 700;
-  padding: 1px 7px;
-  border-radius: 999px;
+  padding: 1px 6px;
+  border-radius: 6px;
   margin-right: 4px;
+}
+
+/* Bulletproof Full vs Short Tab Titles */
+.tab-title-full {
+  display: inline;
+}
+.tab-title-short {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .tab-title-full {
+    display: none !important;
+  }
+  .tab-title-short {
+    display: inline !important;
+  }
 }
 
 /* User Workspace Specific Styling */
@@ -7866,14 +7989,16 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 
 .user-subtabs-nav {
   display: flex;
-  gap: 8px;
+  gap: 4px;
   overflow-x: auto;
-  padding: 6px;
-  margin-bottom: 20px;
+  padding: 4px;
+  margin-bottom: 16px;
   background: rgba(15, 23, 42, 0.75);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
+  border-radius: 10px;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x mandatory;
 }
 
 .user-subtabs-nav::-webkit-scrollbar {
@@ -7881,32 +8006,36 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f58dad; outline-
 }
 
 .user-subtab-btn {
-  background: transparent;
-  border: 1px solid transparent;
-  color: #94a3b8;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 10px 18px;
-  border-radius: 10px;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: #94a3b8 !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  height: 32px !important;
+  padding: 0 12px !important;
+  border-radius: 7px !important;
   cursor: pointer;
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  transition: all 0.2s ease;
-  font-family: inherit;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  transition: all 0.2s ease !important;
+  font-family: inherit !important;
+  scroll-snap-align: start;
 }
 
 .user-subtab-btn:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #f1f5f9 !important;
 }
 
 .user-subtab-btn.active {
-  background: rgba(56, 189, 248, 0.18);
-  border-color: rgba(56, 189, 248, 0.45);
-  color: #38bdf8;
-  box-shadow: 0 0 16px rgba(56, 189, 248, 0.22);
+  background: rgba(56, 189, 248, 0.16) !important;
+  border-color: rgba(56, 189, 248, 0.4) !important;
+  color: #38bdf8 !important;
+  font-weight: 600 !important;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.18) !important;
 }
 
 .user-profile-card-section {

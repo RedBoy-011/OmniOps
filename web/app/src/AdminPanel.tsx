@@ -240,15 +240,17 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
       </AnimatePresence>
 
       <div className="admin-wrap">
-        {/* هدر اختصاصی کنسول مدیریت هسته و زیرساخت */}
-        <header className="admin-header glass admin-console-header">
-          <div className="flex items-center gap-3">
+        {/* هدر فلت، مدرن و رسپانسیو کنسول مدیریت هسته و زیرساخت */}
+        <header className="admin-header admin-flat-header">
+          {/* سمت راست: هویت برند و عنوان ماژول */}
+          <div className="admin-header-brand">
             <span className="brand-mark">✦</span>
-            <strong>OmniOps</strong>
-            <span className="admin-badge-tag">کنسول مدیریت هسته و زیرساخت</span>
+            <strong className="brand-title">OmniOps</strong>
+            <span className="admin-badge-tag hidden lg:inline-flex">کنسول مدیریت هسته و زیرساخت</span>
           </div>
 
-          <div className="flex items-center gap-3">
+          {/* سمت چپ: کنترل‌های سراسری، تم، سوییچ، پروفایل و خروج */}
+          <div className="admin-header-actions">
             {/* انتخابگر فشرده طیف رنگ سراسری سیستم (مرحله ۲) */}
             <ThemePaletteSelector compact isSuperadmin={currentUser.role === "superadmin"} />
 
@@ -260,7 +262,9 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
                 onClick={onSwitchToWorkspace}
                 title="سوییچ به فضای کاربری هوش مصنوعی، چت و اسناد"
               >
-                💬 ورود به فضای کار هوش مصنوعی
+                <span className="switch-icon">💬</span>
+                <span className="hidden sm:inline">ورود به فضای کار</span>
+                <span className="sm:hidden">کاربری</span>
               </button>
             )}
 
@@ -274,11 +278,12 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
               title="مشاهده پروفایل، آمار عملکرد و تغییر رمز"
             >
               <span className="profile-pill-icon">👑</span>
-              <span>{currentUser.username}</span>
+              <span className="profile-name-text max-w-[70px] sm:max-w-none truncate">{currentUser.username}</span>
             </button>
 
-            <button className="quiet-button" onClick={onLogout}>
-              خروج امن
+            <button className="quiet-button logout-button" onClick={onLogout} title="خروج امن از سیستم">
+              <span className="logout-icon">🚪</span>
+              <span className="hidden sm:inline">خروج امن</span>
             </button>
           </div>
         </header>
@@ -293,58 +298,70 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
           <p>مدیریت جامع خوشه‌های پردازشی Worker، تأمین‌کنندگان مدل‌ها، کاربران سازمان و پایش لحظه‌ای زیرساخت.</p>
         </div>
 
-        {/* منوی ناوبری ۵ گانهٔ بازطراحی‌شده تب‌های کنسول مدیریت (مرحله ۳) */}
-        <div className="admin-nav-tabs" role="tablist" aria-label="بخش‌های کنسول مدیریت">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={adminTab === "dashboard"}
-            className={`admin-nav-tab ${adminTab === "dashboard" ? "active" : ""}`}
-            onClick={() => setAdminTab("dashboard")}
-          >
-            📊 داشبورد و پایش زیرساخت
-          </button>
+        {/* منوی ناوبری ۵ گانهٔ بازطراحی‌شده تب‌های کنسول مدیریت (فلت و رسپانسیو) */}
+        <div className="admin-nav-tabs-container">
+          <div className="admin-nav-tabs" role="tablist" aria-label="بخش‌های کنسول مدیریت">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={adminTab === "dashboard"}
+              className={`admin-nav-tab ${adminTab === "dashboard" ? "active" : ""}`}
+              onClick={() => setAdminTab("dashboard")}
+            >
+              <span className="tab-icon">📊</span>
+              <span className="tab-title-full hidden md:inline">داشبورد و پایش زیرساخت</span>
+              <span className="tab-title-short md:hidden">داشبورد</span>
+            </button>
 
-          <button
-            type="button"
-            role="tab"
-            aria-selected={adminTab === "nodes"}
-            className={`admin-nav-tab ${adminTab === "nodes" ? "active" : ""}`}
-            onClick={() => setAdminTab("nodes")}
-          >
-            🖥️ سرورها و مدل‌های محلی
-          </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={adminTab === "nodes"}
+              className={`admin-nav-tab ${adminTab === "nodes" ? "active" : ""}`}
+              onClick={() => setAdminTab("nodes")}
+            >
+              <span className="tab-icon">🖥️</span>
+              <span className="tab-title-full hidden md:inline">سرورها و مدل‌های محلی</span>
+              <span className="tab-title-short md:hidden">سرورها</span>
+            </button>
 
-          <button
-            type="button"
-            role="tab"
-            aria-selected={adminTab === "providers"}
-            className={`admin-nav-tab ${adminTab === "providers" ? "active" : ""}`}
-            onClick={() => setAdminTab("providers")}
-          >
-            🌐 تأمین‌کنندگان و پراکسی SOCKS
-          </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={adminTab === "providers"}
+              className={`admin-nav-tab ${adminTab === "providers" ? "active" : ""}`}
+              onClick={() => setAdminTab("providers")}
+            >
+              <span className="tab-icon">🌐</span>
+              <span className="tab-title-full hidden md:inline">تأمین‌کنندگان و پراکسی SOCKS</span>
+              <span className="tab-title-short md:hidden">تأمین‌کنندگان</span>
+            </button>
 
-          <button
-            type="button"
-            role="tab"
-            aria-selected={adminTab === "governance"}
-            className={`admin-nav-tab ${adminTab === "governance" ? "active" : ""}`}
-            onClick={() => setAdminTab("governance")}
-          >
-            🛡️ امنیت، کاربران و حاکمیت
-            {count > 0 && <span className="tab-counter-badge">{count.toLocaleString("fa-IR")}</span>}
-          </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={adminTab === "governance"}
+              className={`admin-nav-tab ${adminTab === "governance" ? "active" : ""}`}
+              onClick={() => setAdminTab("governance")}
+            >
+              <span className="tab-icon">🛡️</span>
+              <span className="tab-title-full hidden md:inline">امنیت، کاربران و حاکمیت</span>
+              <span className="tab-title-short md:hidden">حاکمیت</span>
+              {count > 0 && <span className="tab-counter-badge">{count.toLocaleString("fa-IR")}</span>}
+            </button>
 
-          <button
-            type="button"
-            role="tab"
-            aria-selected={adminTab === "settings"}
-            className={`admin-nav-tab ${adminTab === "settings" ? "active" : ""}`}
-            onClick={() => setAdminTab("settings")}
-          >
-            ⚙️ تنظیمات سیستم و تم سراسری
-          </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={adminTab === "settings"}
+              className={`admin-nav-tab ${adminTab === "settings" ? "active" : ""}`}
+              onClick={() => setAdminTab("settings")}
+            >
+              <span className="tab-icon">⚙️</span>
+              <span className="tab-title-full hidden md:inline">تنظیمات سیستم و تم سراسری</span>
+              <span className="tab-title-short md:hidden">تنظیمات</span>
+            </button>
+          </div>
         </div>
 
         {/* ۱. تب بازطراحی‌شده داشبورد و پایش زیرساخت (مرحله ۴: سلسله‌مراتبی و کم‌حجم) */}
@@ -659,7 +676,9 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
                 className={`user-subtab-btn ${govSubTab === "users" ? "active" : ""}`}
                 onClick={() => setGovSubTab("users")}
               >
-                <span>👥 مدیریت کاربران و دسترسی‌ها</span>
+                <span>👥</span>
+                <span className="hidden md:inline">مدیریت کاربران و دسترسی‌ها</span>
+                <span className="md:hidden">کاربران</span>
               </button>
 
               <button
@@ -669,7 +688,9 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
                 className={`user-subtab-btn ${govSubTab === "pending" ? "active" : ""}`}
                 onClick={() => setGovSubTab("pending")}
               >
-                <span>📋 درخواست‌های ثبت‌نام</span>
+                <span>📋</span>
+                <span className="hidden md:inline">درخواست‌های ثبت‌نام</span>
+                <span className="md:hidden">درخواست‌ها</span>
                 {count > 0 && <span className="tab-counter-badge">{count.toLocaleString("fa-IR")}</span>}
               </button>
 
@@ -680,7 +701,9 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
                 className={`user-subtab-btn ${govSubTab === "audit" ? "active" : ""}`}
                 onClick={() => setGovSubTab("audit")}
               >
-                <span>🛡️ دفترچه ممیزی امنیت</span>
+                <span>🛡️</span>
+                <span className="hidden md:inline">دفترچه ممیزی امنیت</span>
+                <span className="md:hidden">ممیزی</span>
               </button>
 
               <button
@@ -690,7 +713,9 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
                 className={`user-subtab-btn ${govSubTab === "agents" ? "active" : ""}`}
                 onClick={() => setGovSubTab("agents")}
               >
-                <span>🤖 حاکمیت بر ایجنت‌ها</span>
+                <span>🤖</span>
+                <span className="hidden md:inline">حاکمیت بر ایجنت‌ها</span>
+                <span className="md:hidden">ایجنت‌ها</span>
               </button>
 
               <button
@@ -700,7 +725,9 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
                 className={`user-subtab-btn ${govSubTab === "profile" ? "active" : ""}`}
                 onClick={() => setGovSubTab("profile")}
               >
-                <span>👤 پروفایل و امنیت حساب</span>
+                <span>👤</span>
+                <span className="hidden md:inline">پروفایل و امنیت حساب</span>
+                <span className="md:hidden">پروفایل</span>
               </button>
 
               <button
@@ -710,7 +737,9 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
                 className={`user-subtab-btn ${govSubTab === "pairing" ? "active" : ""}`}
                 onClick={() => setGovSubTab("pairing")}
               >
-                <span>🔑 اتصال موقت ایجنت</span>
+                <span>🔑</span>
+                <span className="hidden md:inline">اتصال موقت ایجنت</span>
+                <span className="md:hidden">اتصال</span>
               </button>
             </div>
 

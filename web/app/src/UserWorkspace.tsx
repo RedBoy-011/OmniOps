@@ -56,14 +56,14 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
 
       <div className="admin-wrap">
         {/* هدر اختصاصی فضای کاربری سازمانی */}
-        <header className="admin-header glass user-header">
-          <div className="flex items-center gap-3">
+        <header className="admin-header admin-flat-header user-workspace-header">
+          <div className="admin-header-brand">
             <span className="brand-mark">✦</span>
-            <strong>OmniOps</strong>
-            <span className="workspace-badge-tag">فضای کاربری هوش مصنوعی</span>
+            <strong className="brand-title">OmniOps</strong>
+            <span className="workspace-badge-tag hidden lg:inline-flex">فضای کاربری هوش مصنوعی</span>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="admin-header-actions">
             {/* کلید بازگشت به کنسول مدیریت برای سوپرادمین‌ها */}
             {currentUser.role === "superadmin" && onSwitchToAdmin && (
               <button
@@ -72,7 +72,9 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
                 onClick={onSwitchToAdmin}
                 title="سوییچ به کنسول مدیریت زیرساخت و سرورها"
               >
-                👑 ورود به کنسول مدیریت
+                <span className="switch-icon">👑</span>
+                <span className="hidden sm:inline">کنسول مدیریت</span>
+                <span className="sm:hidden">مدیریت</span>
               </button>
             )}
 
@@ -82,7 +84,8 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
               onClick={() => setWorkspaceMode("downloads")}
               title="دانلود برنامه‌های ویندوز و اندروید"
             >
-              📥 دریافت برنامه‌ها
+              <span>📥</span>
+              <span className="hidden sm:inline">دریافت برنامه‌ها</span>
             </button>
 
             <button
@@ -92,11 +95,12 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
               title="مشاهده پروفایل، آمار عملکرد و تغییر رمز عبور"
             >
               <span className="profile-pill-icon">{currentUser.role === "superadmin" ? "👑" : "👤"}</span>
-              <span>{currentUser.username}</span>
+              <span className="max-w-[70px] sm:max-w-none truncate">{currentUser.username}</span>
             </button>
 
-            <button className="quiet-button" onClick={onLogout}>
-              خروج امن
+            <button className="quiet-button logout-button" onClick={onLogout} title="خروج امن از سیستم">
+              <span>🚪</span>
+              <span className="hidden sm:inline">خروج امن</span>
             </button>
           </div>
         </header>
@@ -125,71 +129,85 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
           </div>
         </div>
 
-        {/* ناوبری اصلی فضای کاری */}
-        <div className="workspace-switch" role="tablist" aria-label="حالت فضای کاری">
-          {currentUser.capabilities.includes("chat") && (
-            <>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={workspaceMode === "chat"}
-                className={workspaceMode === "chat" ? "active" : ""}
-                onClick={() => setWorkspaceMode("chat")}
-              >
-                💬 گفت‌وگو با هوش مصنوعی
-              </button>
+        {/* ناوبری اصلی فضای کاری (فلت و رسپانسیو) */}
+        <div className="admin-nav-tabs-container">
+          <div className="workspace-switch" role="tablist" aria-label="حالت فضای کاری">
+            {currentUser.capabilities.includes("chat") && (
+              <>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={workspaceMode === "chat"}
+                  className={workspaceMode === "chat" ? "active" : ""}
+                  onClick={() => setWorkspaceMode("chat")}
+                >
+                  <span>💬</span>
+                  <span className="hidden md:inline">گفت‌وگو با هوش مصنوعی</span>
+                  <span className="md:hidden">گفت‌وگو</span>
+                </button>
 
-              <button
-                type="button"
-                role="tab"
-                aria-selected={workspaceMode === "pilot"}
-                className={workspaceMode === "pilot" ? "active" : ""}
-                onClick={() => setWorkspaceMode("pilot")}
-              >
-                🛠️ میز کار و هدایت پروژه
-              </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={workspaceMode === "pilot"}
+                  className={workspaceMode === "pilot" ? "active" : ""}
+                  onClick={() => setWorkspaceMode("pilot")}
+                >
+                  <span>🛠️</span>
+                  <span className="hidden md:inline">میز کار و هدایت پروژه</span>
+                  <span className="md:hidden">هدایت پروژه</span>
+                </button>
 
-              <button
-                type="button"
-                role="tab"
-                aria-selected={workspaceMode === "task"}
-                className={workspaceMode === "task" ? "active" : ""}
-                onClick={() => setWorkspaceMode("task")}
-              >
-                📋 پروژه‌ها و وظایف
-              </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={workspaceMode === "task"}
+                  className={workspaceMode === "task" ? "active" : ""}
+                  onClick={() => setWorkspaceMode("task")}
+                >
+                  <span>📋</span>
+                  <span className="hidden md:inline">پروژه‌ها و وظایف</span>
+                  <span className="md:hidden">پروژه‌ها</span>
+                </button>
 
-              <button
-                type="button"
-                role="tab"
-                aria-selected={workspaceMode === "customizations"}
-                className={workspaceMode === "customizations" ? "active" : ""}
-                onClick={() => setWorkspaceMode("customizations")}
-              >
-                📦 مهارت‌ها و دستیارها
-              </button>
-            </>
-          )}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={workspaceMode === "customizations"}
+                  className={workspaceMode === "customizations" ? "active" : ""}
+                  onClick={() => setWorkspaceMode("customizations")}
+                >
+                  <span>📦</span>
+                  <span className="hidden md:inline">مهارت‌ها و دستیارها</span>
+                  <span className="md:hidden">مهارت‌ها</span>
+                </button>
+              </>
+            )}
 
-          <button
-            type="button"
-            role="tab"
-            aria-selected={workspaceMode === "downloads"}
-            className={workspaceMode === "downloads" ? "active" : ""}
-            onClick={() => setWorkspaceMode("downloads")}
-          >
-            📥 دریافت برنامه‌ها (ویندوز / اندروید)
-          </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={workspaceMode === "downloads"}
+              className={workspaceMode === "downloads" ? "active" : ""}
+              onClick={() => setWorkspaceMode("downloads")}
+            >
+              <span>📥</span>
+              <span className="hidden md:inline">دریافت برنامه‌ها (ویندوز / اندروید)</span>
+              <span className="md:hidden">کلاینت‌ها</span>
+            </button>
 
-          <button
-            type="button"
-            role="tab"
-            aria-selected={workspaceMode === "profile"}
-            className={workspaceMode === "profile" ? "active" : ""}
-            onClick={() => setWorkspaceMode("profile")}
-          >
-            👤 پروفایل و امنیت حساب
-          </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={workspaceMode === "profile"}
+              className={workspaceMode === "profile" ? "active" : ""}
+              onClick={() => setWorkspaceMode("profile")}
+            >
+              <span>👤</span>
+              <span className="hidden md:inline">پروفایل و امنیت حساب</span>
+              <span className="md:hidden">پروفایل</span>
+            </button>
+          </div>
         </div>
 
         {/* محتوای تب‌های انتخابی کاربر */}

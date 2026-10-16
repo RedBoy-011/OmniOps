@@ -56,9 +56,9 @@ export function ThemePaletteSelector({ isSuperadmin = true, compact = false, onP
 
   if (compact) {
     return (
-      <div className="theme-palette-compact flex items-center gap-2" title="تغییر طیف رنگ سراسری سیستم (وب، ویندوز، اندروید)">
-        <span className="text-xs text-muted font-mono" style={{ opacity: 0.8 }}>طیف رنگ:</span>
-        <div className="flex items-center gap-1.5 bg-black/40 p-1 rounded-full border border-white/10">
+      <div className="theme-palette-compact flex items-center gap-1.5 flex-shrink-0" title="تغییر طیف رنگ سراسری سیستم (وب، ویندوز، اندروید)">
+        <span className="text-[11px] text-muted font-mono hidden md:inline" style={{ opacity: 0.8 }}>طیف رنگ:</span>
+        <div className="flex items-center gap-1 bg-black/40 p-0.5 sm:p-1 rounded-full border border-white/10">
           {palettes.map((p) => {
             const isSelected = activePalette === p.id;
             return (
@@ -67,12 +67,12 @@ export function ThemePaletteSelector({ isSuperadmin = true, compact = false, onP
                 type="button"
                 onClick={() => handleSelectPalette(p.id)}
                 disabled={saving}
-                className={`w-5 h-5 rounded-full transition-all duration-200 relative ${
+                className={`w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full transition-all duration-200 relative flex-shrink-0 ${
                   isSelected ? "scale-125 ring-2 ring-white ring-offset-1 ring-offset-black" : "opacity-70 hover:opacity-100 hover:scale-110"
                 }`}
                 style={{
                   background: p.gradient,
-                  boxShadow: isSelected ? `0 0 10px ${p.primary}` : undefined,
+                  boxShadow: isSelected ? `0 0 8px ${p.primary}` : undefined,
                 }}
                 title={`${p.name} ${isSelected ? "(فعال)" : ""}`}
                 aria-label={p.name}
@@ -81,7 +81,7 @@ export function ThemePaletteSelector({ isSuperadmin = true, compact = false, onP
           })}
         </div>
         {statusMessage && (
-          <span className="text-xs text-brand animate-pulse font-mono mr-1">{statusMessage}</span>
+          <span className="text-[10px] text-brand animate-pulse font-mono mr-1 hidden lg:inline">{statusMessage}</span>
         )}
       </div>
     );
