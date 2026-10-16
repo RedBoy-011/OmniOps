@@ -16,9 +16,9 @@ def main():
     username = input("Namn-e karbari-e SuperAdmin: ").strip()
     mobile = input("Shomare mobile: ").strip()
     while True:
-        password = getpass.getpass("Ramz-e oboor (4 ta 1024 neveshe): ")
-        if not 4 <= len(password) <= 1024:
-            print("Ramz bayad beyn 4 ta 1024 neveshe bashad. Dobare talash konid.")
+        password = getpass.getpass("Ramz-e oboor (12 ta 1024 neveshe): ")
+        if not 12 <= len(password) <= 1024:
+            print("Ramz bayad beyn 12 ta 1024 neveshe bashad. Dobare talash konid.")
             continue
         confirm = getpass.getpass("Tekrare ramz: ")
         if password != confirm:
