@@ -66,9 +66,19 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
     }
   }, []);
 
+  const apkFile = getFile('OmniOps-Mobile.apk');
+  const edgeFile = getFile('OmniOps-Edge-Setup.exe') || getFile('omniops-agent-setup.exe');
+
+  const apkCacheBust = apkFile?.sha256 ? `?v=${apkFile.sha256.slice(0, 8)}` : '';
+  const edgeCacheBust = edgeFile?.sha256 ? `?v=${edgeFile.sha256.slice(0, 8)}` : '';
+
   const apkDownloadUrl = originUrl
-    ? `${originUrl}/downloads/OmniOps-Mobile.apk`
-    : '/downloads/OmniOps-Mobile.apk';
+    ? `${originUrl}/downloads/OmniOps-Mobile.apk${apkCacheBust}`
+    : `/downloads/OmniOps-Mobile.apk${apkCacheBust}`;
+
+  const edgeDownloadUrl = originUrl
+    ? `${originUrl}/downloads/OmniOps-Edge-Setup.exe${edgeCacheBust}`
+    : `/downloads/OmniOps-Edge-Setup.exe${edgeCacheBust}`;
 
   const handleCopyApkUrl = async () => {
     try {
@@ -257,12 +267,13 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
                   )}
 
                   <a
-                    href="/downloads/OmniOps-Edge-Setup.exe"
+                    href={edgeDownloadUrl}
                     download="OmniOps-Edge-Setup.exe"
+                    target="_self"
                     className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 rounded-xl text-xs text-center transition flex items-center justify-center gap-2 shadow-lg shadow-cyan-950"
                   >
                     <span>⬇️</span>
-                    <span>دانلود مستقیم نصاب ویندوز از هسته (.exe)</span>
+                    <span>دانلود مستقیم نصاب ویندوز از سرور محلی ({edgeFile?.size_formatted || '3.3 MB'})</span>
                   </a>
 
                   <div className="flex gap-2">
@@ -402,12 +413,13 @@ export const ClientDownloadsCard: React.FC<ClientDownloadsProps> = ({
                   )}
 
                   <a
-                    href="/downloads/OmniOps-Mobile.apk"
+                    href={apkDownloadUrl}
                     download="OmniOps-Mobile.apk"
+                    target="_self"
                     className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs text-center transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950"
                   >
                     <span>⬇️</span>
-                    <span>دانلود مستقیم فایل نصاب OmniOps-Mobile.apk از سرور</span>
+                    <span>دانلود مستقیم فایل نصاب OmniOps-Mobile.apk از سرور محلی ({activeFile?.size_formatted || '5.9 MB'})</span>
                   </a>
 
                   <a

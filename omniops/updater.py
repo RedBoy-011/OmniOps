@@ -237,8 +237,8 @@ def apply_update(repo_root: Path | str | None = None, branch: str = "main") -> d
         },
     }
 
-    # Step 4: Sync release assets into the core downloads directory
-    sync_res = sync_release_assets(root, branch)
+    # Step 4: Sync release assets into the core downloads directory (replace outdated binaries)
+    sync_res = sync_release_assets(root, branch, force=True)
 
     return {
         "status": "updated",
@@ -366,14 +366,53 @@ def get_core_downloads_info(repo_root: Path | str | None = None) -> dict[str, An
     }
 
 
-def sync_release_assets(repo_root: Path | str | None = None, branch: str = "main") -> dict[str, Any]:
-    """Copies/syncs newly prepared release files from GitHub or local builds into the core downloads directory."""
+def sync_release_assets(repo_root: Path | str | None = None, branch: str = "main", force: bool = False) -> dict[str, Any]:
+    """Copies/syncs newly prepared release files from GitHub or local builds into the core downloads directory.
+    When force=True or when local files are missing/stale, downloads the latest binaries from GitHub Release
+    and atomically replaces older ones on disk.
+    """
     root = _get_repo_root(repo_root)
     downloads_dir = root / "downloads"
     downloads_dir.mkdir(parents=True, exist_ok=True)
     synced_files = []
 
-    # 1. Sync Windows Edge Setup if alternate name exists
+    # 1. Download/sync latest release binaries directly from GitHub Release
+    for artifact in ["OmniOps-Edge-Setup.exe", "OmniOps-Mobile.apk"]:
+        dest = downloads_dir / artifact
+        needs_sync = force or (not dest.is_file()) or (dest.stat().st_size < 100000)
+        if needs_sync:
+            gh_url = f"https://github.com/RedBoy-011/OmniOps/releases/latest/download/{artifact}"
+            tmp_dest = downloads_dir / f"{artifact}.tmp"
+            try:
+                req = urllib.request.Request(
+                    gh_url,
+                    headers={"User-Agent": "Mozilla/5.0 (compatible; OmniOps-Core/1.0)"}
+                )
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    if resp.status == 200:
+                        with open(tmp_dest, "wb") as f_out:
+                            while chunk := resp.read(65536):
+                                f_out.write(chunk)
+
+                        if tmp_dest.is_file() and tmp_dest.stat().st_size > 50000:
+                            if dest.is_file():
+                                try:
+                                    dest.unlink()
+                                except Exception:
+                                    pass
+                            tmp_dest.replace(dest)
+                            synced_files.append(f"{artifact} (دریافت و جایگزینی با آخرین نسخه گیت‌هاب)")
+                        elif tmp_dest.is_file():
+                            tmp_dest.unlink()
+            except Exception as exc:
+                logger.debug("GitHub release asset fetch skipped/failed for %s: %s", artifact, exc)
+                if tmp_dest.is_file():
+                    try:
+                        tmp_dest.unlink()
+                    except Exception:
+                        pass
+
+    # 2. Sync Windows Edge Setup if alternate legacy name exists
     edge_exe = downloads_dir / "OmniOps-Edge-Setup.exe"
     agent_setup = downloads_dir / "omniops-agent-setup.exe"
     if not edge_exe.is_file() and agent_setup.is_file():
@@ -382,31 +421,32 @@ def sync_release_assets(repo_root: Path | str | None = None, branch: str = "main
     elif edge_exe.is_file() and not agent_setup.is_file():
         shutil.copy2(edge_exe, agent_setup)
 
-    # 2. Sync Android APK if build script exists or if one is present
+    # 3. Fallback: Local APK build if APK is missing or empty
     mobile_apk = downloads_dir / "OmniOps-Mobile.apk"
-    if not mobile_apk.is_file():
+    if not mobile_apk.is_file() or mobile_apk.stat().st_size < 10000:
         build_script = root / "scripts" / "build_android_apk.py"
         if build_script.is_file():
             try:
-                subprocess.run(["python", str(build_script)], cwd=str(root), capture_output=True, timeout=30)
+                subprocess.run(["python", str(build_script)], cwd=str(root), capture_output=True, timeout=60)
                 if mobile_apk.is_file():
-                    synced_files.append("OmniOps-Mobile.apk (built locally)")
+                    synced_files.append("OmniOps-Mobile.apk (ساخت محلی با پایتون)")
             except Exception as exc:
                 logger.debug("Local APK build attempt had error: %s", exc)
 
-    # 3. Check GitHub Release assets fallback download if internet is accessible
-    for artifact in ["OmniOps-Edge-Setup.exe", "OmniOps-Mobile.apk"]:
-        dest = downloads_dir / artifact
-        if not dest.is_file():
-            gh_url = f"https://github.com/RedBoy-011/OmniOps/releases/latest/download/{artifact}"
-            try:
-                req = urllib.request.Request(gh_url, headers={"User-Agent": "OmniOps-Core/1.0"})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    if resp.status == 200:
-                        dest.write_bytes(resp.read())
-                        synced_files.append(f"{artifact} (downloaded from GitHub release)")
-            except Exception as exc:
-                logger.debug("GitHub release asset fetch skipped for %s: %s", artifact, exc)
+    # 4. Regenerate SHA256SUMS.txt with real live hashes of all binaries
+    sums_file = downloads_dir / "SHA256SUMS.txt"
+    try:
+        lines = []
+        for candidate in ["omniops-agent-setup.exe", "OmniOps-Edge-Setup.exe", "OmniOps-Mobile.apk"]:
+            cp = downloads_dir / candidate
+            if cp.is_file():
+                h = compute_file_sha256(cp)
+                if h:
+                    lines.append(f"{h}  {candidate}")
+        if lines:
+            sums_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except Exception as exc:
+        logger.debug("Failed to update SHA256SUMS.txt: %s", exc)
 
     current_info = get_core_downloads_info(root)
     return {

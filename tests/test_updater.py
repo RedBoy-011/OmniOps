@@ -108,7 +108,9 @@ class TestUpdater(unittest.TestCase):
             mock_exe = downloads_dir / "omniops-agent-setup.exe"
             mock_exe.write_bytes(b"MZ-mock-binary")
 
-            res = updater.sync_release_assets(repo_root=temp_dir)
+            # Mock urlopen so test doesn't make live network calls
+            with patch("urllib.request.urlopen", side_effect=Exception("network offline")):
+                res = updater.sync_release_assets(repo_root=temp_dir)
             self.assertEqual(res["status"], "ok")
             # Should have copied omniops-agent-setup.exe to OmniOps-Edge-Setup.exe
             edge_file = downloads_dir / "OmniOps-Edge-Setup.exe"

@@ -796,7 +796,7 @@ def make_server(
                     if principal["role"] != "superadmin":
                         raise IdentityError("Superadmin access required", 403)
                     repo_root = Path(__file__).resolve().parent.parent
-                    self._send(200, updater.sync_release_assets(repo_root=repo_root))
+                    self._send(200, updater.sync_release_assets(repo_root=repo_root, force=True))
                 elif path == "/api/admin/theme":
                     palette = payload.get("palette")
                     updated = store.set_theme_palette(principal, palette)
@@ -1089,27 +1089,35 @@ def make_server(
                 downloads_dir = repo_root / 'downloads'
                 target_file = downloads_dir / filename
                 if target_file.is_file():
-                    raw = target_file.read_bytes()
                     content_type = 'application/vnd.android.package-archive' if filename.endswith('.apk') else (
                         mimetypes.guess_type(target_file.name)[0] or 'application/octet-stream'
                     )
                     sha256_hash = updater.compute_file_sha256(target_file)
-                    current_commit = updater.get_current_commit(repo_root) or 'v1.21.0'
+                    current_commit = updater.get_current_commit(repo_root) or 'v1.27.0'
+                    file_size = target_file.stat().st_size
                     self.send_response(200)
                     self.send_header('Content-Type', content_type)
-                    self.send_header('Content-Length', str(len(raw)))
-                    self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+                    self.send_header('Content-Length', str(file_size))
+                    self.send_header('Content-Disposition', f'attachment; filename="{filename}"; filename*=UTF-8\'\'{filename}')
                     self.send_header('X-Checksum-SHA256', sha256_hash)
                     self.send_header('X-OmniOps-Version', current_commit[:7])
-                    self.send_header('Cache-Control', 'public, max-age=3600')
+                    self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+                    self.send_header('Pragma', 'no-cache')
+                    self.send_header('Expires', '0')
                     self.send_header('X-Content-Type-Options', 'nosniff')
                     self.end_headers()
-                    self.wfile.write(raw)
+                    try:
+                        with open(target_file, 'rb') as f_in:
+                            while chunk := f_in.read(65536):
+                                self.wfile.write(chunk)
+                    except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, OSError):
+                        pass
                     return
                 # Fallback: Redirect to GitHub Release download
                 release_url = f'https://github.com/RedBoy-011/OmniOps/releases/latest/download/{filename}'
                 self.send_response(302)
                 self.send_header('Location', release_url)
+                self.send_header('Cache-Control', 'no-store, no-cache')
                 self.end_headers()
                 return
             if parsed.path == '/api/downloads/info':
