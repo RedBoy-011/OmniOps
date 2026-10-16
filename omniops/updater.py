@@ -62,6 +62,24 @@ def get_current_commit(repo_root: Path | str | None = None) -> str | None:
     return None
 
 
+def get_current_tag(repo_root: Path | str | None = None) -> str:
+    """Returns the latest git tag of the local repository or fallback v1.25.0."""
+    root = _get_repo_root(repo_root)
+    try:
+        res = subprocess.run(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    except Exception:
+        pass
+    return "v1.25.0"
+
+
 def get_remote_commit(repo_root: Path | str | None = None, branch: str = "main") -> str | None:
     """Returns the latest commit hash from GitHub remote repository."""
     root = _get_repo_root(repo_root)
@@ -286,7 +304,7 @@ def get_core_downloads_info(repo_root: Path | str | None = None) -> dict[str, An
     root = _get_repo_root(repo_root)
     downloads_dir = root / "downloads"
     current_commit = get_current_commit(root)
-    version = current_commit[:7] if current_commit else "v1.21.0"
+    version = get_current_tag(root)
 
     files_info = []
     seen_filenames = set()
