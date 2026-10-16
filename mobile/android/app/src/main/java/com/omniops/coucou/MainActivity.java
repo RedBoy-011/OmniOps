@@ -26,7 +26,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String KEY_AUTH_TOKEN = "auth_token";
     private static final String KEY_USERNAME = "username";
     private static final String KEY_ROLE = "role";
-    private static final String DEFAULT_SERVER_URL = "http://172.19.30.94:9000";
+    private static final String DEFAULT_SERVER_URL = "";
 
     private WebView webView;
     private SwipeRefreshLayout swipeRefresh;

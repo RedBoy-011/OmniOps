@@ -28,6 +28,28 @@ function digits(value: string) {
     .replace(/\D/g, "").slice(0, 6);
 }
 
+function normalizeServerUrl(rawUrl: string): string {
+  if (!rawUrl || typeof rawUrl !== "string") return "";
+  let clean = rawUrl.trim();
+  if (!clean) return "";
+  clean = clean.replace(/\/+$/, "");
+  if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+    clean = "http://" + clean;
+  }
+  try {
+    const u = new URL(clean);
+    if (!u.port) {
+      if (/^(\d{1,3}\.){3}\d{1,3}$/.test(u.hostname) || u.hostname === "localhost") {
+        u.port = "9000";
+        clean = u.origin;
+      }
+    } else {
+      clean = u.origin;
+    }
+  } catch {}
+  return clean;
+}
+
 function clipboardPin(value: string): string | null {
   const normalized = value.trim()
     .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)))
@@ -73,13 +95,15 @@ export default function App() {
 
   // Sync palette from master server
   useEffect(() => {
-    const srv = masterUrl.trim() || "http://127.0.0.1:8000";
-    fetch(`${srv.replace(/\/+$/, "")}/api/theme`)
+    const cleanUrl = normalizeServerUrl(masterUrl);
+    const srv = cleanUrl || "http://127.0.0.1:9000";
+    fetch(`${srv}/api/theme`)
       .then((r) => r.json())
       .then((data) => {
-        if (data.active_palette && data.active_palette in OMNI_PALETTES) {
-          setPalette(data.active_palette as OmniThemePalette);
-          applyThemePalette(data.active_palette);
+        const pal = data.active_palette || data.palette;
+        if (pal && pal in OMNI_PALETTES) {
+          setPalette(pal as OmniThemePalette);
+          applyThemePalette(pal);
         }
       })
       .catch(() => undefined);
@@ -214,17 +238,19 @@ export default function App() {
   }
 
   async function verify(code: string) {
-    if (!masterUrl.trim()) {
-      setError("ابتدا آدرس هستهٔ مرکزی را وارد کنید.");
+    const cleanUrl = normalizeServerUrl(masterUrl);
+    if (!cleanUrl) {
+      setError("ابتدا آدرس هستهٔ مرکزی را وارد کنید (مانند 192.168.1.10:9000 یا 172.19.30.94:9443).");
       setPin("");
       attempt.current = "";
       fields.current[0]?.focus();
       return;
     }
+    setMasterUrl(cleanUrl);
     setError("");
     setPhase("verifying");
     try {
-      const status = await invoke<AgentStatus>("pair_agent", { code, masterUrl: masterUrl.trim() });
+      const status = await invoke<AgentStatus>("pair_agent", { code, masterUrl: cleanUrl });
       sessionGeneration.current += 1;
       connected.current = true;
       setPin("");
@@ -537,8 +563,8 @@ export default function App() {
             <div className="shield" aria-hidden="true">⌁</div>
             <h1>اتصال امن به هسته</h1><p>کد شش‌رقمی موقت را از پنل سازمان دریافت کنید.</p>
             <label htmlFor="master-url" className="agent-label">آدرس هستهٔ مرکزی</label>
-            <input id="master-url" className="agent-input" dir="ltr" type="url" placeholder="https://edge.example.com" autoComplete="off" spellCheck={false} value={masterUrl} onChange={(event) => setMasterUrl(event.target.value)} disabled={phase === "verifying"} />
-            <span className="agent-url-hint">برای اتصال در شبکهٔ داخلی، آدرس کامل سرور مانند <bdi>http://192.168.1.10:9000</bdi> را وارد کنید.</span>
+            <input id="master-url" className="agent-input" dir="ltr" type="text" placeholder="192.168.1.10:9000 یا 172.19.30.94:9443" autoComplete="off" spellCheck={false} value={masterUrl} onChange={(event) => setMasterUrl(event.target.value)} disabled={phase === "verifying"} />
+            <span className="agent-url-hint">نشانی سرور مرکزی (مانند <bdi>192.168.1.10:9000</bdi> یا <bdi>172.19.30.94:9443</bdi> - درج http:// اختیاری است).</span>
             <div className="pin-row" dir="ltr" aria-label="کد اتصال شش‌رقمی">
               {Array.from({ length: 6 }, (_, index) => (
                 <input key={index} ref={(element) => { fields.current[index] = element; }} className="pin-cell" aria-label={`رقم ${index + 1}`} inputMode="numeric" pattern="[0-9]*" autoComplete={index === 0 ? "one-time-code" : "off"} maxLength={1} value={pin[index] || ""} disabled={phase === "verifying"} onChange={(event) => setDigit(index, event.target.value)} onPaste={pasteCode} onKeyDown={(event) => {

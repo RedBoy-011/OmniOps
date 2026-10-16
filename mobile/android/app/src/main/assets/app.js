@@ -66,10 +66,33 @@ document.addEventListener("DOMContentLoaded", () => {
   const modalCmdOutput = document.getElementById("modalCmdOutput");
   const btnCloseModal = document.getElementById("btnCloseModal");
 
+  // Helper: Smart URL Normalization
+  function normalizeServerUrl(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== "string") return "";
+    let clean = rawUrl.trim();
+    if (!clean) return "";
+    clean = clean.replace(/\/+$/, "");
+    if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+      clean = "http://" + clean;
+    }
+    try {
+      const u = new URL(clean);
+      if (!u.port) {
+        if (/^(\d{1,3}\.){3}\d{1,3}$/.test(u.hostname) || u.hostname === "localhost") {
+          u.port = "9000";
+          clean = u.origin;
+        }
+      } else {
+        clean = u.origin;
+      }
+    } catch (e) {}
+    return clean;
+  }
+
   // State Variables
-  let currentServerUrl = "http://172.19.30.94:9000";
+  let currentServerUrl = "";
   let currentToken = "";
-  let currentOperator = { username: "admin", role: "operator" };
+  let currentOperator = { username: "", role: "operator" };
   let pollingInterval = null;
   let pinTimerInterval = null;
   let activePendingApprovalId = null;
@@ -95,8 +118,10 @@ document.addEventListener("DOMContentLoaded", () => {
   } catch (e) {}
 
   async function syncServerTheme() {
+    const srv = normalizeServerUrl(currentServerUrl || (serverUrlInput ? serverUrlInput.value : ""));
+    if (!srv) return;
     try {
-      const res = await fetch(`${currentServerUrl}/api/theme`);
+      const res = await fetch(`${srv}/api/theme`);
       if (res.ok) {
         const data = await res.json();
         if (data.palette && AVAILABLE_PALETTES.includes(data.palette)) {
@@ -114,7 +139,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (window.OmniOpsBridge && typeof window.OmniOpsBridge.vibrateDevice === "function") {
         window.OmniOpsBridge.vibrateDevice(35);
       }
-      if (currentToken) {
+      if (currentToken && currentServerUrl) {
         fetch(`${currentServerUrl}/api/admin/theme`, {
           method: "POST",
           headers: {
@@ -146,13 +171,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (saved && saved.serverUrl) {
-      currentServerUrl = saved.serverUrl.replace(/\/+$/, "");
+      currentServerUrl = normalizeServerUrl(saved.serverUrl);
       serverUrlInput.value = currentServerUrl;
+    } else {
+      currentServerUrl = "";
+      serverUrlInput.value = "";
     }
 
     if (saved && saved.token) {
       currentToken = saved.token;
-      currentOperator.username = saved.username || "admin";
+      currentOperator.username = saved.username || "operator";
       currentOperator.role = saved.role || "operator";
       showOperatorConsole();
     } else {
@@ -274,7 +302,15 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   async function redeemPairingCode(pin) {
-    const srv = serverUrlInput.value.trim() || currentServerUrl;
+    const rawSrv = (serverUrlInput ? serverUrlInput.value.trim() : "") || currentServerUrl;
+    const srv = normalizeServerUrl(rawSrv);
+    if (!srv) {
+      showAuthAlert("لطفاً نشانی سرور را وارد نمایید (مثال: 192.168.1.50:9000 یا 172.19.30.94:9443).");
+      return;
+    }
+
+    currentServerUrl = srv;
+    serverUrlInput.value = srv;
     hideAuthAlert();
     btnRedeemPin.disabled = true;
     btnRedeemPin.innerText = "در حال احراز هویت با هسته...";
@@ -282,11 +318,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const deviceId = "mobile-op-" + Math.floor(Math.random() * 899999 + 100000);
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+
       const resp = await fetch(`${srv}/api/agent/redeem`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: pin, device_id: deviceId }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       const data = await resp.json();
       if (!resp.ok) {
@@ -304,7 +345,11 @@ document.addEventListener("DOMContentLoaded", () => {
       pinInput.value = "";
       showOperatorConsole();
     } catch (err) {
-      showAuthAlert(err.message || "خطا در اتصال به سرور مرکزی.");
+      if (err.name === "AbortError") {
+        showAuthAlert(`مهلت اتصال به سرور در نشانی ${srv} به پایان رسید. از روشن بودن سرور و درستی پورت اطمینان حاصل کنید.`);
+      } else {
+        showAuthAlert(err.message || `خطا در اتصال به سرور در نشانی ${srv}.`);
+      }
     } finally {
       btnRedeemPin.disabled = false;
       btnRedeemPin.innerHTML = `<span>⚡</span><span>اتصال و احراز هویت با کد ۶ رقمی</span>`;
@@ -313,25 +358,38 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 2. Login with Credentials
   btnLogin.addEventListener("click", async () => {
-    const srv = serverUrlInput.value.trim() || currentServerUrl;
+    const rawSrv = (serverUrlInput ? serverUrlInput.value.trim() : "") || currentServerUrl;
+    const srv = normalizeServerUrl(rawSrv);
     const user = loginUsername.value.trim();
     const pass = loginPassword.value;
+
+    if (!srv) {
+      showAuthAlert("لطفاً نشانی سرور را وارد نمایید (مثال: 192.168.1.50:9000 یا 172.19.30.94:9443).");
+      return;
+    }
 
     if (!user || !pass) {
       showAuthAlert("نام کاربری و کلمه عبور الزامی است.");
       return;
     }
 
+    currentServerUrl = srv;
+    serverUrlInput.value = srv;
     hideAuthAlert();
     btnLogin.disabled = true;
     btnLogin.innerText = "در حال اعتبارسنجی...";
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+
       const resp = await fetch(`${srv}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: user, password: pass }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       const data = await resp.json();
       if (!resp.ok) {
@@ -345,7 +403,11 @@ document.addEventListener("DOMContentLoaded", () => {
       saveSession(srv, data.token, data.user?.username || data.profile?.username || user, data.user?.role || data.profile?.role || "admin");
       showOperatorConsole();
     } catch (err) {
-      showAuthAlert(err.message || "خطا در برقراری ارتباط با سرور.");
+      if (err.name === "AbortError") {
+        showAuthAlert(`مهلت اتصال به سرور در نشانی ${srv} به پایان رسید. از روشن بودن سرور و درستی پورت اطمینان حاصل کنید.`);
+      } else {
+        showAuthAlert(err.message || `خطا در اتصال به سرور در نشانی ${srv}.`);
+      }
     } finally {
       btnLogin.disabled = false;
       btnLogin.innerHTML = `<span>🚀</span><span>ورود به کنسول عملیاتی</span>`;

@@ -1,11 +1,7 @@
 import { useState } from "react";
 import { type Profile, api } from "./api";
-import { ChatRoom } from "./ChatRoom";
-import { WorkspaceTasks } from "./WorkspaceTasks";
-import { CustomizationsPanel } from "./CustomizationsPanel";
 import { ClientDownloadsCard } from "./components/ClientDownloadsCard";
 import { UserProfileModal } from "./components/UserProfileModal";
-import { AgenticWorkspaceCard } from "./components/AgenticWorkspaceCard";
 
 type Props = {
   user: Profile;
@@ -16,8 +12,7 @@ type Props = {
 export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
   const [currentUser, setCurrentUser] = useState<Profile>(user);
   const [showProfile, setShowProfile] = useState(false);
-  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "pilot" | "task" | "customizations" | "downloads" | "profile">("chat");
-  const [chatInitialPrompt, setChatInitialPrompt] = useState("");
+  const [workspaceMode, setWorkspaceMode] = useState<"downloads" | "profile">("downloads");
 
   // Pair state for downloads / pairing
   const [pair, setPair] = useState<{ code: string; expires_at: number } | null>(null);
@@ -105,14 +100,14 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
           </div>
         </header>
 
-        {/* بنر خوش‌آمدگویی و معرفی فضای کاربری */}
+        {/* بنر درگاه احراز هویت و اتصال به ایجنت‌های سازمانی */}
         <div className="user-hero-card glass">
           <div className="user-hero-info">
-            <span className="user-hero-eyebrow">WORKSPACE / AI ASSISTANT</span>
-            <h1>سلام، {currentUser.username}؛ به فضای کاری هوش مصنوعی خوش آمدید</h1>
+            <span className="user-hero-eyebrow">OMNIOPS / CLIENT & PAIRING GATEWAY</span>
+            <h1>سلام، {currentUser.username}؛ به درگاه ارتباط و جفت‌سازی ایجنت‌ها خوش آمدید</h1>
             <p>
-              از طریق این درگاه می‌توانید با مدل‌های مجاز سازمان گفت‌وگو کنید، اسناد و فایل‌های کاری را تحلیل نمایید
-              و به کلاینت‌های دسکتاپ و همراه متصل شوید.
+              از طریق این درگاه می‌توانید برنامه‌های کلاینت ویندوز (مرکز اصلی اجرای وظایف) و همراه اندروید (کنترلر از راه دور) را دریافت نمایید،
+              کدهای ۶ رقمی موقت جهت اتصال امن صادر کرده و حساب کاربری خود را مدیریت کنید.
             </p>
           </div>
 
@@ -122,68 +117,16 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
               <strong>{currentUser.role === "superadmin" ? "مدیر کل سامانه" : "کاربر سازمان"}</strong>
             </div>
             <div className="user-caps-summary">
-              {currentUser.capabilities.includes("chat") && <span className="cap-mini-tag">چت هوشمند</span>}
-              {currentUser.capabilities.includes("provider.use") && <span className="cap-mini-tag">مدل‌های آنلاین</span>}
-              {currentUser.capabilities.includes("agent.pair") && <span className="cap-mini-tag">اتصال دستگاه</span>}
+              {currentUser.capabilities.includes("agent.pair") && <span className="cap-mini-tag">جفت‌سازی ایجنت</span>}
+              <span className="cap-mini-tag">کلاینت ویندوز</span>
+              <span className="cap-mini-tag">همراه اندروید</span>
             </div>
           </div>
         </div>
 
-        {/* ناوبری اصلی فضای کاری (فلت و رسپانسیو) */}
+        {/* ناوبری فضای کاربری (فلت و رسپانسیو) */}
         <div className="admin-nav-tabs-container">
           <div className="workspace-switch" role="tablist" aria-label="حالت فضای کاری">
-            {currentUser.capabilities.includes("chat") && (
-              <>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={workspaceMode === "chat"}
-                  className={workspaceMode === "chat" ? "active" : ""}
-                  onClick={() => setWorkspaceMode("chat")}
-                >
-                  <span>💬</span>
-                  <span className="hidden md:inline">گفت‌وگو با هوش مصنوعی</span>
-                  <span className="md:hidden">گفت‌وگو</span>
-                </button>
-
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={workspaceMode === "pilot"}
-                  className={workspaceMode === "pilot" ? "active" : ""}
-                  onClick={() => setWorkspaceMode("pilot")}
-                >
-                  <span>🛠️</span>
-                  <span className="hidden md:inline">میز کار و هدایت پروژه</span>
-                  <span className="md:hidden">هدایت پروژه</span>
-                </button>
-
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={workspaceMode === "task"}
-                  className={workspaceMode === "task" ? "active" : ""}
-                  onClick={() => setWorkspaceMode("task")}
-                >
-                  <span>📋</span>
-                  <span className="hidden md:inline">پروژه‌ها و وظایف</span>
-                  <span className="md:hidden">پروژه‌ها</span>
-                </button>
-
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={workspaceMode === "customizations"}
-                  className={workspaceMode === "customizations" ? "active" : ""}
-                  onClick={() => setWorkspaceMode("customizations")}
-                >
-                  <span>📦</span>
-                  <span className="hidden md:inline">مهارت‌ها و دستیارها</span>
-                  <span className="md:hidden">مهارت‌ها</span>
-                </button>
-              </>
-            )}
-
             <button
               type="button"
               role="tab"
@@ -192,8 +135,8 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
               onClick={() => setWorkspaceMode("downloads")}
             >
               <span>📥</span>
-              <span className="hidden md:inline">دریافت برنامه‌ها (ویندوز / اندروید)</span>
-              <span className="md:hidden">کلاینت‌ها</span>
+              <span className="hidden md:inline">دریافت برنامه‌ها و جفت‌سازی دستگاه‌ها</span>
+              <span className="md:hidden">کلاینت‌ها و پین</span>
             </button>
 
             <button
@@ -210,36 +153,7 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
           </div>
         </div>
 
-        {/* محتوای تب‌های انتخابی کاربر */}
-        {currentUser.capabilities.includes("chat") && (
-          <>
-            <div hidden={workspaceMode !== "chat"}>
-              <ChatRoom
-                initialPrompt={chatInitialPrompt}
-                onClearInitialPrompt={() => setChatInitialPrompt("")}
-              />
-            </div>
-
-            <div hidden={workspaceMode !== "pilot"}>
-              <AgenticWorkspaceCard
-                canExecuteCommands={currentUser.capabilities.includes("action.approve") || currentUser.role === "superadmin"}
-                onLoadContextToChat={(prompt) => {
-                  setChatInitialPrompt(prompt);
-                  setWorkspaceMode("chat");
-                }}
-              />
-            </div>
-
-            <div hidden={workspaceMode !== "task"}>
-              <WorkspaceTasks canRequest={currentUser.capabilities.includes("action.request")} />
-            </div>
-
-            <div hidden={workspaceMode !== "customizations"}>
-              <CustomizationsPanel onSelectSkill={() => setWorkspaceMode("chat")} />
-            </div>
-          </>
-        )}
-
+        {/* محتوای تب‌های فعال */}
         <div hidden={workspaceMode !== "downloads"}>
           <ClientDownloadsCard
             pair={pair}

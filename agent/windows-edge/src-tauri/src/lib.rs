@@ -72,7 +72,18 @@ impl SharedState {
 }
 
 fn master_origin(value: &str) -> Result<String, String> {
-    let url = Url::parse(value.trim()).map_err(|_| "آدرس هستهٔ مرکزی معتبر نیست".to_string())?;
+    let mut trimmed = value.trim().trim_end_matches('/').to_string();
+    if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+        trimmed = format!("http://{}", trimmed);
+    }
+    let mut url = Url::parse(&trimmed).map_err(|_| "آدرس هستهٔ مرکزی معتبر نیست".to_string())?;
+    if url.port().is_none() {
+        if let Some(host) = url.host_str() {
+            if host.parse::<Ipv4Addr>().is_ok() || host == "localhost" {
+                let _ = url.set_port(Some(9000));
+            }
+        }
+    }
     let loopback = matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
     let private_lan = url
         .host_str()
@@ -920,7 +931,10 @@ mod url_tests {
     #[test]
     fn accepts_private_lan_and_secure_master_urls() {
         assert!(master_origin("http://172.19.30.10:9000").is_ok());
+        assert!(master_origin("172.19.30.10:9000").is_ok());
+        assert!(master_origin("172.19.30.10").is_ok());
         assert!(master_origin("http://10.88.0.1:9000").is_ok());
+        assert!(master_origin("10.88.0.1").is_ok());
         assert!(master_origin("https://edge.example.com").is_ok());
     }
 

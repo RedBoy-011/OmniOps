@@ -416,11 +416,14 @@ class WorkerEndpointTests(unittest.TestCase):
         admin = self.store.login("root-admin", "a very strong admin password")["token"]
 
         # Check update status
-        code, status_res = self.call("GET", "/api/admin/system/update-status", token=admin)
-        self.assertEqual(code, 200)
-        self.assertIn("update_available", status_res)
-        self.assertIn("current_commit", status_res)
-        self.assertIn("latest_commit", status_res)
+        with patch("omniops.updater.check_for_updates", return_value={
+            "update_available": True, "current_commit": "1111111", "latest_commit": "2222222", "branch": "main"
+        }):
+            code, status_res = self.call("GET", "/api/admin/system/update-status", token=admin)
+            self.assertEqual(code, 200)
+            self.assertIn("update_available", status_res)
+            self.assertIn("current_commit", status_res)
+            self.assertIn("latest_commit", status_res)
 
         # Apply update
         with patch("omniops.updater.apply_update", return_value={"status": "updated", "message": "ok", "previous_commit": "1111111", "new_commit": "2222222"}):

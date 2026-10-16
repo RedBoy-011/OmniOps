@@ -377,11 +377,10 @@ def build_signed_apk(output_path: Path):
     )
 
     # Prepare files inside APK
-    # Prepare files inside APK
     files_to_pack = {
         "AndroidManifest.xml": manifest_data,
         "classes.dex": dex_data,
-        "assets/app_info.json": b'{"name":"OmniOps Coucou","version":"1.2.0","biometric":true,"dynamic_island":true,"platform":"android"}',
+        "assets/app_info.json": b'{"name":"OmniOps Coucou","version":"1.27.0","biometric":true,"dynamic_island":true,"platform":"android"}',
     }
 
     # Include actual mobile assets (HTML, CSS, JS, design tokens)
