@@ -83,8 +83,8 @@ export function UserProfileModal({ currentUser, onClose, onProfileUpdated, embed
       setError("وارد کردن رمز عبور فعلی الزامی است.");
       return;
     }
-    if (newPassword.length < 12) {
-      setError("رمز عبور جدید باید حداقل ۱۲ کاراکتر داشته باشد.");
+    if (newPassword.length < 4) {
+      setError("رمز عبور جدید باید حداقل ۴ کاراکتر داشته باشد.");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -302,14 +302,14 @@ export function UserProfileModal({ currentUser, onClose, onProfileUpdated, embed
               </div>
 
               <div className="form-group">
-                <label htmlFor="new-pass">رمز عبور جدید (حداقل ۱۲ نویسه)</label>
+                <label htmlFor="new-pass">رمز عبور جدید (حداقل ۴ نویسه)</label>
                 <input
                   id="new-pass"
                   type="password"
                   required
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="حداقل ۱۲ نویسه امن"
+                  placeholder="حداقل ۴ نویسه امن"
                 />
               </div>
 

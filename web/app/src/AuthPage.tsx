@@ -103,8 +103,8 @@ export function AuthPage({ onLogin }: AuthPageProps) {
                     <input id="register-username" className="form-input" autoComplete="username" minLength={3} maxLength={32} value={username} onChange={(e) => setUsername(e.target.value)} required />
                     <label className="form-label" htmlFor="register-mobile">شماره موبایل</label>
                     <input id="register-mobile" className="form-input phone-input" type="tel" inputMode="tel" autoComplete="tel" placeholder="0912… یا ‎+98912…" value={mobile} onChange={(e) => setMobile(e.target.value)} required />
-                    <label className="form-label" htmlFor="register-password">رمز عبور (حداقل ۱۲ نویسه)</label>
-                    <input id="register-password" className="form-input" type="password" autoComplete="new-password" minLength={12} value={password} onChange={(e) => setPassword(e.target.value)} required />
+                    <label className="form-label" htmlFor="register-password">رمز عبور (حداقل ۴ نویسه)</label>
+                    <input id="register-password" className="form-input" type="password" autoComplete="new-password" minLength={4} value={password} onChange={(e) => setPassword(e.target.value)} required />
                     <button className="submit-button" disabled={busy}>{busy ? "در حال ثبت…" : "ثبت درخواست"}</button>
                   </form>
                 </motion.div>

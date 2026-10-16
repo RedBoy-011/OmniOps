@@ -84,7 +84,7 @@ def main():
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument("-u", "--username", help="نام کاربری جدید مدیر ارشد [پیش‌فرض: admin]")
-    parser.add_argument("-p", "--password", help="رمز عبور جدید مدیر ارشد (حداقل ۱۲ نویسه)")
+    parser.add_argument("-p", "--password", help="رمز عبور جدید مدیر ارشد (حداقل ۴ نویسه)")
     parser.add_argument("-m", "--mobile", default="09120000000", help="شماره موبایل مدیر ارشد [پیش‌فرض: 09120000000]")
     parser.add_argument("--stdin-password", action="store_true", help="خواندن رمز عبور مستقیماً از ورودی استاندارد (stdin)")
     parser.add_argument("--config", help="مسیر فایل تنظیمات (پیش‌فرض: /etc/omniops/master.env)")
@@ -139,9 +139,9 @@ def main():
 
         while True:
             try:
-                pw1 = getpass.getpass("رمز عبور جدید مدیر ارشد (حداقل ۱۲ نویسه): ")
-                if len(pw1) < 12:
-                    print("⚠️ رمز عبور باید حداقل ۱۲ نویسه باشد. لطفاً دوباره وارد کنید.", file=sys.stderr)
+                pw1 = getpass.getpass("رمز عبور جدید مدیر ارشد (حداقل ۴ نویسه): ")
+                if len(pw1) < 4:
+                    print("⚠️ رمز عبور باید حداقل ۴ نویسه باشد. لطفاً دوباره وارد کنید.", file=sys.stderr)
                     continue
                 pw2 = getpass.getpass("تکرار رمز عبور جدید: ")
                 if pw1 != pw2:
