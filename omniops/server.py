@@ -31,6 +31,7 @@ from . import telemetry
 from . import updater
 from . import playwright_worker
 from .persona import get_persona_manager, normalize_persian_text
+from .decision import get_decision_layer, DecisionQuestion, DecisionRequest
 
 MAX_BODY_BYTES = 384 * 1024
 LAN_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
@@ -1064,6 +1065,25 @@ def make_server(
                         raise IdentityError('Superadmin permission required', 403)
                     mgr = get_persona_manager()
                     self._send(200, mgr.reset_to_default())
+                elif path == '/api/admin/decision/config':
+                    if principal.get('role') != 'superadmin' and 'admin:write' not in principal.get('capabilities', []):
+                        raise IdentityError('Superadmin permission required', 403)
+                    dlayer = get_decision_layer()
+                    updated = dlayer.update_config(payload)
+                    self._send(200, updated)
+                elif path == '/api/decision/decide':
+                    raw_state = payload.get('state', '')
+                    raw_questions = payload.get('questions', [])
+                    q_objs = [DecisionQuestion.from_dict(q) for q in raw_questions if isinstance(q, dict)]
+                    req = DecisionRequest(
+                        state=raw_state,
+                        questions=q_objs,
+                        confidence_threshold=payload.get('confidence_threshold'),
+                        metadata=payload.get('metadata', {})
+                    )
+                    dlayer = get_decision_layer()
+                    res = dlayer.decide(req)
+                    self._send(200, res.to_dict())
                 elif path in ('/api/web/workspace/project/patches/rollback', '/api/agent/workspace/project/patches/rollback'):
                     self._send(200, {'patch': workspace.rollback_file_patch(principal, payload.get('patch_id'))})
                 elif path in ('/api/web/workspace/project/search', '/api/agent/workspace/project/search'):
@@ -1694,6 +1714,33 @@ def make_server(
                     return
                 mgr = get_persona_manager()
                 self._send(200, mgr.get_config())
+                return
+            if parsed.path == '/api/admin/decision/config':
+                if not self._node_channel():
+                    return
+                principal = self._principal()
+                if principal is None:
+                    return
+                if principal.get('role') != 'superadmin' and 'admin:read' not in principal.get('capabilities', []):
+                    self._send(403, {'error': {'message': 'Superadmin permission required'}})
+                    return
+                dlayer = get_decision_layer()
+                self._send(200, dlayer.get_config())
+                return
+            if parsed.path == '/api/decision/replay':
+                if not self._node_channel():
+                    return
+                principal = self._principal()
+                if principal is None:
+                    return
+                qs = parse_qs(parsed.query)
+                dec_id = qs.get('decision_id', [''])[0]
+                dlayer = get_decision_layer()
+                item = dlayer.replay(dec_id)
+                if not item:
+                    self._send(404, {'error': {'message': 'Decision ID not found in replay buffer'}})
+                else:
+                    self._send(200, {'decision': item})
                 return
             if self.path == '/api/admin/providers':
                 if not self._node_channel():
