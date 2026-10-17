@@ -64,6 +64,7 @@ if [[ "${#repositories[@]}" -eq 0 ]]; then
   target="/opt/omniops"
   printf 'هیچ مخزن فعالی پیدا نشد. در حال دریافت خودکار کد از گیت‌هاب در %s...\n' "$target"
   git clone https://github.com/RedBoy-011/OmniOps.git "$target"
+  rm -rf "$target/old_features" 2>/dev/null || true
   repo="$target"
 else
   # اولویت با فرایند در حال اجرا، سپس دایرکتوری فعلی
@@ -299,6 +300,9 @@ trap - EXIT
 # ۶. به‌روزرسانی کد مخزن
 git fetch --prune origin +refs/heads/main:refs/remotes/origin/main
 git checkout -B main refs/remotes/origin/main 2>/dev/null || git merge --ff-only origin/main 2>/dev/null || true
+
+# پاک‌سازی پوشه آرشیو قابلیت‌های قدیمی در سرور برای بهینه‌سازی حجم و منابع
+rm -rf "$repo/old_features" 2>/dev/null || true
 
 # ۷. بررسی و نصب خودکار Node.js 24 و nvm در صورت نیاز
 if [[ -f /root/.nvm/nvm.sh ]]; then

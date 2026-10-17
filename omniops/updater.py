@@ -12,6 +12,7 @@ import json
 import logging
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -204,6 +205,15 @@ def apply_update(repo_root: Path | str | None = None, branch: str = "main") -> d
             }
 
     new_commit = get_current_commit(root) or prev_commit
+
+    # Remove archived legacy features on Linux server to save disk and memory
+    if sys.platform != "win32":
+        old_features_dir = root / "old_features"
+        if old_features_dir.is_dir():
+            try:
+                shutil.rmtree(old_features_dir, ignore_errors=True)
+            except Exception:
+                pass
 
     # Step 3: Rebuild Web App frontend if npm is available
     rebuilt_frontend = False
