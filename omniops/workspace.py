@@ -22,11 +22,27 @@ _command_streams = {}
 _command_streams_lock = threading.Lock()
 
 
+class ResolvedProjectRoot(tuple):
+    """Tuple of (root_dir: Path, project_name: str) with hybrid workspace metadata."""
+    def __new__(cls, root_dir: Path, project_name: str, mode: str = "local_windows", owner_id: str = ""):
+        inst = super().__new__(cls, (root_dir, project_name))
+        inst.root_dir = root_dir
+        inst.project_name = project_name
+        inst.mode = mode
+        inst.owner_id = owner_id
+        return inst
+
+
 class WorkspaceStore:
     def __init__(self, store):
         self.store = store
         with store._lock, store._db() as db:
             db.executescript("""
+                CREATE TABLE IF NOT EXISTS workspace_disk_quotas (
+                    owner_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                    max_quota_bytes INTEGER NOT NULL DEFAULT 262144000,
+                    updated_at INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS workspace_projects (
                     id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     name TEXT NOT NULL, created_at INTEGER NOT NULL,
@@ -203,9 +219,19 @@ class WorkspaceStore:
     def list_projects(self, principal):
         self._cap(principal, 'chat')
         with self.store._db() as db:
-            return [dict(row) for row in db.execute(
+            rows = db.execute(
                 "SELECT id,name,created_at,COALESCE(root_path,'') as root_path FROM workspace_projects WHERE owner_id=? ORDER BY created_at DESC, rowid DESC LIMIT 30",
-                (principal['id'],))]
+                (principal['id'],)).fetchall()
+            results = []
+            for row in rows:
+                p_dict = dict(row)
+                root_str = (p_dict.get('root_path') or '').strip()
+                if root_str and Path(root_str).is_dir():
+                    p_dict['workspace_mode'] = 'local_windows'
+                else:
+                    p_dict['workspace_mode'] = 'cloud_server'
+                results.append(p_dict)
+            return results
 
     def get_project(self, principal, project_id):
         self._cap(principal, 'chat')
@@ -218,7 +244,10 @@ class WorkspaceStore:
                 row = db.execute("SELECT id, owner_id, name, created_at, COALESCE(root_path,'') as root_path FROM workspace_projects WHERE id=? AND owner_id=?", (project_id, principal['id'])).fetchone()
             if not row:
                 raise IdentityError('Project not found', 404)
-            return dict(row)
+            p_dict = dict(row)
+            root_str = (p_dict.get('root_path') or '').strip()
+            p_dict['workspace_mode'] = 'local_windows' if (root_str and Path(root_str).is_dir()) else 'cloud_server'
+            return p_dict
 
     def create_project(self, principal, name, root_path=""):
         self._cap(principal, 'chat')
@@ -234,7 +263,8 @@ class WorkspaceStore:
             db.execute('INSERT INTO workspace_projects (id, owner_id, name, created_at, root_path) VALUES (?,?,?,?,?)',
                        (project_id, principal['id'], name.strip(), int(self.store.clock()), clean_root))
             self.store._audit(db, principal['id'], 'workspace_project_created', project_id)
-        return {'id': project_id, 'name': name.strip(), 'root_path': clean_root}
+        mode = 'local_windows' if (clean_root and Path(clean_root).is_dir()) else 'cloud_server'
+        return {'id': project_id, 'name': name.strip(), 'root_path': clean_root, 'workspace_mode': mode}
 
     def bind_project_root(self, principal, project_id, root_path):
         self._cap(principal, 'chat')
@@ -249,25 +279,111 @@ class WorkspaceStore:
             if changed != 1:
                 raise IdentityError('Project not found', 404)
             self.store._audit(db, principal['id'], 'workspace_project_root_updated', project_id)
-        return {'status': 'updated', 'project_id': project_id, 'root_path': clean_path}
+        mode = 'local_windows' if (clean_path and Path(clean_path).is_dir()) else 'cloud_server'
+        return {'status': 'updated', 'project_id': project_id, 'root_path': clean_path, 'workspace_mode': mode}
 
     def _resolve_project_root(self, principal, project_id):
         with self.store._db() as db:
             if principal.get('role') == 'superadmin':
-                row = db.execute('SELECT root_path, name FROM workspace_projects WHERE id=?',
+                row = db.execute('SELECT root_path, name, owner_id FROM workspace_projects WHERE id=?',
                                  (project_id,)).fetchone()
             else:
-                row = db.execute('SELECT root_path, name FROM workspace_projects WHERE id=? AND owner_id=?',
+                row = db.execute('SELECT root_path, name, owner_id FROM workspace_projects WHERE id=? AND owner_id=?',
                                  (project_id, principal['id'])).fetchone()
             if not row:
                 raise IdentityError('Project not found', 404)
+            owner_id = row['owner_id']
             root_str = (row['root_path'] or '').strip()
-            if not root_str:
-                raise IdentityError('Project does not have an anchored local directory root', 400)
-            target = Path(root_str).resolve()
-            if not target.exists() or not target.is_dir():
-                raise IdentityError(f'Anchored project directory does not exist: {root_str}', 404)
-            return target, row['name']
+
+            # 1. Primary path: Host local directory (e.g. Windows workspace root)
+            if root_str:
+                target = Path(root_str).resolve()
+                if target.exists() and target.is_dir():
+                    return ResolvedProjectRoot(target, row['name'], mode="local_windows", owner_id=owner_id)
+
+            # 2. Fallback path: Cloud server isolated workspace
+            cloud_root = Path(__file__).resolve().parent.parent / "data" / "workspaces" / owner_id / project_id
+            cloud_root.mkdir(parents=True, exist_ok=True)
+            readme_path = cloud_root / "README.md"
+            if not readme_path.exists():
+                try:
+                    readme_path.write_text(
+                        f"# {row['name']}\n> فضای کار ابری ایزوله OmniOps Cloud Workspace\n\nاین فضای کاری به صورت خودکار روی سرور ابری ایجاد شده است.\n",
+                        encoding="utf-8"
+                    )
+                except Exception:
+                    pass
+            return ResolvedProjectRoot(cloud_root, row['name'], mode="cloud_server", owner_id=owner_id)
+
+    def get_user_quota(self, principal, user_id=None):
+        target_uid = principal['id']
+        if user_id and user_id != target_uid:
+            if principal.get('role') != 'superadmin' and 'admin:read' not in principal.get('capabilities', []):
+                raise IdentityError('Superadmin permission required', 403)
+            target_uid = user_id
+
+        with self.store._db() as db:
+            row = db.execute('SELECT max_quota_bytes FROM workspace_disk_quotas WHERE owner_id=?', (target_uid,)).fetchone()
+            max_quota = row['max_quota_bytes'] if row else 262144000  # 250 MB default
+
+        used_bytes = self.get_user_disk_usage(target_uid)
+        available_bytes = max(0, max_quota - used_bytes)
+        usage_pct = round((used_bytes / max_quota) * 100.0, 1) if max_quota > 0 else 0.0
+
+        return {
+            'user_id': target_uid,
+            'max_quota_bytes': max_quota,
+            'max_quota_mb': round(max_quota / (1024 * 1024), 2),
+            'used_bytes': used_bytes,
+            'used_mb': round(used_bytes / (1024 * 1024), 2),
+            'available_bytes': available_bytes,
+            'available_mb': round(available_bytes / (1024 * 1024), 2),
+            'usage_percent': usage_pct,
+        }
+
+    def set_user_quota(self, principal, user_id, max_quota_bytes):
+        if principal.get('role') != 'superadmin' and 'admin:write' not in principal.get('capabilities', []):
+            raise IdentityError('Superadmin permission required to update disk quota', 403)
+        if not isinstance(max_quota_bytes, int) or max_quota_bytes < 10 * 1024 * 1024 or max_quota_bytes > 50 * 1024 * 1024 * 1024:
+            raise IdentityError('Disk quota must be between 10 MB and 50 GB', 400)
+
+        now = int(time.time())
+        with self.store._lock, self.store._db() as db:
+            db.execute('''
+                INSERT INTO workspace_disk_quotas (owner_id, max_quota_bytes, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(owner_id) DO UPDATE SET max_quota_bytes=excluded.max_quota_bytes, updated_at=excluded.updated_at
+            ''', (user_id, max_quota_bytes, now))
+            self.store._audit(db, principal['id'], 'workspace_quota_updated', f"{user_id}:{max_quota_bytes}")
+
+        return self.get_user_quota(principal, user_id=user_id)
+
+    def get_user_disk_usage(self, owner_id: str) -> int:
+        cloud_base = Path(__file__).resolve().parent.parent / "data" / "workspaces" / owner_id
+        if not cloud_base.exists() or not cloud_base.is_dir():
+            return 0
+        total = 0
+        for root, _, files in os.walk(cloud_base):
+            for f in files:
+                fp = Path(root) / f
+                try:
+                    total += fp.stat().st_size
+                except Exception:
+                    pass
+        return total
+
+    def check_disk_quota(self, owner_id: str, additional_bytes: int = 0) -> None:
+        used = self.get_user_disk_usage(owner_id)
+        with self.store._db() as db:
+            row = db.execute('SELECT max_quota_bytes FROM workspace_disk_quotas WHERE owner_id=?', (owner_id,)).fetchone()
+            max_quota = row['max_quota_bytes'] if row else 262144000  # 250 MB
+        if (used + additional_bytes) > max_quota:
+            max_mb = round(max_quota / (1024 * 1024), 1)
+            used_mb = round(used / (1024 * 1024), 1)
+            raise IdentityError(
+                f"سهمیه دیسک فضای ابری پر شده است. مصرف جاری: {used_mb} مگابایت، سقف مجاز: {max_mb} مگابایت. لطفاً فایل‌های زائد را حذف کرده یا سهمیه را ارتقا دهید.",
+                413
+            )
 
     def _safe_resolve(self, root_dir: Path, rel_path: str) -> Path:
         if not isinstance(rel_path, str):
@@ -282,7 +398,9 @@ class WorkspaceStore:
 
     def inspect_project(self, principal, project_id):
         self._cap(principal, 'chat')
-        root_dir, project_name = self._resolve_project_root(principal, project_id)
+        resolved = self._resolve_project_root(principal, project_id)
+        root_dir, project_name = resolved[0], resolved[1]
+        mode = getattr(resolved, 'mode', 'local_windows')
 
         # Detect language and framework
         p_type = 'generic'
@@ -371,6 +489,7 @@ class WorkspaceStore:
             'project_id': project_id,
             'name': project_name,
             'root_path': str(root_dir),
+            'workspace_mode': mode,
             'project_type': p_type,
             'framework': framework,
             'total_entries': file_count,
@@ -429,10 +548,18 @@ class WorkspaceStore:
             raise IdentityError('action.request permission required to modify files', 403)
         if not isinstance(content, str):
             raise IdentityError('File content must be a string')
-        if len(content.encode('utf-8')) > 256 * 1024:
+        content_bytes = len(content.encode('utf-8'))
+        if content_bytes > 256 * 1024:
             raise IdentityError('File content exceeds 256 KiB limit', 413)
 
-        root_dir, _ = self._resolve_project_root(principal, project_id)
+        resolved = self._resolve_project_root(principal, project_id)
+        root_dir = resolved[0]
+        mode = getattr(resolved, 'mode', 'local_windows')
+        owner_id = getattr(resolved, 'owner_id', principal['id'])
+
+        if mode == 'cloud_server':
+            self.check_disk_quota(owner_id, content_bytes)
+
         target = self._safe_resolve(root_dir, relative_path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding='utf-8')
@@ -444,7 +571,8 @@ class WorkspaceStore:
             'status': 'written',
             'project_id': project_id,
             'path': relative_path,
-            'bytes': len(content.encode('utf-8')),
+            'bytes': content_bytes,
+            'workspace_mode': mode,
         }
 
     def propose_file_patch(self, principal, project_id, relative_path, new_content, apply=False):

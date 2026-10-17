@@ -62,6 +62,7 @@ export interface ProjectBinding {
   name: string;
   root_path: string;
   git_repo?: string;
+  workspace_mode?: "local_windows" | "cloud_server";
 }
 
 export interface AgentStep {
@@ -467,6 +468,7 @@ export function AgenticChatbot({ onClose }: Props) {
             name: p.name,
             root_path: p.root_path || "C:\\Users\\arfaghani\\Desktop\\OmniOps",
             git_repo: p.name === "OmniOps" ? "https://github.com/RedBoy-011/OmniOps.git" : undefined,
+            workspace_mode: p.workspace_mode || (p.root_path ? "local_windows" : "cloud_server"),
           }));
           setProjectsList(mapped);
           // If activeProject is default, align with first found
@@ -1424,8 +1426,45 @@ export function AgenticChatbot({ onClose }: Props) {
             <span style={{ fontSize: "10.5px", color: "#8b949e", maxWidth: "140px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} dir="ltr">
               {activeProject.root_path.split("\\").pop()}
             </span>
-            <span style={{ fontSize: "10px", color: "#58a6ff" }}>▾</span>
           </button>
+
+          {/* نشانگر زنده فضای کار دوگانه (ویندوز آنلاین / ابر ایزوله) */}
+          <span
+            style={{
+              fontSize: "11px",
+              padding: "3px 9px",
+              borderRadius: "12px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "5px",
+              background: activeProject.workspace_mode === "cloud_server"
+                ? "rgba(14, 165, 233, 0.15)"
+                : "rgba(16, 185, 129, 0.15)",
+              border: activeProject.workspace_mode === "cloud_server"
+                ? "1px solid rgba(14, 165, 233, 0.4)"
+                : "1px solid rgba(16, 185, 129, 0.4)",
+              color: activeProject.workspace_mode === "cloud_server" ? "#38bdf8" : "#34d399",
+              fontWeight: 600,
+            }}
+            title={
+              activeProject.workspace_mode === "cloud_server"
+                ? "فضای کار ابری ایزوله روی سرور فعال است (سقف مجاز ۲۵۰ مگابایت)"
+                : `اتصال مستقیم به مسیر لوکال ویندوز (${activeProject.root_path})`
+            }
+          >
+            <span
+              style={{
+                width: "6px",
+                height: "6px",
+                borderRadius: "50%",
+                background: activeProject.workspace_mode === "cloud_server" ? "#38bdf8" : "#10b981",
+                boxShadow: activeProject.workspace_mode === "cloud_server"
+                  ? "0 0 6px #38bdf8"
+                  : "0 0 6px #10b981",
+              }}
+            />
+            {activeProject.workspace_mode === "cloud_server" ? "☁️ سرور ابری" : "🟢 ویندوز آنلاین"}
+          </span>
 
           {/* سشن و عنوان گفتگو با قابلیت ویرایش نام و نمایش اسپینر لودینگ چرخان */}
           <div

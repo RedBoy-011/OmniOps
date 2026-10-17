@@ -846,6 +846,8 @@ def make_server(
                 "/api/admin/workspace/agent/runs/stop", "/api/admin/workspace/agent/runs/approve",
                 "/api/workspace/agent/notifications/read", "/api/web/workspace/agent/notifications/read",
                 "/api/admin/workspace/sandbox/policy",
+                "/api/admin/workspace/quota",
+                "/api/admin/decision/config", "/api/decision/decide",
                 "/api/web/workspace/project/patches/rollback", "/api/agent/workspace/project/patches/rollback",
                 "/api/web/workspace/project/search", "/api/agent/workspace/project/search",
                 "/api/web/workspace/task/run/feedback", "/api/agent/workspace/task/run/feedback",
@@ -1048,6 +1050,12 @@ def make_server(
                     self._send(200, workspace.mark_task_notifications_read(principal, payload.get('notification_ids')))
                 elif path == '/api/admin/workspace/sandbox/policy':
                     self._send(200, {'policy': workspace.update_sandbox_policy(principal, payload)})
+                elif path == '/api/admin/workspace/quota':
+                    if principal.get('role') != 'superadmin' and 'admin:write' not in principal.get('capabilities', []):
+                        raise IdentityError('Superadmin permission required', 403)
+                    target_uid = payload.get('user_id')
+                    max_bytes = int(payload.get('max_quota_bytes', 262144000))
+                    self._send(200, workspace.set_user_quota(principal, target_uid, max_bytes))
                 elif path == '/api/admin/persona':
                     if principal.get('role') != 'superadmin' and 'admin:write' not in principal.get('capabilities', []):
                         raise IdentityError('Superadmin permission required', 403)
@@ -1655,6 +1663,29 @@ def make_server(
                     return
                 try:
                     self._send(200, {'policy': workspace.get_sandbox_policy(principal)})
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                except Exception as exc:
+                    self._send(400, {'error': {'message': f'Invalid request: {exc}'}})
+                return
+            if parsed.path == '/api/admin/workspace/quota':
+                principal = self._principal('web') or self._principal('agent')
+                if principal is None:
+                    return
+                try:
+                    target_uid = parse_qs(parsed.query).get('user_id', [None])[0]
+                    self._send(200, workspace.get_user_quota(principal, user_id=target_uid))
+                except IdentityError as exc:
+                    self._send(exc.status, {'error': {'message': str(exc)}})
+                except Exception as exc:
+                    self._send(400, {'error': {'message': f'Invalid request: {exc}'}})
+                return
+            if parsed.path in ('/api/web/workspace/storage/status', '/api/agent/workspace/storage/status'):
+                principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
+                if principal is None:
+                    return
+                try:
+                    self._send(200, workspace.get_user_quota(principal))
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
                 except Exception as exc:

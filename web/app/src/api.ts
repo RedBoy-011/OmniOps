@@ -51,7 +51,13 @@ export type UserProfileReport = {
 export type ChatSession = { id: string; title: string; created_at: number; updated_at: number; message_count: number };
 export type ChatHistory = { id: string; prompt: string; reply: string; model: string; created_at: number; session_id?: string | null };
 export type MemoryNote = { id: string; content: string; created_at: number };
-export type WorkspaceProject = { id: string; name: string; created_at: number; root_path?: string };
+export type WorkspaceProject = {
+  id: string;
+  name: string;
+  created_at: number;
+  root_path?: string;
+  workspace_mode?: "local_windows" | "cloud_server";
+};
 export type WorkspaceAttachment = { id: string; project_id: string; name: string; mime: string; size: number; created_at: number };
 export type TaskDraft = { id: string; project_id: string; description: string; status: "draft" | "cancelled"; created_at: number; updated_at: number };
 export type PendingUser = { id: string; username: string; mobile: string; created_at: number };
@@ -404,6 +410,7 @@ export type ProjectInspection = {
   project_id: string;
   name: string;
   root_path: string;
+  workspace_mode?: "local_windows" | "cloud_server";
   project_type: string;
   framework: string;
   total_entries: number;
@@ -1108,6 +1115,23 @@ export const api = {
     request<PersonaConfig>("/api/admin/persona", "POST", data),
   resetPersonaConfig: () =>
     request<PersonaConfig>("/api/admin/persona/reset", "POST", {}),
+  getStorageQuota: () =>
+    request<StorageQuotaInfo>("/api/web/workspace/storage/status"),
+  getAdminQuota: (user_id?: string) =>
+    request<StorageQuotaInfo>("/api/admin/workspace/quota" + (user_id ? `?user_id=${user_id}` : "")),
+  setAdminQuota: (user_id: string, max_quota_bytes: number) =>
+    request<StorageQuotaInfo>("/api/admin/workspace/quota", "POST", { user_id, max_quota_bytes }),
+};
+
+export type StorageQuotaInfo = {
+  user_id: string;
+  max_quota_bytes: number;
+  max_quota_mb: number;
+  used_bytes: number;
+  used_mb: number;
+  available_bytes: number;
+  available_mb: number;
+  usage_percent: number;
 };
 
 export type PersonaConfig = {
