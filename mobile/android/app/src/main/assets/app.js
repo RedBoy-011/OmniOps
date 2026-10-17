@@ -544,7 +544,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function pingHeartbeat() {
     if (!currentToken || !currentServerUrl) return;
     try {
-      await universalFetch(`${currentServerUrl}/api/agent/heartbeat`, {
+      await universalFetch(`${currentServerUrl}/api/mobile/heartbeat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1214,7 +1214,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function loadChatModels() {
     if (!currentToken || !currentServerUrl || !chatModelSelect) return;
     try {
-      const resp = await universalFetch(`${currentServerUrl}/api/agent/models`, {
+      const resp = await universalFetch(`${currentServerUrl}/api/mobile/models`, {
         headers: { Authorization: `Bearer ${currentToken}` },
       });
       if (resp.ok) {
@@ -1288,7 +1288,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const saveHistory = chatSaveHistoryToggle ? chatSaveHistoryToggle.checked : false;
 
     try {
-      const resp = await universalFetch(`${currentServerUrl}/api/agent/chat`, {
+      const resp = await universalFetch(`${currentServerUrl}/api/mobile/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1350,7 +1350,7 @@ document.addEventListener("DOMContentLoaded", () => {
     btnClearChatHistory.addEventListener("click", async () => {
       if (!confirm("آیا مایل به شروع گفتگوی جدید و پاکسازی صفحه هستید؟")) return;
       try {
-        await universalFetch(`${currentServerUrl}/api/agent/history/clear`, {
+        await universalFetch(`${currentServerUrl}/api/mobile/history/clear`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

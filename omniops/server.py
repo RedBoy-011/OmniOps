@@ -730,20 +730,12 @@ def make_server(
                 "/api/mobile/commands/dispatch", "/api/mobile/commands/approve", "/api/mobile/commands/cancel",
                 "/api/mobile/approvals/request", "/api/mobile/approvals/decide", "/api/mobile/kill-switch",
                 "/api/mobile/projects/steer", "/api/mobile/chat", "/api/mobile/chat/stream", "/api/mobile/heartbeat",
+                "/api/mobile/history/clear", "/api/mobile/sessions",
                 "/api/agent/commands/claim", "/api/agent/commands/report",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
-            if path.startswith("/api/mobile/") or path in {
-                "/api/agent/heartbeat",
-                "/api/agent/chat", "/api/web/chat",
-                "/api/agent/chat/stream", "/api/web/chat/stream",
-                "/api/chat/sessions", "/api/chat/sessions/rename", "/api/chat/sessions/delete",
-                "/api/agent/sessions", "/api/agent/sessions/rename", "/api/agent/sessions/delete",
-                "/api/chat/history/clear", "/api/agent/history/clear",
-                "/api/chat/memory/add", "/api/agent/memory/add",
-                "/api/chat/memory/remove", "/api/agent/memory/remove",
-            }:
+            if path.startswith("/api/mobile/"):
                 audience = "any"
             elif path.startswith("/api/agent/") and path != "/api/agent/pairing":
                 audience = "agent"
@@ -1526,7 +1518,7 @@ def make_server(
                               '/api/chat/history', '/api/chat/memory',
                               '/api/agent/history', '/api/agent/memory',
                               '/api/mobile/history', '/api/mobile/memory'):
-                principal = self._principal('any')
+                principal = self._principal('any' if parsed.path.startswith('/api/mobile/') else ('agent' if parsed.path.startswith('/api/agent/') else 'web'))
                 if principal is None:
                     return
                 try:
@@ -1635,7 +1627,7 @@ def make_server(
                 })
                 return
             if self.path in ('/api/agent/models', '/api/web/models', '/api/mobile/models'):
-                principal = self._principal('any')
+                principal = self._principal('any' if self.path.startswith('/api/mobile/') else ('agent' if self.path == '/api/agent/models' else 'web'))
                 if principal is None:
                     return
                 if "chat" not in principal["capabilities"]:
