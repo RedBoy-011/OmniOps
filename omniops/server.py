@@ -842,7 +842,7 @@ def make_server(
                     if providers is None:
                         raise IdentityError('Provider registry unavailable', 503)
                     if path.endswith('/save'):
-                        if not (isinstance(self.connection, ssl.SSLSocket) and self.connection.version() == "TLSv1.3"):
+                        if not getattr(self.server, "allow_http_external", False) and not (isinstance(self.connection, ssl.SSLSocket) and self.connection.version() == "TLSv1.3"):
                             self._send(426, {"error": {"message": "Direct TLS 1.3 is required for provider credentials"}})
                             return
                         result = providers.save(principal, payload.get('kind'), payload.get('api_key'),

@@ -20,10 +20,21 @@ class TestRouterAndCatalog(unittest.TestCase):
         self.assertIn("token_label", qwen)
         self.assertGreater(qwen["context_tokens"], 0)
 
-        # Gemini cloud model
+        # Gemini cloud models
         gem = get_model_metadata("gemini/gemini-2.5-flash")
         self.assertEqual(gem["category"], "fast_chat")
         self.assertEqual(gem["context_tokens"], 1000000)
+
+        gem2 = get_model_metadata("gemini/gemini-2.0-flash")
+        self.assertEqual(gem2["category"], "fast_chat")
+        self.assertIn("۲.۰ فلش", gem2["name"])
+
+        # DeepSeek Cloud models
+        ds_chat = get_model_metadata("openrouter/deepseek/deepseek-chat")
+        self.assertEqual(ds_chat["category"], "general")
+
+        ds_reason = get_model_metadata("openrouter/deepseek/deepseek-reasoner")
+        self.assertEqual(ds_reason["category"], "reasoning")
 
         # DeepSeek R1 reasoning
         r1 = get_model_metadata("ollama/deepseek-r1:14b")

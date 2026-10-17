@@ -234,7 +234,42 @@ export function ProviderManager() {
   const [socksHealth, setSocksHealth] = useState<SocksHealthResult | null>(null);
   const [socksHealthLoading, setSocksHealthLoading] = useState(false);
   const [error, setError] = useState("");
-  const secure = window.location.protocol === "https:";
+  const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
+  const secure = true;
+  const [catalogFilter, setCatalogFilter] = useState<string>("all");
+  const [catalogSearch, setCatalogSearch] = useState<string>("");
+
+  const enabledModelsSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of providers) {
+      if (p.enabled) {
+        for (const m of p.models) {
+          set.add(m);
+          set.add(`${p.kind}/${m}`);
+        }
+      }
+    }
+    return set;
+  }, [providers]);
+
+  const filteredCatalogEntries = useMemo(() => {
+    return Object.entries(catalog).filter(([id, meta]) => {
+      if (catalogFilter !== "all" && meta.category !== catalogFilter) {
+        return false;
+      }
+      if (catalogSearch.trim()) {
+        const q = catalogSearch.trim().toLowerCase();
+        const inId = id.toLowerCase().includes(q);
+        const inName = (meta.name || "").toLowerCase().includes(q);
+        const inComment = (meta.comment || "").toLowerCase().includes(q);
+        const inTags = (meta.recommended_for || []).some(t => t.toLowerCase().includes(q));
+        if (!inId && !inName && !inComment && !inTags) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [catalog, catalogFilter, catalogSearch]);
 
   async function refresh() {
     try {
@@ -242,9 +277,14 @@ export function ProviderManager() {
       setProviders(data.providers);
       setError("");
       try {
-        const m = await api.webModels();
-        if (m.catalog) setCatalog(m.catalog);
-      } catch {}
+        const catRes = await api.modelsCatalog();
+        if (catRes.catalog) setCatalog(catRes.catalog);
+      } catch {
+        try {
+          const m = await api.webModels();
+          if (m.catalog) setCatalog(m.catalog);
+        } catch {}
+      }
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "فهرست Provider دریافت نشد.";
       setError(message);
@@ -306,22 +346,30 @@ export function ProviderManager() {
   }, [secure]);
 
   return <section className="glass admin-card operations-card provider-manager" aria-label="مدیریت Providerهای API">
-    {!secure ? (
-      <div style={{ padding: "18px", borderRadius: "14px", background: "rgba(124, 58, 237, 0.08)", border: "1px solid rgba(124, 58, 237, 0.3)", margin: "10px 0" }}>
-        <p style={{ margin: "0 0 10px", fontSize: "13px", color: "#e9d5ff", lineHeight: "1.8" }}>
-          🔒 <strong>ثبت کلیدهای API و پراکسی نیازمند درگاه امن HTTPS است:</strong>
-          <br />
-          جهت محافظت از لو رفتن کلیدها در شبکه محلی، این بخش از طریق درگاه امن پورت <strong>9443</strong> در دسترس است:
-        </p>
-        <a
-          href={`https://${window.location.hostname}:9443/`}
-          style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "9px 18px", borderRadius: "10px", background: "#7c3aed", color: "#fff", textDecoration: "none", fontSize: "12px", fontWeight: "bold" }}
-        >
-          🚀 ورود به پنل امن: https://{window.location.hostname}:9443/
-        </a>
+    {!isHttps && (
+      <div style={{
+        padding: "10px 16px",
+        borderRadius: "10px",
+        background: "rgba(59, 130, 246, 0.08)",
+        border: "1px solid rgba(59, 130, 246, 0.25)",
+        marginBottom: "14px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        flexWrap: "wrap",
+        gap: "10px",
+        fontSize: "12px",
+        color: "#bfdbfe"
+      }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+          <span>🌐</span>
+          <span><strong>حالت شبکه محلی (HTTP):</strong> تنظیمات پراکسی و ارائه‌دهندگان ابری بر روی درگاه سرور محلی فعال است و ذخیره کلیدها و مدل‌ها مجاز می‌باشد.</span>
+        </span>
+        <span style={{ fontSize: "11px", color: "#93c5fd", background: "rgba(0,0,0,0.3)", padding: "3px 10px", borderRadius: "6px" }}>
+          درگاه ارتباطی: {typeof window !== "undefined" ? window.location.host : "127.0.0.1"}
+        </span>
       </div>
-    ) : (
-      <>
+    )}
         {/* داشبورد وضعیت سلامت و پایش تأخیر SOCKS5h */}
         <div className="socks-health-card">
           <div className="socks-health-header">
@@ -453,7 +501,185 @@ export function ProviderManager() {
             <ProviderCard key={provider.kind} provider={provider} defaultProxy={defaultProxy} refresh={refresh} catalog={catalog} />
           ))}
         </div>
-      </>
-    )}
+
+        {/* کاتالوگ جامع مشخصات، دسته‌بندی و راهنمای موضوعی مدل‌های هوش مصنوعی */}
+        <div className="models-catalog-section" style={{ marginTop: "32px", borderTop: "1px solid rgba(255, 255, 255, 0.1)", paddingTop: "24px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", marginBottom: "16px" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "bold", color: "#38bdf8", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>📦</span>
+                <span>کاتالوگ موضوعی و راهنمای کاربرد مدل‌ها (آنلاین و محلی)</span>
+              </h3>
+              <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#94a3b8" }}>
+                توضیحات تخصصی، پنجره بافت (توکن) و زمینهٔ کاربری هر مدل جهت انتخاب بهترین گزینه یا درک نحوه تصمیم‌گیری موتور هوشمند JRV.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+              <input
+                type="text"
+                value={catalogSearch}
+                onChange={e => setCatalogSearch(e.target.value)}
+                placeholder="🔍 جست‌وجو در نام مدل، کاربرد یا توضیحات…"
+                style={{
+                  background: "rgba(15, 23, 42, 0.6)",
+                  border: "1px solid rgba(255, 255, 255, 0.15)",
+                  borderRadius: "8px",
+                  padding: "6px 12px",
+                  fontSize: "12px",
+                  color: "#f8fafc",
+                  width: "240px"
+                }}
+              />
+            </div>
+          </div>
+
+          {/* تب‌های دسته‌بندی موضوعی */}
+          <div style={{ display: "flex", gap: "8px", overflowX: "auto", paddingBottom: "10px", marginBottom: "16px" }}>
+            {[
+              { id: "all", label: "همه مدل‌ها", icon: "📋" },
+              { id: "coding", label: "برنامه‌نویسی و کدنویسی", icon: "💻" },
+              { id: "reasoning", label: "استدلال عمیق و منطق", icon: "🧠" },
+              { id: "fast_chat", label: "گفتگوی روزمره و فوق‌سریع", icon: "⚡" },
+              { id: "general", label: "چندمنظوره و درک متن", icon: "🌐" },
+              { id: "vision", label: "چندرسانه‌ای و تحلیل تصویر", icon: "👁️" }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setCatalogFilter(tab.id)}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: "8px",
+                  fontSize: "12px",
+                  fontWeight: catalogFilter === tab.id ? "bold" : "normal",
+                  background: catalogFilter === tab.id ? "rgba(56, 189, 248, 0.2)" : "rgba(255, 255, 255, 0.04)",
+                  border: catalogFilter === tab.id ? "1px solid #38bdf8" : "1px solid rgba(255, 255, 255, 0.08)",
+                  color: catalogFilter === tab.id ? "#38bdf8" : "#cbd5e1",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  whiteSpace: "nowrap",
+                  transition: "all 0.15s ease"
+                }}
+              >
+                <span>{tab.icon}</span>
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* گرید کارت‌های مدل با جزئیات کامل */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
+            gap: "14px"
+          }}>
+            {filteredCatalogEntries.map(([modelId, meta]) => {
+              const isAuto = modelId === "auto";
+              const isEnabled = isAuto || enabledModelsSet.has(modelId) || enabledModelsSet.has(meta.clean_name || "");
+              return (
+                <div
+                  key={modelId}
+                  style={{
+                    background: "rgba(255, 255, 255, 0.03)",
+                    border: `1px solid ${isEnabled ? (meta.badge_color || "#38bdf8") + "40" : "rgba(255, 255, 255, 0.08)"}`,
+                    borderRadius: "12px",
+                    padding: "14px",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    gap: "10px",
+                    position: "relative",
+                    overflow: "hidden"
+                  }}
+                >
+                  <div>
+                    {/* هدر کارت: عنوان، دسته‌بندی و نشان وضعیت */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px", marginBottom: "6px" }}>
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                          <span style={{
+                            fontSize: "10px",
+                            padding: "2px 6px",
+                            borderRadius: "4px",
+                            background: (meta.badge_color || "#38bdf8") + "20",
+                            color: meta.badge_color || "#38bdf8",
+                            fontWeight: "bold",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px"
+                          }}>
+                            <span>{meta.category_icon}</span>
+                            <span>{meta.category_label}</span>
+                          </span>
+                          <span style={{ fontSize: "10px", color: "#94a3b8", background: "rgba(255,255,255,0.06)", padding: "2px 6px", borderRadius: "4px" }}>
+                            {meta.provider === "gemini" ? "✨ گوگل جمنای" : meta.provider === "openai" ? "🟢 OpenAI" : meta.provider === "anthropic" ? "🟣 کلود" : meta.provider === "openrouter" ? "🌐 OpenRouter" : meta.provider === "ollama" ? "🦙 لوکال (Ollama)" : "⚡ خودکار"}
+                          </span>
+                        </div>
+                        <h4 style={{ margin: "6px 0 2px", fontSize: "13px", fontWeight: "bold", color: "#f8fafc" }}>
+                          {meta.name}
+                        </h4>
+                        <span style={{ fontSize: "11px", color: "#64748b", fontFamily: "monospace" }} dir="ltr">
+                          {modelId}
+                        </span>
+                      </div>
+
+                      <span style={{
+                        fontSize: "10px",
+                        padding: "2px 8px",
+                        borderRadius: "12px",
+                        background: isEnabled ? "rgba(16, 185, 129, 0.15)" : "rgba(255, 255, 255, 0.05)",
+                        color: isEnabled ? "#34d399" : "#64748b",
+                        border: `1px solid ${isEnabled ? "rgba(16, 185, 129, 0.3)" : "rgba(255, 255, 255, 0.1)"}`,
+                        whiteSpace: "nowrap"
+                      }}>
+                        {isAuto ? "✨ JRV" : isEnabled ? "🟢 فعال در هسته" : "⚪ نیازمند اتصال"}
+                      </span>
+                    </div>
+
+                    {/* مشخصات بافت و سرعت */}
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", margin: "8px 0" }}>
+                      <span style={{ fontSize: "11px", color: "#e2e8f0", background: "rgba(0, 0, 0, 0.35)", padding: "3px 8px", borderRadius: "6px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                        <span>⚡</span>
+                        <span>سرعت: {meta.speed}</span>
+                      </span>
+                      <span style={{ fontSize: "11px", color: "#e2e8f0", background: "rgba(0, 0, 0, 0.35)", padding: "3px 8px", borderRadius: "6px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                        <span>🎯</span>
+                        <span>بافت: {meta.context_window}</span>
+                      </span>
+                    </div>
+
+                    {/* کامنت و شرح کاربرد مدل */}
+                    <p style={{ margin: "6px 0 10px", fontSize: "11.5px", color: "#cbd5e1", lineHeight: "1.7" }}>
+                      {meta.comment}
+                    </p>
+                  </div>
+
+                  {/* تگ‌های کاربردهای پیشنهادی */}
+                  {meta.recommended_for && meta.recommended_for.length > 0 && (
+                    <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", borderTop: "1px solid rgba(255, 255, 255, 0.05)", paddingTop: "8px" }}>
+                      {meta.recommended_for.map((tag, idx) => (
+                        <span
+                          key={idx}
+                          style={{
+                            fontSize: "10.5px",
+                            padding: "2px 7px",
+                            borderRadius: "5px",
+                            background: "rgba(255, 255, 255, 0.04)",
+                            color: "#94a3b8",
+                            border: "1px solid rgba(255, 255, 255, 0.06)"
+                          }}
+                        >
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
   </section>;
 }

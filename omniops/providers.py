@@ -254,6 +254,10 @@ def fetch_models(kind, api_key, mode, proxy_url, with_prices=False):
         catalog_prices = {}
         for item in items[:3000]:
             if isinstance(item, dict):
+                if kind == 'gemini':
+                    methods = item.get('supportedGenerationMethods')
+                    if isinstance(methods, list) and 'generateContent' not in methods:
+                        continue
                 name = item.get('name' if kind == 'gemini' else 'id')
                 if isinstance(name, str) and len(name) <= 160:
                     name = name.removeprefix('models/') if kind == 'gemini' else name
@@ -404,7 +408,7 @@ class ProviderRegistry:
             models = fetch_models(kind, key, row['network_mode'], row['proxy_url'])
             catalog_prices = {}
         with self.identity._lock, self.identity._db() as db:
-            updated = db.execute('''UPDATE provider_accounts SET models_json=?,catalog_prices_json=?,tested_at=?
+            updated = db.execute('''UPDATE provider_accounts SET models_json=?,catalog_prices_json=?,tested_at=?,enabled=1
                 WHERE kind=? AND secret=? AND network_mode=? AND proxy_url=?''',
                 (json.dumps(models), json.dumps(catalog_prices), int(self.identity.clock()), kind,
                  row['secret'], row['network_mode'], row['proxy_url']))
