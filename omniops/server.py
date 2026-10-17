@@ -30,6 +30,7 @@ from .mobile_orchestrator import MobileApprovalStore
 from . import telemetry
 from . import updater
 from . import playwright_worker
+from .persona import get_persona_manager, normalize_persian_text
 
 MAX_BODY_BYTES = 384 * 1024
 LAN_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
@@ -167,8 +168,14 @@ def make_server(
                 if active_inferences[0] >= max_concurrent_inferences:
                     raise IdentityError('ظرفیت پردازش همزمان مدل تکمیل است؛ لطفاً چند لحظه بعد مجدداً تلاش کنید.', 429)
                 active_inferences[0] += 1
+            persona_mgr = get_persona_manager()
+            sys_context_str = sys_context if ('sys_context' in locals() and sys_context) else None
+            system_persona = persona_mgr.render_system_prompt(sys_context_str)
+
             try:
                 def completed(result):
+                    if persona_mgr.config.get('normalize_persian', True) and isinstance(result.get('reply'), str):
+                        result['reply'] = normalize_persian_text(result['reply'])
                     if save_history and memory is not None:
                         memory.remember_chat(principal, prompt.strip(), result['reply'], result['model'], session_id=session_id)
                     return result
@@ -186,7 +193,7 @@ def make_server(
                         raise IdentityError('Direct TLS 1.3 required for external chat', 426)
                     if providers is None:
                         raise IdentityError('Provider registry unavailable', 503)
-                    return completed(providers.complete(principal, model, effective_prompt, max_tokens=2048))
+                    return completed(providers.complete(principal, model, effective_prompt, max_tokens=2048, system_prompt=system_persona))
 
                 if requested.startswith(('gemini/', 'openrouter/', 'openai/', 'anthropic/')):
                     return external(requested)
@@ -225,7 +232,8 @@ def make_server(
                             else:
                                 local_name = cand.split('/', 1)[-1]
                                 client = current_ollama()
-                                answer = client.chat(local_name, [{'role': 'user', 'content': effective_prompt}])
+                                chat_msgs = persona_mgr.build_chat_messages(effective_prompt, dynamic_context=sys_context_str)
+                                answer = client.chat(local_name, chat_msgs)
                                 res = completed({'reply': answer, 'model': cand})
                                 res['routing_reason'] = routing_reason
                                 if search_meta.get('needs_grounding'):
@@ -247,7 +255,8 @@ def make_server(
                 last_error = None
                 for candidate in candidates:
                     try:
-                        answer = client.chat(candidate, [{'role': 'user', 'content': effective_prompt}])
+                        chat_msgs = persona_mgr.build_chat_messages(effective_prompt, dynamic_context=sys_context_str)
+                        answer = client.chat(candidate, chat_msgs)
                         return completed({'reply': answer, 'model': f'ollama/{candidate}'})
                     except OllamaError as exc:
                         last_error = exc
@@ -340,6 +349,10 @@ def make_server(
                     or (hasattr(self, 'headers') and self.headers.get('X-Forwarded-Proto', '').lower() == 'https')
                 )
 
+                persona_mgr = get_persona_manager()
+                sys_context_str = sys_context if ('sys_context' in locals() and sys_context) else None
+                system_persona = persona_mgr.render_system_prompt(sys_context_str)
+
                 if requested.startswith(('gemini/', 'openrouter/', 'openai/', 'anthropic/')):
                     if not allow_external:
                         send_event({'error': 'Explicit external data consent required'})
@@ -351,8 +364,10 @@ def make_server(
                         send_event({'error': 'Provider registry unavailable'})
                         return
                     try:
-                        res = providers.complete(principal, requested, effective_prompt, max_tokens=2048)
+                        res = providers.complete(principal, requested, effective_prompt, max_tokens=2048, system_prompt=system_persona)
                         reply = res.get('reply', '')
+                        if persona_mgr.config.get('normalize_persian', True):
+                            reply = normalize_persian_text(reply)
                         model_used = res.get('model', requested)
                         send_event({'chunk': reply, 'model': model_used})
                         send_event({'done': True, 'model': model_used, 'reply': reply})
@@ -396,8 +411,10 @@ def make_server(
                     for cand in [chosen_id] + fallback_chain:
                         try:
                             if cand.startswith(('gemini/', 'openrouter/', 'openai/', 'anthropic/')):
-                                res = providers.complete(principal, cand, effective_prompt, max_tokens=2048)
+                                res = providers.complete(principal, cand, effective_prompt, max_tokens=2048, system_prompt=system_persona)
                                 reply = res.get('reply', '')
+                                if persona_mgr.config.get('normalize_persian', True):
+                                    reply = normalize_persian_text(reply)
                                 send_event({'chunk': reply, 'model': cand})
                                 send_event({
                                     'done': True,
@@ -412,11 +429,14 @@ def make_server(
                             else:
                                 local_name = cand.split('/', 1)[-1]
                                 client = current_ollama()
+                                chat_msgs = persona_mgr.build_chat_messages(effective_prompt, dynamic_context=sys_context_str)
                                 full_reply_parts = []
-                                for chunk in client.chat_stream(local_name, [{'role': 'user', 'content': effective_prompt}]):
+                                for chunk in client.chat_stream(local_name, chat_msgs):
                                     full_reply_parts.append(chunk)
                                     send_event({'chunk': chunk, 'model': cand})
                                 full_reply = "".join(full_reply_parts)
+                                if persona_mgr.config.get('normalize_persian', True):
+                                    full_reply = normalize_persian_text(full_reply)
                                 send_event({
                                     'done': True,
                                     'model': cand,
@@ -443,9 +463,10 @@ def make_server(
 
                 chosen_candidate = None
                 full_reply_parts = []
+                chat_msgs = persona_mgr.build_chat_messages(effective_prompt, dynamic_context=sys_context_str)
                 for candidate in candidates:
                     try:
-                        for chunk in client.chat_stream(candidate, [{'role': 'user', 'content': effective_prompt}]):
+                        for chunk in client.chat_stream(candidate, chat_msgs):
                             if not chosen_candidate:
                                 chosen_candidate = candidate
                             full_reply_parts.append(chunk)
@@ -457,6 +478,8 @@ def make_server(
 
                 if chosen_candidate:
                     full_reply = "".join(full_reply_parts)
+                    if persona_mgr.config.get('normalize_persian', True):
+                        full_reply = normalize_persian_text(full_reply)
                     model_name = f'ollama/{chosen_candidate}'
                     send_event({'done': True, 'model': model_name, 'reply': full_reply})
                     if save_history and memory is not None:
@@ -1024,6 +1047,23 @@ def make_server(
                     self._send(200, workspace.mark_task_notifications_read(principal, payload.get('notification_ids')))
                 elif path == '/api/admin/workspace/sandbox/policy':
                     self._send(200, {'policy': workspace.update_sandbox_policy(principal, payload)})
+                elif path == '/api/admin/persona':
+                    if principal.get('role') != 'superadmin' and 'admin:write' not in principal.get('capabilities', []):
+                        raise IdentityError('Superadmin permission required', 403)
+                    mgr = get_persona_manager()
+                    updated = mgr.update_config(
+                        template=payload.get('template'),
+                        enabled=payload.get('enabled'),
+                        normalize_persian=payload.get('normalize_persian'),
+                        diacritics_assistance=payload.get('diacritics_assistance'),
+                        system_name=payload.get('system_name')
+                    )
+                    self._send(200, updated)
+                elif path == '/api/admin/persona/reset':
+                    if principal.get('role') != 'superadmin' and 'admin:write' not in principal.get('capabilities', []):
+                        raise IdentityError('Superadmin permission required', 403)
+                    mgr = get_persona_manager()
+                    self._send(200, mgr.reset_to_default())
                 elif path in ('/api/web/workspace/project/patches/rollback', '/api/agent/workspace/project/patches/rollback'):
                     self._send(200, {'patch': workspace.rollback_file_patch(principal, payload.get('patch_id'))})
                 elif path in ('/api/web/workspace/project/search', '/api/agent/workspace/project/search'):
@@ -1642,6 +1682,18 @@ def make_server(
                         self._send(200, {'notes': memory.notes(principal)})
                 except IdentityError as exc:
                     self._send(exc.status, {'error': {'message': str(exc)}})
+                return
+            if parsed.path == '/api/admin/persona':
+                if not self._node_channel():
+                    return
+                principal = self._principal()
+                if principal is None:
+                    return
+                if principal.get('role') != 'superadmin' and 'admin:read' not in principal.get('capabilities', []):
+                    self._send(403, {'error': {'message': 'Superadmin permission required'}})
+                    return
+                mgr = get_persona_manager()
+                self._send(200, mgr.get_config())
                 return
             if self.path == '/api/admin/providers':
                 if not self._node_channel():

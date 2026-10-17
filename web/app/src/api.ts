@@ -1098,10 +1098,27 @@ export const api = {
       "POST",
       { node_id, reason }
     ),
-  getTheme: () =>
+    getTheme: () =>
     request<ThemeResponse>("/api/theme"),
   setAdminTheme: (palette: string) =>
     request<{ active_palette: string }>("/api/admin/theme", "POST", { palette }),
+  getPersonaConfig: () =>
+    request<PersonaConfig>("/api/admin/persona"),
+  updatePersonaConfig: (data: Partial<PersonaConfig>) =>
+    request<PersonaConfig>("/api/admin/persona", "POST", data),
+  resetPersonaConfig: () =>
+    request<PersonaConfig>("/api/admin/persona/reset", "POST", {}),
+};
+
+export type PersonaConfig = {
+  enabled: boolean;
+  template: string;
+  system_name: string;
+  normalize_persian: boolean;
+  enforce_tone_rules: boolean;
+  diacritics_assistance: boolean;
+  updated_at: number;
+  version: string;
 };
 
 export type ThemePaletteInfo = {

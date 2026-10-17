@@ -13,6 +13,7 @@ import { LiveLogViewer } from "./components/LiveLogViewer";
 import { VoiceNotePlayer } from "./components/VoiceNotePlayer";
 import { AdminAgentGovernanceCard } from "./components/AdminAgentGovernanceCard";
 import { ThemePaletteSelector } from "./components/ThemePaletteSelector";
+import { SystemPersonaCard } from "./components/SystemPersonaCard";
 
 const choices = [
   ["chat", "گفت‌وگو"],
@@ -25,7 +26,7 @@ const choices = [
 ] as const;
 
 type AdminTab = "dashboard" | "nodes" | "providers" | "governance";
-type GovernanceSubTab = "users" | "pending" | "audit" | "agents" | "profile" | "pairing" | "backup";
+type GovernanceSubTab = "users" | "pending" | "audit" | "agents" | "persona" | "profile" | "pairing" | "backup";
 
 type Props = {
   user: Profile;
@@ -555,6 +556,18 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
               <button
                 type="button"
                 role="tab"
+                aria-selected={govSubTab === "persona"}
+                className={`user-subtab-btn ${govSubTab === "persona" ? "active" : ""}`}
+                onClick={() => setGovSubTab("persona")}
+              >
+                <span>🎭</span>
+                <span className="hidden md:inline">هویت، لحن فارسی و دانش</span>
+                <span className="md:hidden">هویت و لحن</span>
+              </button>
+
+              <button
+                type="button"
+                role="tab"
                 aria-selected={govSubTab === "profile"}
                 className={`user-subtab-btn ${govSubTab === "profile" ? "active" : ""}`}
                 onClick={() => setGovSubTab("profile")}
@@ -665,7 +678,10 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
             {/* زیرتب ۴: حاکمیت ایجنت‌ها */}
             {govSubTab === "agents" && <AdminAgentGovernanceCard />}
 
-            {/* زیرتب ۵: پروفایل ادمین */}
+            {/* زیرتب ۵: هویت، لحن فارسی و دانش کلامی سیستم */}
+            {govSubTab === "persona" && <SystemPersonaCard />}
+
+            {/* زیرتب ۶: پروفایل ادمین */}
             {govSubTab === "profile" && (
               <UserProfileModal
                 embedded
