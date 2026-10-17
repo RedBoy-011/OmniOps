@@ -2,6 +2,7 @@ import { useState } from "react";
 import { type Profile } from "./api";
 import { UserProfileModal } from "./components/UserProfileModal";
 import { ThemePaletteSelector } from "./components/ThemePaletteSelector";
+import { AgenticChatbot } from "./components/AgenticChatbot";
 
 type Props = {
   user: Profile;
@@ -11,7 +12,7 @@ type Props = {
 
 export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
   const [currentUser, setCurrentUser] = useState<Profile>(user);
-  const [activeTab, setActiveTab] = useState<"client" | "profile">("client");
+  const [activeTab, setActiveTab] = useState<"chat" | "client" | "profile">("chat");
   const [copiedServer, setCopiedServer] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
   const [showToken, setShowToken] = useState(false);
@@ -52,6 +53,27 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
             <div className="workspace-nav-pills" style={{ display: "flex", gap: "6px" }}>
               <button
                 type="button"
+                className={`workspace-tab-pill ${activeTab === "chat" ? "active" : ""}`}
+                onClick={() => setActiveTab("chat")}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "6px 14px",
+                  borderRadius: "10px",
+                  fontSize: "12px",
+                  fontWeight: "bold",
+                  background: activeTab === "chat" ? "var(--primary, #3b82f6)" : "rgba(255,255,255,0.06)",
+                  color: "#fff",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  cursor: "pointer",
+                }}
+              >
+                <span>🤖</span>
+                <span>دستیار هوشمند و چت‌بات</span>
+              </button>
+              <button
+                type="button"
                 className={`workspace-tab-pill ${activeTab === "client" ? "active" : ""}`}
                 onClick={() => setActiveTab("client")}
                 style={{
@@ -69,7 +91,7 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
                 }}
               >
                 <span>🖥️</span>
-                <span>کلاینت ویندوز</span>
+                <span>کلاینت دسکتاپ و توکن</span>
               </button>
               <button
                 type="button"
@@ -113,7 +135,9 @@ export function UserWorkspace({ user, onLogout, onSwitchToAdmin }: Props) {
           </div>
         </header>
 
-        {activeTab === "client" ? (
+        {activeTab === "chat" ? (
+          <AgenticChatbot />
+        ) : activeTab === "client" ? (
           <div className="client-connection-portal" style={{ display: "grid", gap: "20px" }}>
             {/* کارت معرفی استودیو دسکتاپ ویندوز */}
             <div className="glass admin-card" style={{ padding: "24px", borderRadius: "16px" }}>
