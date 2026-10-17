@@ -9,6 +9,7 @@ import { SystemUpdateCenterCard } from "./components/SystemUpdateCenterCard";
 import { UserManagementCard } from "./components/UserManagementCard";
 import { UserProfileModal } from "./components/UserProfileModal";
 import { SecurityAuditCard } from "./components/SecurityAuditCard";
+import { LiveLogViewer } from "./components/LiveLogViewer";
 import { AdminAgentGovernanceCard } from "./components/AdminAgentGovernanceCard";
 import { ThemePaletteSelector } from "./components/ThemePaletteSelector";
 
@@ -651,8 +652,13 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
               </section>
             )}
 
-            {/* زیرتب ۳: ممیزی امنیتی */}
-            {govSubTab === "audit" && <SecurityAuditCard />}
+            {/* زیرتب ۳: ممیزی امنیتی و پایشگر زنده هسته (Live Log Viewer) */}
+            {govSubTab === "audit" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+                <LiveLogViewer />
+                <SecurityAuditCard />
+              </div>
+            )}
 
             {/* زیرتب ۴: حاکمیت ایجنت‌ها */}
             {govSubTab === "agents" && <AdminAgentGovernanceCard />}
