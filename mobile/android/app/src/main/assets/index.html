@@ -89,26 +89,39 @@
       </section>
     </main>
 
+    <!-- Global Operator Session Bar (Shown when authenticated) -->
+    <section id="globalSessionBar" class="session-bar glass-card" style="display: none;">
+      <div class="session-info">
+        <span class="user-avatar">👤</span>
+        <div>
+          <div class="user-name-row">
+            <span id="sessionUsername" class="user-name">admin</span>
+            <span id="sessionRole" class="badge badge-cyan">اپراتور همراه</span>
+          </div>
+          <span id="sessionServer" class="server-endpoint-text" dir="ltr">172.19.30.94:9000</span>
+        </div>
+      </div>
+      <div class="session-actions">
+        <button id="btnRefreshStatus" class="btn-icon" title="بروزرسانی داده‌ها">🔄</button>
+        <button id="btnLogout" class="btn-icon btn-icon-danger" title="خروج / قطع اتصال">🚪</button>
+      </div>
+    </section>
+
+    <!-- Sub-Navigation Tabs Bar (Console vs AI Chatbot) -->
+    <nav id="appNavTabs" class="app-nav-bar glass-card" style="display: none;">
+      <button id="navTabConsole" class="nav-tab-btn active">
+        <span class="nav-tab-icon">🖥️</span>
+        <span class="nav-tab-text">کنسول و وظایف</span>
+      </button>
+      <button id="navTabChat" class="nav-tab-btn">
+        <span class="nav-tab-icon">💬</span>
+        <span class="nav-tab-text">گفتگو با هوش مصنوعی</span>
+        <span id="chatActiveDot" class="chat-tab-dot"></span>
+      </button>
+    </nav>
+
     <!-- VIEW 2: DEDICATED MOBILE OPERATOR CONSOLE -->
     <main id="operatorView" class="view-section">
-      <!-- Operator Session Bar -->
-      <section class="session-bar glass-card">
-        <div class="session-info">
-          <span class="user-avatar">👤</span>
-          <div>
-            <div class="user-name-row">
-              <span id="sessionUsername" class="user-name">admin</span>
-              <span id="sessionRole" class="badge badge-cyan">اپراتور ارشد</span>
-            </div>
-            <span id="sessionServer" class="server-endpoint-text" dir="ltr">172.19.30.94:9000</span>
-          </div>
-        </div>
-        <div class="session-actions">
-          <button id="btnRefreshStatus" class="btn-icon" title="بروزرسانی داده‌ها">🔄</button>
-          <button id="btnLogout" class="btn-icon btn-icon-danger" title="خروج / قطع اتصال">🚪</button>
-        </div>
-      </section>
-
       <!-- Windows Agent Node Card -->
       <section class="card glass-card">
         <div class="card-header">
@@ -278,6 +291,65 @@
           <button id="btnOpenDesktop" class="btn-link">
             <span>🌐</span>
             <span>مشاهده نسخه وب دسکتاپ هسته (Admin Dashboard) ↗</span>
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <!-- VIEW 3: DEDICATED MOBILE AI CHATBOT (همگام با ایجنت ویندوز) -->
+    <main id="chatView" class="view-section" style="display: none;">
+      <!-- Chat Controls Bar Card -->
+      <section class="card glass-card chat-controls-card">
+        <div class="chat-controls-row">
+          <div class="chat-model-box">
+            <span class="chat-control-icon">🤖</span>
+            <select id="chatModelSelect" class="chat-model-select" title="انتخاب مدل هوش مصنوعی">
+              <option value="auto">انتخاب هوشمند (Auto Model)</option>
+            </select>
+          </div>
+          <div class="chat-controls-actions">
+            <label class="chat-history-toggle" title="ذخیره گفتگو در حافظه کاربری سرور">
+              <input type="checkbox" id="chatSaveHistoryToggle">
+              <span>ذخیره حافظه</span>
+            </label>
+            <button id="btnClearChatHistory" class="btn-clear-chat" title="شروع گفتگوی جدید / پاکسازی">
+              <span>🗑️</span>
+              <span>پاکسازی</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Chat Messages Container -->
+      <section class="card glass-card chat-viewport-card">
+        <div id="chatMessagesStream" class="chat-messages-stream">
+          <!-- Initial Welcome Card -->
+          <div id="chatWelcomeCard" class="chat-welcome-box">
+            <span class="welcome-icon">⚡</span>
+            <h3 class="welcome-title">دستیار هوشمند OmniOps</h3>
+            <p class="welcome-desc">پاسخ‌گویی به پرسش‌های فنی، تحلیل وضعیت گره‌ها، بررسی کدها و اجرای اقدامات با مدل‌های محلی سرور و ایجنت ویندوز.</p>
+            <div class="welcome-chips-grid">
+              <button class="chat-chip" data-prompt="وضعیت کلی سرور و گره‌های متصل را گزارش کن.">📊 وضعیت گره‌های سیستم</button>
+              <button class="chat-chip" data-prompt="آیا فرمانی در انتظار تأیید یا خطایی در لاگ‌ها هست؟">⚠️ بررسی خطاهای اخیر</button>
+              <button class="chat-chip" data-prompt="چه مدل‌هایی در Ollama فعال و در دسترس هستند؟">🧠 فهرست مدل‌های محلی</button>
+              <button class="chat-chip" data-prompt="خلاصه فرآیندها و پروژه‌های جاری را ارائه بده.">🚀 خلاصه پروژه‌های ویندوز</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat Loading / Typing Indicator -->
+        <div id="chatTypingIndicator" class="chat-typing-row" style="display: none;">
+          <div class="typing-bubble">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          </div>
+          <span class="typing-text">دستیار در حال پردازش و پاسخگویی...</span>
+        </div>
+
+        <!-- Chat Sticky Input Bar -->
+        <div class="chat-input-bar">
+          <textarea id="chatInputPrompt" class="chat-input-textarea" placeholder="پیام خود را بنویسید (Enter برای ارسال)..." rows="1"></textarea>
+          <button id="btnSendChatPrompt" class="btn-send-chat" title="ارسال پیام">
+            <span>🚀</span>
           </button>
         </div>
       </section>

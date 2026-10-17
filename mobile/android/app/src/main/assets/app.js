@@ -32,11 +32,28 @@ document.addEventListener("DOMContentLoaded", () => {
   const authAlert = document.getElementById("authAlert");
 
   // Session Bar Elements
+  const globalSessionBar = document.getElementById("globalSessionBar");
   const sessionUsername = document.getElementById("sessionUsername");
   const sessionRole = document.getElementById("sessionRole");
   const sessionServer = document.getElementById("sessionServer");
   const btnRefreshStatus = document.getElementById("btnRefreshStatus");
   const btnLogout = document.getElementById("btnLogout");
+
+  // Navigation Tabs Elements
+  const appNavTabs = document.getElementById("appNavTabs");
+  const navTabConsole = document.getElementById("navTabConsole");
+  const navTabChat = document.getElementById("navTabChat");
+
+  // AI Chatbot Elements
+  const chatView = document.getElementById("chatView");
+  const chatModelSelect = document.getElementById("chatModelSelect");
+  const chatSaveHistoryToggle = document.getElementById("chatSaveHistoryToggle");
+  const btnClearChatHistory = document.getElementById("btnClearChatHistory");
+  const chatMessagesStream = document.getElementById("chatMessagesStream");
+  const chatWelcomeCard = document.getElementById("chatWelcomeCard");
+  const chatTypingIndicator = document.getElementById("chatTypingIndicator");
+  const chatInputPrompt = document.getElementById("chatInputPrompt");
+  const btnSendChatPrompt = document.getElementById("btnSendChatPrompt");
 
   // Windows Node Elements
   const targetNodeName = document.getElementById("targetNodeName");
@@ -143,6 +160,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const AVAILABLE_PALETTES = ["magenta", "cyan", "emerald", "amber", "indigo"];
   let currentPalette = "magenta";
   let currentAgentState = "inactive";
+  let currentActiveTab = "console";
+  let heartbeatInterval = null;
+  let consecutiveAuthErrors = 0;
+  let isChatSending = false;
 
   // Theme Management (Phase 1, 2, 8)
   function applyThemePalette(palette) {
@@ -264,6 +285,7 @@ document.addEventListener("DOMContentLoaded", () => {
       window.OmniOpsBridge.clearSession();
     }
     stopPolling();
+    stopHeartbeat();
     showAuthScreen();
   }
 
@@ -271,12 +293,22 @@ document.addEventListener("DOMContentLoaded", () => {
   function showAuthScreen() {
     authView.classList.add("active");
     operatorView.classList.remove("active");
+    operatorView.style.display = "none";
+    if (chatView) {
+      chatView.classList.remove("active");
+      chatView.style.display = "none";
+    }
+    if (globalSessionBar) globalSessionBar.style.display = "none";
+    if (appNavTabs) appNavTabs.style.display = "none";
+    stopPolling();
+    stopHeartbeat();
     updateConnectionStatus("offline", "آفلاین");
   }
 
   function showOperatorConsole() {
     authView.classList.remove("active");
-    operatorView.classList.add("active");
+    if (globalSessionBar) globalSessionBar.style.display = "flex";
+    if (appNavTabs) appNavTabs.style.display = "flex";
 
     sessionUsername.innerText = currentOperator.username;
     sessionRole.innerText = currentOperator.role === "admin" ? "مدیر کل سیستم" : "اپراتور همراه";
@@ -287,9 +319,40 @@ document.addEventListener("DOMContentLoaded", () => {
       sessionServer.innerText = currentServerUrl;
     }
 
+    switchAppTab(currentActiveTab);
     startPolling();
+    startHeartbeat();
     refreshAllData();
+    loadChatModels();
   }
+
+  function switchAppTab(tab) {
+    currentActiveTab = tab;
+    if (tab === "chat") {
+      if (navTabChat) navTabChat.classList.add("active");
+      if (navTabConsole) navTabConsole.classList.remove("active");
+      operatorView.classList.remove("active");
+      operatorView.style.display = "none";
+      if (chatView) {
+        chatView.classList.add("active");
+        chatView.style.display = "flex";
+      }
+      scrollChatToBottom();
+      if (chatInputPrompt) chatInputPrompt.focus();
+    } else {
+      if (navTabConsole) navTabConsole.classList.add("active");
+      if (navTabChat) navTabChat.classList.remove("active");
+      if (chatView) {
+        chatView.classList.remove("active");
+        chatView.style.display = "none";
+      }
+      operatorView.classList.add("active");
+      operatorView.style.display = "flex";
+    }
+  }
+
+  if (navTabConsole) navTabConsole.addEventListener("click", () => switchAppTab("console"));
+  if (navTabChat) navTabChat.addEventListener("click", () => switchAppTab("chat"));
 
   function updateConnectionStatus(state, text) {
     connDot.className = "status-dot " + state;
@@ -456,7 +519,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // 3. Data Polling and Refreshing
+  // 3. Data Polling and Heartbeat
   function startPolling() {
     stopPolling();
     pollingInterval = setInterval(refreshAllData, 3000);
@@ -465,6 +528,31 @@ document.addEventListener("DOMContentLoaded", () => {
   function stopPolling() {
     if (pollingInterval) clearInterval(pollingInterval);
     pollingInterval = null;
+  }
+
+  function startHeartbeat() {
+    stopHeartbeat();
+    pingHeartbeat();
+    heartbeatInterval = setInterval(pingHeartbeat, 15000);
+  }
+
+  function stopHeartbeat() {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+
+  async function pingHeartbeat() {
+    if (!currentToken || !currentServerUrl) return;
+    try {
+      await universalFetch(`${currentServerUrl}/api/agent/heartbeat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${currentToken}`,
+        },
+        body: JSON.stringify({}),
+      });
+    } catch (e) {}
   }
 
   function setLocalControlsDisabled(disabled) {
@@ -486,9 +574,15 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       if (statusRes.status === 401) {
-        clearSession();
+        consecutiveAuthErrors++;
+        if (consecutiveAuthErrors >= 3) {
+          clearSession();
+        } else {
+          pingHeartbeat();
+        }
         return;
       }
+      consecutiveAuthErrors = 0;
 
       if (statusRes.ok) {
         const latency = Math.round(performance.now() - startTime);
@@ -1082,5 +1176,197 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!ts) return "";
     const date = new Date(ts * 1000);
     return date.toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  // 12. Mobile AI Chatbot Implementation
+  function renderMarkdownText(text) {
+    if (!text || typeof text !== "string") return "";
+    let safe = text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+    // Code blocks ```code```
+    safe = safe.replace(/```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g, (match, lang, code) => {
+      return `<pre><code>${code.trim()}</code></pre>`;
+    });
+
+    // Inline code `code`
+    safe = safe.replace(/`([^`]+)`/g, "<code>$1</code>");
+
+    // Bold **text**
+    safe = safe.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+
+    // Newlines
+    safe = safe.replace(/\n/g, "<br>");
+
+    return safe;
+  }
+
+  function scrollChatToBottom() {
+    if (chatMessagesStream) {
+      setTimeout(() => {
+        chatMessagesStream.scrollTop = chatMessagesStream.scrollHeight;
+      }, 50);
+    }
+  }
+
+  async function loadChatModels() {
+    if (!currentToken || !currentServerUrl || !chatModelSelect) return;
+    try {
+      const resp = await universalFetch(`${currentServerUrl}/api/agent/models`, {
+        headers: { Authorization: `Bearer ${currentToken}` },
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const models = data.models || [];
+        const currentVal = chatModelSelect.value;
+        chatModelSelect.innerHTML = `<option value="auto">🤖 انتخاب هوشمند (Auto Model)</option>`;
+        models.forEach((m) => {
+          const opt = document.createElement("option");
+          opt.value = m;
+          opt.innerText = m.startsWith("ollama/") ? `🦙 ${m.replace("ollama/", "")}` : m;
+          chatModelSelect.appendChild(opt);
+        });
+        if (models.includes(currentVal)) {
+          chatModelSelect.value = currentVal;
+        }
+      }
+    } catch (e) {}
+  }
+
+  function appendChatMessage(sender, text, model = "") {
+    if (chatWelcomeCard && chatWelcomeCard.style.display !== "none") {
+      chatWelcomeCard.style.display = "none";
+    }
+
+    const row = document.createElement("div");
+    row.className = `chat-message-row ${sender}`;
+
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+    let metaHtml = "";
+    if (sender === "assistant") {
+      const modelTag = model ? `<span class="assistant-model-pill">${model.replace("ollama/", "")}</span>` : "";
+      metaHtml = `<div class="message-sender-meta"><span>🤖 دستیار هوشمند</span>${modelTag}<span>•</span><span>${timeStr}</span></div>`;
+    } else {
+      metaHtml = `<div class="message-sender-meta"><span>👤 شما</span><span>•</span><span>${timeStr}</span></div>`;
+    }
+
+    const bubbleHtml = `<div class="chat-bubble">${renderMarkdownText(text)}</div>`;
+    row.innerHTML = metaHtml + bubbleHtml;
+
+    chatMessagesStream.appendChild(row);
+    scrollChatToBottom();
+  }
+
+  async function sendChatPrompt(customText = null) {
+    const text = customText !== null ? customText : (chatInputPrompt ? chatInputPrompt.value.trim() : "");
+    if (!text || isChatSending) return;
+
+    if (!currentToken || !currentServerUrl) {
+      showAuthAlert("ابتدا به سرور متصل شوید.");
+      return;
+    }
+
+    isChatSending = true;
+    if (chatInputPrompt && customText === null) {
+      chatInputPrompt.value = "";
+      chatInputPrompt.style.height = "auto";
+    }
+    if (btnSendChatPrompt) btnSendChatPrompt.disabled = true;
+
+    appendChatMessage("user", text);
+
+    if (chatTypingIndicator) {
+      chatTypingIndicator.style.display = "flex";
+      scrollChatToBottom();
+    }
+
+    const selectedModel = chatModelSelect ? chatModelSelect.value : "auto";
+    const saveHistory = chatSaveHistoryToggle ? chatSaveHistoryToggle.checked : false;
+
+    try {
+      const resp = await universalFetch(`${currentServerUrl}/api/agent/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${currentToken}`,
+        },
+        body: JSON.stringify({
+          message: text,
+          model: selectedModel,
+          save_history: saveHistory,
+        }),
+      });
+
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.error?.message || "پاسخی از مدل دریافت نشد.");
+      }
+
+      appendChatMessage("assistant", data.reply || "پاسخ متنی دریافت نشد.", data.model || selectedModel);
+      if (window.OmniOpsBridge && typeof window.OmniOpsBridge.vibrateDevice === "function") {
+        window.OmniOpsBridge.vibrateDevice(30);
+      }
+    } catch (err) {
+      appendChatMessage("assistant", `⚠️ خطا در پردازش: ${err.message}`);
+    } finally {
+      isChatSending = false;
+      if (chatTypingIndicator) chatTypingIndicator.style.display = "none";
+      if (btnSendChatPrompt) btnSendChatPrompt.disabled = false;
+      scrollChatToBottom();
+      if (chatInputPrompt) chatInputPrompt.focus();
+    }
+  }
+
+  // Preset Chips Listener
+  document.querySelectorAll(".chat-chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const p = chip.getAttribute("data-prompt");
+      if (p) sendChatPrompt(p);
+    });
+  });
+
+  if (btnSendChatPrompt) {
+    btnSendChatPrompt.addEventListener("click", () => sendChatPrompt());
+  }
+
+  if (chatInputPrompt) {
+    chatInputPrompt.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendChatPrompt();
+      }
+    });
+    chatInputPrompt.addEventListener("input", () => {
+      chatInputPrompt.style.height = "auto";
+      chatInputPrompt.style.height = Math.min(chatInputPrompt.scrollHeight, 120) + "px";
+    });
+  }
+
+  if (btnClearChatHistory) {
+    btnClearChatHistory.addEventListener("click", async () => {
+      if (!confirm("آیا مایل به شروع گفتگوی جدید و پاکسازی صفحه هستید؟")) return;
+      try {
+        await universalFetch(`${currentServerUrl}/api/agent/history/clear`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${currentToken}`,
+          },
+          body: JSON.stringify({}),
+        });
+      } catch (e) {}
+
+      if (chatMessagesStream) {
+        chatMessagesStream.innerHTML = "";
+        if (chatWelcomeCard) {
+          chatWelcomeCard.style.display = "flex";
+          chatMessagesStream.appendChild(chatWelcomeCard);
+        }
+      }
+    });
   }
 });

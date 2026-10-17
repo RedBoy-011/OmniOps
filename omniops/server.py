@@ -425,14 +425,25 @@ def make_server(
                 if not authorization.startswith("Bearer "):
                     raise IdentityError("Bearer session required", 401)
                 token = authorization.removeprefix("Bearer ")
+                principal = None
                 if audience in ("any", "*"):
-                    for aud in ("web", "agent"):
+                    for aud in ("agent", "web"):
                         try:
-                            return store.authenticate(token, aud)
+                            principal = store.authenticate(token, aud)
+                            if principal:
+                                break
                         except IdentityError:
                             pass
-                    raise IdentityError("Session is no longer active", 401)
-                return store.authenticate(token, audience)
+                    if principal is None:
+                        raise IdentityError("Session is no longer active", 401)
+                else:
+                    principal = store.authenticate(token, audience)
+                if principal and principal.get("jti"):
+                    try:
+                        store.heartbeat(principal)
+                    except Exception:
+                        pass
+                return principal
             except IdentityError as exc:
                 self._send(exc.status, {"error": {"message": str(exc)}})
                 return None
@@ -718,12 +729,21 @@ def make_server(
                 "/api/admin/users/update", "/api/admin/users/reset-quota", "/api/user/profile", "/api/user/change-password",
                 "/api/mobile/commands/dispatch", "/api/mobile/commands/approve", "/api/mobile/commands/cancel",
                 "/api/mobile/approvals/request", "/api/mobile/approvals/decide", "/api/mobile/kill-switch",
-                "/api/mobile/projects/steer",
+                "/api/mobile/projects/steer", "/api/mobile/chat", "/api/mobile/chat/stream", "/api/mobile/heartbeat",
                 "/api/agent/commands/claim", "/api/agent/commands/report",
             } and not (path.startswith("/api/admin/pending/") and path.rsplit("/", 1)[-1] in {"approve", "reject"}):
                 self._send(404, {"error": {"message": "Route not found"}})
                 return
-            if path.startswith("/api/mobile/"):
+            if path.startswith("/api/mobile/") or path in {
+                "/api/agent/heartbeat",
+                "/api/agent/chat", "/api/web/chat",
+                "/api/agent/chat/stream", "/api/web/chat/stream",
+                "/api/chat/sessions", "/api/chat/sessions/rename", "/api/chat/sessions/delete",
+                "/api/agent/sessions", "/api/agent/sessions/rename", "/api/agent/sessions/delete",
+                "/api/chat/history/clear", "/api/agent/history/clear",
+                "/api/chat/memory/add", "/api/agent/memory/add",
+                "/api/chat/memory/remove", "/api/agent/memory/remove",
+            }:
                 audience = "any"
             elif path.startswith("/api/agent/") and path != "/api/agent/pairing":
                 audience = "agent"
@@ -734,7 +754,7 @@ def make_server(
                 principal = self._principal(audience)
                 if principal is None:
                     return
-            if path in {"/api/auth/logout", "/api/agent/heartbeat", "/api/agent/logout"}:
+            if path in {"/api/auth/logout", "/api/agent/heartbeat", "/api/mobile/heartbeat", "/api/agent/logout"}:
                 if path.endswith("heartbeat"):
                     store.heartbeat(principal)
                 else:
@@ -984,10 +1004,10 @@ def make_server(
                                                               payload.get('name'), payload.get('mime'), payload.get('content_base64')))
                 elif path in ('/api/web/workspace/attachments/remove', '/api/agent/workspace/attachments/remove'):
                     self._send(200, workspace.remove_attachment(principal, payload.get('id')))
-                elif path in ('/api/agent/chat/stream', '/api/web/chat/stream'):
+                elif path in ('/api/agent/chat/stream', '/api/web/chat/stream', '/api/mobile/chat/stream'):
                     self._stream_chat(principal, payload)
                     return
-                elif path in ('/api/agent/chat', '/api/web/chat'):
+                elif path in ('/api/agent/chat', '/api/web/chat', '/api/mobile/chat'):
                     self._send(200, self._answer_chat(principal, payload))
                 elif path == '/api/mobile/approvals/request':
                     self._send(201, mobile_store.request_approval(
@@ -1502,10 +1522,11 @@ def make_server(
                 except Exception as exc:
                     self._send(400, {'error': {'message': f'Invalid request: {exc}'}})
                 return
-            if parsed.path in ('/api/chat/sessions', '/api/agent/sessions',
+            if parsed.path in ('/api/chat/sessions', '/api/agent/sessions', '/api/mobile/sessions',
                               '/api/chat/history', '/api/chat/memory',
-                              '/api/agent/history', '/api/agent/memory'):
-                principal = self._principal('agent' if parsed.path.startswith('/api/agent/') else 'web')
+                              '/api/agent/history', '/api/agent/memory',
+                              '/api/mobile/history', '/api/mobile/memory'):
+                principal = self._principal('any')
                 if principal is None:
                     return
                 try:
@@ -1613,8 +1634,8 @@ def make_server(
                     ]
                 })
                 return
-            if self.path in ('/api/agent/models', '/api/web/models'):
-                principal = self._principal('agent' if self.path == '/api/agent/models' else 'web')
+            if self.path in ('/api/agent/models', '/api/web/models', '/api/mobile/models'):
+                principal = self._principal('any')
                 if principal is None:
                     return
                 if "chat" not in principal["capabilities"]:
