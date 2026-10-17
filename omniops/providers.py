@@ -501,21 +501,21 @@ class ProviderRegistry:
             return []
         with self.identity._db() as db:
             accounts = db.execute("""SELECT kind,models_json FROM provider_accounts
-                WHERE kind IN ('gemini','openrouter') AND enabled=1 AND tested_at IS NOT NULL""").fetchall()
+                WHERE enabled=1 AND tested_at IS NOT NULL""").fetchall()
         return [f"{row['kind']}/{model}" for row in accounts
                 for model in json.loads(row['models_json'])
-                if row['kind'] != 'gemini' or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,159}', model)]
+                if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}', model)]
 
-    def complete(self, principal, requested, prompt):
+    def complete(self, principal, requested, prompt, max_tokens: int = 256):
         if not _external_use(principal):
             raise IdentityError('Profile has no external provider permission', 403)
         if not isinstance(requested, str) or '/' not in requested:
             raise IdentityError('Choose a provider model', 400)
         kind, model = requested.split('/', 1)
-        if kind not in ('gemini', 'openrouter') or not model:
+        if kind not in ENDPOINTS or not model:
             raise IdentityError('Unsupported chat provider model', 404)
-        if kind == 'gemini' and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,159}', model):
-            raise IdentityError('Invalid Gemini model', 400)
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}', model):
+            raise IdentityError('Invalid model identifier', 400)
         if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 8000:
             raise IdentityError('Chat message must contain 1-8000 characters')
         with self.identity._db() as db:
@@ -546,17 +546,35 @@ class ProviderRegistry:
                     document = _provider_post(ENDPOINTS[kind][0], '/v1beta/models/' + quote(model, safe='') + ':generateContent',
                                               key, row['network_mode'], row['proxy_url'],
                                               {'contents': [{'role': 'user', 'parts': [{'text': prompt.strip()}]}],
-                                               'generationConfig': {'maxOutputTokens': 256}})
+                                               'generationConfig': {'maxOutputTokens': max_tokens}})
                     try:
                         parts = document['candidates'][0]['content']['parts']
                         text = ''.join(part['text'] for part in parts if isinstance(part.get('text'), str))
                     except (KeyError, IndexError, TypeError) as exc:
                         raise IdentityError('Gemini returned no text response', 502) from exc
-                else:
+                elif kind == 'openai':
+                    document = _provider_post(ENDPOINTS[kind][0], '/v1/chat/completions',
+                                              key, row['network_mode'], row['proxy_url'],
+                                              {'model': model, 'messages': [{'role': 'user', 'content': prompt.strip()}],
+                                               'max_tokens': max_tokens, 'stream': False})
+                    try:
+                        text = document['choices'][0]['message']['content']
+                    except (KeyError, IndexError, TypeError) as exc:
+                        raise IdentityError('OpenAI returned no text response', 502) from exc
+                elif kind == 'anthropic':
+                    document = _provider_post(ENDPOINTS[kind][0], '/v1/messages',
+                                              key, row['network_mode'], row['proxy_url'],
+                                              {'model': model, 'messages': [{'role': 'user', 'content': prompt.strip()}],
+                                               'max_tokens': max_tokens})
+                    try:
+                        text = document['content'][0]['text']
+                    except (KeyError, IndexError, TypeError) as exc:
+                        raise IdentityError('Anthropic returned no text response', 502) from exc
+                else:  # openrouter
                     document = _provider_post(ENDPOINTS[kind][0], '/api/v1/chat/completions',
                                               key, row['network_mode'], row['proxy_url'],
                                               {'model': model, 'messages': [{'role': 'user', 'content': prompt.strip()}],
-                                               'max_tokens': 256, 'stream': False})
+                                               'max_tokens': max_tokens, 'stream': False})
                     try:
                         text = document['choices'][0]['message']['content']
                     except (KeyError, IndexError, TypeError) as exc:

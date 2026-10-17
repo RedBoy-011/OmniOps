@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { api, type MemoryNote, type ChatSession, type AttachedDoc, type TaskNotification } from "./api";
+import { api, type MemoryNote, type ChatSession, type AttachedDoc, type TaskNotification, type ModelMeta } from "./api";
 import { FilePreviewPanel } from "./components/FilePreviewPanel";
 import { MarkdownMessage } from "./components/MarkdownMessage";
 import { estimateModelCost } from "./design-system/tokens";
 
-type Entry = { id?: string; role: "user" | "assistant"; text: string; time: string; model?: string };
+type Entry = {
+  id?: string;
+  role: "user" | "assistant";
+  text: string;
+  time: string;
+  model?: string;
+  routing_reason?: string;
+};
 type QueuedMessage = { id: string; text: string; time: string };
 const suggestions = ["وضعیت امروز سیستم را خلاصه کن", "برای بررسی سرویس‌ها چه مراحلی پیشنهاد می‌کنی؟", "یک گزارش کوتاه فارسی بنویس"];
 
@@ -17,9 +24,12 @@ export function ChatRoom({
   onClearInitialPrompt?: () => void;
 } = {}) {
   const [models, setModels] = useState<string[]>([]);
+  const [catalog, setCatalog] = useState<Record<string, ModelMeta>>({});
   const [modelPricing, setModelPricing] = useState<Record<string, { input: string; output: string }>>({});
   const [selected, setSelected] = useState("auto");
-  const [externalConsent, setExternalConsent] = useState(false);
+  const [externalConsent, setExternalConsent] = useState(() => {
+    return typeof localStorage !== "undefined" ? localStorage.getItem("omniops_allow_external") !== "false" : true;
+  });
   const [entries, setEntries] = useState<Entry[]>([]);
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
   const [queueCollapsed, setQueueCollapsed] = useState(false);
@@ -125,6 +135,9 @@ export function ChatRoom({
     try {
       const result = await api.webModels();
       setModels(result.models);
+      if (result.catalog) {
+        setCatalog(result.catalog);
+      }
       if (result.pricing) {
         setModelPricing(result.pricing);
       }
@@ -476,7 +489,7 @@ export function ChatRoom({
           return next;
         });
       },
-      (fullReply, model) => {
+      (fullReply, model, routing_reason) => {
         setEntries((before) => {
           if (before.length === 0) return before;
           const next = [...before];
@@ -486,6 +499,7 @@ export function ChatRoom({
               ...last,
               text: fullReply || last.text,
               model: model || last.model,
+              routing_reason: routing_reason || last.routing_reason,
             };
           }
           return next;
@@ -508,14 +522,29 @@ export function ChatRoom({
         });
         setBusy(false);
       },
-      filesToSend
+      filesToSend,
+      (routing) => {
+        setEntries((before) => {
+          if (before.length === 0) return before;
+          const next = [...before];
+          const last = next[next.length - 1];
+          if (last && last.role === "assistant") {
+            next[next.length - 1] = {
+              ...last,
+              model: routing.model || last.model,
+              routing_reason: routing.reason || last.routing_reason,
+            };
+          }
+          return next;
+        });
+      }
     );
   }
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const message = draft.trim();
-    if (!message || (!localModels.length && !(externalConsent && externalModels.length))) return;
+    if (!message || (!localModels.length && !externalModels.length)) return;
 
     if (busy) {
       // اگر مدل مشغول است، پیام به صف اضافه می‌شود
@@ -910,6 +939,12 @@ export function ChatRoom({
               </div>
               {entry.role === "assistant" ? (
                 <div className="chat-message-bubble-content">
+                  {entry.routing_reason && (
+                    <div className="chat-routing-pill" title={entry.routing_reason}>
+                      <span className="routing-icon">🧠 JRV:</span>
+                      <span className="routing-text">{entry.routing_reason}</span>
+                    </div>
+                  )}
                   <MarkdownMessage content={entry.text} />
                   {busy && index === entries.length - 1 && (
                     <span className="chat-streaming-cursor" aria-hidden="true">▍</span>
@@ -1268,66 +1303,120 @@ export function ChatRoom({
               <span className="antigravity-model-arrow">▲</span>
             </button>
 
-            {/* پاپ‌آپ لیست مدل‌ها با نشانگر سهمیه، سرعت و هزینه تقریبی */}
+            {/* پاپ‌آپ لیست مدل‌ها با نشانگر سهمیه، سرعت، دسته‌بندی و پنجره توکن */}
             {showModelPicker && (
               <div className="antigravity-model-dropdown">
                 <div className="antigravity-model-dropdown-header">
                   <span>مدل‌های هوش مصنوعی (AI Models)</span>
-                  <small>سرعت، سهمیه و تخمین هزینه به ازای ۱M توکن</small>
+                  <small>دسته‌بندی، سهمیه، توکن و سرعت</small>
                 </div>
 
                 <div className="antigravity-model-section">
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                    <span className="antigravity-model-section-title">مدل‌های محلی ورکر (Ollama):</span>
-                    <span className="omni-cost-badge free" style={{ fontSize: "10px" }}>۱۰۰٪ رایگان</span>
+                    <span className="antigravity-model-section-title">مسیریابی خودکار (Intelligent Router):</span>
                   </div>
                   <div
                     className={`antigravity-model-item ${selected === "auto" ? "active" : ""}`}
                     onClick={() => { setSelected("auto"); setShowModelPicker(false); }}
                   >
-                    <div>
-                      <span>⚡ هوشمند خودکار (Auto Router)</span>
-                      <small style={{ display: "block", color: "#94a3b8", fontSize: "10px" }}>مسیریابی کم‌هزینه و سریع</small>
-                    </div>
-                    <span className="omni-cost-badge free">رایگان / بهینه</span>
-                  </div>
-                  {localModels.map(m => {
-                    const cost = estimateModelCost(m, modelPricing);
-                    return (
-                      <div
-                        key={m}
-                        className={`antigravity-model-item ${selected === m ? "active" : ""}`}
-                        onClick={() => { setSelected(m); setShowModelPicker(false); }}
-                        title={cost.summary}
-                      >
-                        <span className="truncate">{m}</span>
-                        <span className={`omni-cost-badge ${cost.badgeClass}`}>
-                          {cost.tier === "free" ? "🟢 GPU Local" : cost.inputPerMillion}
-                        </span>
+                    <div className="antigravity-model-item-top">
+                      <div className="antigravity-model-item-title">
+                        <span>✦ موتور هوشمند JRV</span>
+                        <span className="model-catalog-tag category">🧠 تصمیم‌گیر خودکار</span>
                       </div>
-                    );
-                  })}
+                      <div className="antigravity-model-item-badges">
+                        <span className="omni-cost-badge free">رایگان / بهینه</span>
+                      </div>
+                    </div>
+                    <div className="model-catalog-comment">
+                      تحلیل هوشمند پرامپت (کدنویسی، استدلال، چت سریع) و هدایت به بهترین مدل محلی یا ابری با کمترین تأخیر.
+                    </div>
+                  </div>
                 </div>
 
-                {externalModels.length > 0 && externalConsent && (
+                {localModels.length > 0 && (
                   <div className="antigravity-model-section">
-                    <span className="antigravity-model-section-title">مدل‌های ابری آنلاین (Cloud API):</span>
-                    {externalModels.map(m => {
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                      <span className="antigravity-model-section-title">مدل‌های محلی ورکر (Ollama):</span>
+                      <span className="omni-cost-badge free" style={{ fontSize: "10px" }}>۱۰۰٪ داخلی و آفلاین</span>
+                    </div>
+                    {localModels.map((m) => {
+                      const meta = catalog[m];
                       const cost = estimateModelCost(m, modelPricing);
                       return (
                         <div
                           key={m}
                           className={`antigravity-model-item ${selected === m ? "active" : ""}`}
                           onClick={() => { setSelected(m); setShowModelPicker(false); }}
-                          title={cost.summary}
+                          title={meta?.comment || cost.summary}
                         >
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <span className="truncate" style={{ display: "block" }}>{m}</span>
-                            <small style={{ color: "#94a3b8", fontSize: "10px" }}>{cost.summary}</small>
+                          <div className="antigravity-model-item-top">
+                            <div className="antigravity-model-item-title">
+                              <span className="truncate">{meta?.label || m.replace("ollama/", "")}</span>
+                              {meta?.category_label && (
+                                <span className="model-catalog-tag category">{meta.category_label}</span>
+                              )}
+                            </div>
+                            <div className="antigravity-model-item-badges">
+                              {meta?.token_label && (
+                                <span className="model-catalog-tag token">{meta.token_label}</span>
+                              )}
+                              <span className={`omni-cost-badge ${cost.badgeClass}`}>
+                                {cost.tier === "free" ? "🟢 GPU Local" : cost.inputPerMillion}
+                              </span>
+                            </div>
                           </div>
-                          <span className={`omni-cost-badge ${cost.badgeClass}`}>
-                            {cost.inputPerMillion}
-                          </span>
+                          {meta?.comment && (
+                            <div className="model-catalog-comment">{meta.comment}</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {externalModels.length > 0 && (
+                  <div className="antigravity-model-section">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                      <span className="antigravity-model-section-title">مدل‌های ابری آنلاین (Cloud API):</span>
+                      <span className="model-catalog-tag category" style={{ fontSize: "10px" }}>SOCKS5 / Secure API</span>
+                    </div>
+                    {externalModels.map((m) => {
+                      const meta = catalog[m];
+                      const cost = estimateModelCost(m, modelPricing);
+                      return (
+                        <div
+                          key={m}
+                          className={`antigravity-model-item ${selected === m ? "active" : ""}`}
+                          onClick={() => {
+                            setSelected(m);
+                            setExternalConsent(true);
+                            if (typeof localStorage !== "undefined") {
+                              localStorage.setItem("omniops_allow_external", "true");
+                            }
+                            setShowModelPicker(false);
+                          }}
+                          title={meta?.comment || cost.summary}
+                        >
+                          <div className="antigravity-model-item-top">
+                            <div className="antigravity-model-item-title">
+                              <span className="truncate">{meta?.label || m}</span>
+                              {meta?.category_label && (
+                                <span className="model-catalog-tag category">{meta.category_label}</span>
+                              )}
+                            </div>
+                            <div className="antigravity-model-item-badges">
+                              {meta?.token_label && (
+                                <span className="model-catalog-tag token">{meta.token_label}</span>
+                              )}
+                              <span className={`omni-cost-badge ${cost.badgeClass}`}>
+                                {cost.inputPerMillion}
+                              </span>
+                            </div>
+                          </div>
+                          {meta?.comment && (
+                            <div className="model-catalog-comment">{meta.comment}</div>
+                          )}
                         </div>
                       );
                     })}
@@ -1341,7 +1430,7 @@ export function ChatRoom({
             <small className="antigravity-char-count">{draft.length.toLocaleString("fa-IR")} / ۸٬۰۰۰</small>
             <button
               className={`antigravity-send-button ${busy ? "queue-mode" : ""}`}
-              disabled={!draft.trim() || (!localModels.length && !(externalConsent && externalModels.length))}
+              disabled={!draft.trim() || (!localModels.length && !externalModels.length)}
             >
               {busy ? "Queued (+)" : "↗"}
             </button>

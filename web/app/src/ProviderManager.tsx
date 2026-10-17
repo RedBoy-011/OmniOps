@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { api, type ApiProvider, type SocksHealthResult, type SocksHealthStatus } from "./api";
+import { api, type ApiProvider, type SocksHealthResult, type SocksHealthStatus, type ModelMeta } from "./api";
 
 const labels = { openai: "OpenAI", gemini: "Gemini", anthropic: "Claude / Anthropic", openrouter: "OpenRouter" };
 
-type CardProps = { provider: ApiProvider; defaultProxy: string; refresh: () => Promise<void> };
+type CardProps = {
+  provider: ApiProvider;
+  defaultProxy: string;
+  refresh: () => Promise<void>;
+  catalog?: Record<string, ModelMeta>;
+};
 
-function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
+function ProviderCard({ provider, defaultProxy, refresh, catalog }: CardProps) {
   const [key, setKey] = useState("");
   const [useProxy, setUseProxy] = useState(provider.network_mode === "socks");
   const [proxy, setProxy] = useState(provider.proxy_url);
@@ -70,7 +75,9 @@ function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
     await perform("test", async () => {
       if (key.trim() || !provider.configured || changed) await saveSettings();
       await api.testProvider(provider.kind);
-    }, "اتصال آزموده شد و فهرست مدل‌ها به‌روز شد.");
+      // Auto-enable provider in core upon successful test so models are immediately available!
+      await api.enableProvider(provider.kind, true);
+    }, "اتصال با موفقیت آزموده شد، مدل‌ها به هسته اضافه و بلافاصله فعال شدند.");
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -180,6 +187,36 @@ function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
       <label htmlFor={`filter-${provider.kind}`}>جست‌وجوی مدل</label><input id={`filter-${provider.kind}`} value={query} onChange={e => setQuery(e.target.value)} placeholder="نام یا شناسهٔ مدل…" />
       <label htmlFor={`model-${provider.kind}`}>انتخاب مدل · نمایش حداکثر ۸۰ مورد</label>
       <select id={`model-${provider.kind}`} value={selected} onChange={e => setSelected(e.target.value)} dir="ltr">{models.map(model => <option key={model} value={model}>{model}</option>)}</select>
+      {(() => {
+        const meta = catalog?.[selected] || catalog?.[`${provider.kind}/${selected}`];
+        if (!meta) return null;
+        return (
+          <div style={{
+            marginTop: "10px",
+            marginBottom: "10px",
+            padding: "10px 14px",
+            borderRadius: "10px",
+            background: "rgba(255, 255, 255, 0.04)",
+            border: `1px solid ${meta.badge_color || "#3b82f6"}35`,
+            fontSize: "12px",
+            lineHeight: "1.7"
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "6px", marginBottom: "4px" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: meta.badge_color || "#60a5fa", fontWeight: "bold" }}>
+                <span>{meta.category_icon}</span>
+                <span>{meta.category_label}</span>
+                <span style={{ fontSize: "11px", color: "#d1d5db" }}>· {meta.name}</span>
+              </span>
+              <span style={{ fontSize: "11px", color: "#a1a1aa", background: "rgba(0,0,0,0.35)", padding: "2px 8px", borderRadius: "6px" }}>
+                ⚡ {meta.speed} · بافت: {meta.context_window}
+              </span>
+            </div>
+            <div style={{ color: "#e4e4e7", fontSize: "11.5px" }}>
+              {meta.comment}
+            </div>
+          </div>
+        );
+      })()}
       {catalogPrice && <div className="provider-catalog-price"><span>نرخ اعلامی کاتالوگ: ورودی {catalogPrice.input} · خروجی {catalogPrice.output}</span>
         <button type="button" className="quiet-button" onClick={() => { setInput(catalogPrice.input); setOutput(catalogPrice.output); }}>درج در فرم</button></div>}
       <div className="provider-price-fields"><label htmlFor={`input-${provider.kind}`}>ورودی <input id={`input-${provider.kind}`} dir="ltr" type="number" min="0" max="1000000" step="0.000001" required value={input} onChange={e => setInput(e.target.value)} /></label>
@@ -192,6 +229,7 @@ function ProviderCard({ provider, defaultProxy, refresh }: CardProps) {
 
 export function ProviderManager() {
   const [providers, setProviders] = useState<ApiProvider[]>([]);
+  const [catalog, setCatalog] = useState<Record<string, ModelMeta>>({});
   const [defaultProxy, setDefaultProxy] = useState(() => localStorage.getItem("omniops_shared_proxy") || "");
   const [socksHealth, setSocksHealth] = useState<SocksHealthResult | null>(null);
   const [socksHealthLoading, setSocksHealthLoading] = useState(false);
@@ -203,6 +241,10 @@ export function ProviderManager() {
       const data = await api.providers();
       setProviders(data.providers);
       setError("");
+      try {
+        const m = await api.webModels();
+        if (m.catalog) setCatalog(m.catalog);
+      } catch {}
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "فهرست Provider دریافت نشد.";
       setError(message);
@@ -408,7 +450,7 @@ export function ProviderManager() {
         {error && <p className="admin-message" role="alert">{error}</p>}
         <div className="provider-grid">
           {providers.map(provider => (
-            <ProviderCard key={provider.kind} provider={provider} defaultProxy={defaultProxy} refresh={refresh} />
+            <ProviderCard key={provider.kind} provider={provider} defaultProxy={defaultProxy} refresh={refresh} catalog={catalog} />
           ))}
         </div>
       </>

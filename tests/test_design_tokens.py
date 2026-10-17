@@ -29,8 +29,12 @@ class DesignTokensTests(unittest.TestCase):
 
     def test_web_and_edge_css_tokens_contain_magenta(self):
         web_css = REPO_ROOT / "web" / "app" / "src" / "design-system" / "tokens.css"
-        edge_css = REPO_ROOT / "agent" / "windows-edge" / "src" / "design-system" / "tokens.css"
-        mobile_css = REPO_ROOT / "mobile" / "android" / "app" / "src" / "main" / "assets" / "style.css"
+        edge_css = REPO_ROOT / "old_features" / "agent" / "windows-edge" / "src" / "design-system" / "tokens.css"
+        if not edge_css.is_file():
+            edge_css = REPO_ROOT / "agent" / "windows-edge" / "src" / "design-system" / "tokens.css"
+        mobile_css = REPO_ROOT / "old_features" / "mobile" / "android" / "app" / "src" / "main" / "assets" / "style.css"
+        if not mobile_css.is_file():
+            mobile_css = REPO_ROOT / "mobile" / "android" / "app" / "src" / "main" / "assets" / "style.css"
 
         for path in (web_css, edge_css, mobile_css):
             self.assertTrue(path.is_file(), f"CSS file missing: {path}")
@@ -40,7 +44,9 @@ class DesignTokensTests(unittest.TestCase):
 
     def test_ts_tokens_export_palettes(self):
         web_ts = REPO_ROOT / "web" / "app" / "src" / "design-system" / "tokens.ts"
-        edge_ts = REPO_ROOT / "agent" / "windows-edge" / "src" / "design-system" / "tokens.ts"
+        edge_ts = REPO_ROOT / "old_features" / "agent" / "windows-edge" / "src" / "design-system" / "tokens.ts"
+        if not edge_ts.is_file():
+            edge_ts = REPO_ROOT / "agent" / "windows-edge" / "src" / "design-system" / "tokens.ts"
 
         for path in (web_ts, edge_ts):
             self.assertTrue(path.is_file(), f"TS file missing: {path}")

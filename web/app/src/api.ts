@@ -137,6 +137,32 @@ export type ManagedNode = {
 export type ModelPull = { id: string; node_id: string; model: string; action: "pull" | "delete";
   status: "queued" | "running" | "completed" | "failed"; progress: number | null;
   detail: string; created_at: number; updated_at: number };
+export type ModelMeta = {
+  id: string;
+  name: string;
+  label?: string;
+  clean_name?: string;
+  provider?: string;
+  category: "coding" | "reasoning" | "fast_chat" | "general" | "vision";
+  category_label: string;
+  category_icon: string;
+  badge_color: string;
+  speed: string;
+  context_window: string;
+  context_tokens: number;
+  token_label?: string;
+  comment: string;
+  recommended_for: string[];
+};
+
+export type ModelCategory = {
+  id: string;
+  title: string;
+  icon: string;
+  badge_color: string;
+  description: string;
+};
+
 export type ApiProvider = { kind: "openai" | "gemini" | "anthropic" | "openrouter"; configured: boolean;
   enabled: boolean; network_mode: "direct" | "socks"; proxy_url: string;
   models: string[]; tested_at: number | null;
@@ -677,7 +703,19 @@ export const api = {
   me: () => request<{ user: Profile; pending_count?: number }>("/api/auth/me"),
   pending: () => request<{ users: PendingUser[] }>("/api/admin/pending"),
   operations: () => request<Operations>("/api/admin/operations"),
-  webModels: () => request<{ models: string[]; pricing?: Record<string, { input: string; output: string }> }>("/api/web/models"),
+  webModels: () =>
+    request<{
+      models: string[];
+      catalog?: Record<string, ModelMeta>;
+      categories?: Record<string, ModelCategory>;
+      pricing?: Record<string, { input: string; output: string }>;
+    }>("/api/web/models"),
+  modelsCatalog: () =>
+    request<{
+      models: string[];
+      catalog: Record<string, ModelMeta>;
+      categories: Record<string, ModelCategory>;
+    }>("/api/models/catalog"),
   webChat: (
     message: string,
     model: string,
@@ -688,7 +726,7 @@ export const api = {
     include_system_context?: boolean,
     attached_files?: AttachedDoc[] | null
   ) =>
-    request<{ reply: string; model: string }>("/api/web/chat", "POST", {
+    request<{ reply: string; model: string; routing_reason?: string }>("/api/web/chat", "POST", {
       message,
       model,
       allow_external,
@@ -707,9 +745,10 @@ export const api = {
     session_id: string | null | undefined,
     include_system_context: boolean,
     onChunk: (chunk: string, model?: string) => void,
-    onDone: (fullReply: string, model?: string) => void,
+    onDone: (fullReply: string, model?: string, routing_reason?: string) => void,
     onError: (err: string) => void,
-    attached_files?: AttachedDoc[] | null
+    attached_files?: AttachedDoc[] | null,
+    onRouting?: (routing: { model: string; reason: string }) => void
   ) => {
     const token = localStorage.getItem("omniops_token") || volatileWebToken || "";
     try {
@@ -745,6 +784,7 @@ export const api = {
       let buffer = "";
       let fullReply = "";
       let modelUsed = model;
+      let routingReason = "";
 
       while (true) {
         const { value, done } = await reader.read();
@@ -763,6 +803,11 @@ export const api = {
                 onError(data.error);
                 return;
               }
+              if (data.routing) {
+                if (data.routing.model) modelUsed = data.routing.model;
+                if (data.routing.reason) routingReason = data.routing.reason;
+                if (onRouting) onRouting(data.routing);
+              }
               if (data.chunk) {
                 fullReply += data.chunk;
                 if (data.model) modelUsed = data.model;
@@ -771,7 +816,8 @@ export const api = {
               if (data.done) {
                 if (data.model) modelUsed = data.model;
                 if (data.reply) fullReply = data.reply;
-                onDone(fullReply, modelUsed);
+                if (data.routing_reason) routingReason = data.routing_reason;
+                onDone(fullReply, modelUsed, routingReason);
                 return;
               }
             } catch {
@@ -780,7 +826,7 @@ export const api = {
           }
         }
       }
-      onDone(fullReply, modelUsed);
+      onDone(fullReply, modelUsed, routingReason);
     } catch (err) {
       onError(err instanceof Error ? err.message : "خطا در برقراری ارتباط جریانی با سرور");
     }

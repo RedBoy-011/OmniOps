@@ -172,26 +172,66 @@ def make_server(
                 def external(model):
                     if not allow_external:
                         raise IdentityError('Explicit external data consent required', 403)
-                    if not isinstance(self.connection, ssl.SSLSocket) or self.connection.version() != 'TLSv1.3':
+                    is_tls = isinstance(self.connection, ssl.SSLSocket) and self.connection.version() == 'TLSv1.3'
+                    allow_plain = (
+                        os.environ.get('OMNIOPS_ALLOW_HTTP_EXTERNAL', '').lower() in ('1', 'true', 'yes')
+                        or getattr(self.server, 'allow_http_external', False)
+                        or (hasattr(self, 'headers') and self.headers.get('X-Forwarded-Proto', '').lower() == 'https')
+                    )
+                    if not (is_tls or allow_plain):
                         raise IdentityError('Direct TLS 1.3 required for external chat', 426)
                     if providers is None:
                         raise IdentityError('Provider registry unavailable', 503)
-                    return completed(providers.complete(principal, model, effective_prompt))
+                    return completed(providers.complete(principal, model, effective_prompt, max_tokens=2048))
 
-                if requested.startswith(('gemini/', 'openrouter/')):
+                if requested.startswith(('gemini/', 'openrouter/', 'openai/', 'anthropic/')):
                     return external(requested)
+
+                if requested == 'auto':
+                    avail_local = []
+                    try:
+                        client = current_ollama()
+                        avail_local = [f"ollama/{item.name}" for item in client.list_chat_models()]
+                    except Exception:
+                        pass
+                    avail_ext = []
+                    if providers is not None and allow_external:
+                        try:
+                            avail_ext = providers.chat_models(principal)
+                        except Exception:
+                            pass
+                    all_candidates = avail_local + avail_ext
+                    if not all_candidates:
+                        raise IdentityError('No chat model is available (local or cloud)', 503)
+
+                    from .router import JRVRouter
+                    chosen_id, routing_reason, fallback_chain = JRVRouter.choose_model(
+                        effective_prompt, all_candidates, allow_external=allow_external
+                    )
+                    last_error = None
+                    for cand in [chosen_id] + fallback_chain:
+                        try:
+                            if cand.startswith(('gemini/', 'openrouter/', 'openai/', 'anthropic/')):
+                                res = external(cand)
+                                res['routing_reason'] = routing_reason
+                                return res
+                            else:
+                                local_name = cand.split('/', 1)[-1]
+                                client = current_ollama()
+                                answer = client.chat(local_name, [{'role': 'user', 'content': effective_prompt}])
+                                res = completed({'reply': answer, 'model': cand})
+                                res['routing_reason'] = routing_reason
+                                return res
+                        except Exception as exc:
+                            last_error = exc
+                    raise last_error or IdentityError('No model was able to answer', 503)
+
                 try:
                     client = current_ollama()
                     models = client.list_chat_models()
                     selected = choose_local_chat_model(models, requested, effective_prompt)
-                    candidates = [selected] if requested != 'auto' else [selected] + [
-                        item.name for item in models if item.name != selected
-                    ]
+                    candidates = [selected]
                 except (ValueError, OllamaError) as exc:
-                    if requested == 'auto' and allow_external and providers is not None:
-                        candidate = providers.fallback_model(principal)
-                        if candidate:
-                            return external(candidate)
                     if isinstance(exc, OllamaError):
                         raise
                     raise IdentityError(str(exc), 404) from exc
@@ -202,10 +242,6 @@ def make_server(
                         return completed({'reply': answer, 'model': f'ollama/{candidate}'})
                     except OllamaError as exc:
                         last_error = exc
-                if requested == 'auto' and allow_external and providers is not None:
-                    candidate = providers.fallback_model(principal)
-                    if candidate:
-                        return external(candidate)
                 raise last_error or OllamaError('No local chat model is available')
             finally:
                 with active_inferences_lock:
@@ -284,18 +320,25 @@ def make_server(
                     except (BrokenPipeError, ConnectionResetError, OSError):
                         pass
 
-                if requested.startswith(('gemini/', 'openrouter/')):
+                is_tls = isinstance(self.connection, ssl.SSLSocket) and self.connection.version() == 'TLSv1.3'
+                allow_plain = (
+                    os.environ.get('OMNIOPS_ALLOW_HTTP_EXTERNAL', '').lower() in ('1', 'true', 'yes')
+                    or getattr(self.server, 'allow_http_external', False)
+                    or (hasattr(self, 'headers') and self.headers.get('X-Forwarded-Proto', '').lower() == 'https')
+                )
+
+                if requested.startswith(('gemini/', 'openrouter/', 'openai/', 'anthropic/')):
                     if not allow_external:
                         send_event({'error': 'Explicit external data consent required'})
                         return
-                    if not isinstance(self.connection, ssl.SSLSocket) or self.connection.version() != 'TLSv1.3':
+                    if not (is_tls or allow_plain):
                         send_event({'error': 'Direct TLS 1.3 required for external chat'})
                         return
                     if providers is None:
                         send_event({'error': 'Provider registry unavailable'})
                         return
                     try:
-                        res = providers.complete(principal, requested, effective_prompt)
+                        res = providers.complete(principal, requested, effective_prompt, max_tokens=2048)
                         reply = res.get('reply', '')
                         model_used = res.get('model', requested)
                         send_event({'chunk': reply, 'model': model_used})
@@ -306,13 +349,62 @@ def make_server(
                         send_event({'error': str(exc)})
                     return
 
+                if requested == 'auto':
+                    avail_local = []
+                    try:
+                        client = current_ollama()
+                        avail_local = [f"ollama/{item.name}" for item in client.list_chat_models()]
+                    except Exception:
+                        pass
+                    avail_ext = []
+                    if providers is not None and allow_external and (is_tls or allow_plain):
+                        try:
+                            avail_ext = providers.chat_models(principal)
+                        except Exception:
+                            pass
+                    all_candidates = avail_local + avail_ext
+                    if not all_candidates:
+                        send_event({'error': 'No chat model is available (local or cloud)'})
+                        return
+
+                    from .router import JRVRouter
+                    chosen_id, routing_reason, fallback_chain = JRVRouter.choose_model(
+                        effective_prompt, all_candidates, allow_external=allow_external
+                    )
+                    send_event({'routing': {'model': chosen_id, 'reason': routing_reason}})
+
+                    for cand in [chosen_id] + fallback_chain:
+                        try:
+                            if cand.startswith(('gemini/', 'openrouter/', 'openai/', 'anthropic/')):
+                                res = providers.complete(principal, cand, effective_prompt, max_tokens=2048)
+                                reply = res.get('reply', '')
+                                send_event({'chunk': reply, 'model': cand})
+                                send_event({'done': True, 'model': cand, 'reply': reply, 'routing_reason': routing_reason})
+                                if save_history and memory is not None:
+                                    memory.remember_chat(principal, prompt.strip(), reply, cand, session_id=session_id)
+                                return
+                            else:
+                                local_name = cand.split('/', 1)[-1]
+                                client = current_ollama()
+                                full_reply_parts = []
+                                for chunk in client.chat_stream(local_name, [{'role': 'user', 'content': effective_prompt}]):
+                                    full_reply_parts.append(chunk)
+                                    send_event({'chunk': chunk, 'model': cand})
+                                full_reply = "".join(full_reply_parts)
+                                send_event({'done': True, 'model': cand, 'reply': full_reply, 'routing_reason': routing_reason})
+                                if save_history and memory is not None:
+                                    memory.remember_chat(principal, prompt.strip(), full_reply, cand, session_id=session_id)
+                                return
+                        except Exception:
+                            continue
+                    send_event({'error': 'All candidate models failed to generate a response'})
+                    return
+
                 try:
                     client = current_ollama()
                     models = client.list_chat_models()
                     selected = choose_local_chat_model(models, requested, effective_prompt)
-                    candidates = [selected] if requested != 'auto' else [selected] + [
-                        item.name for item in models if item.name != selected
-                    ]
+                    candidates = [selected]
                 except Exception as exc:
                     send_event({'error': str(exc)})
                     return
@@ -338,20 +430,6 @@ def make_server(
                     if save_history and memory is not None:
                         memory.remember_chat(principal, prompt.strip(), full_reply, model_name, session_id=session_id)
                 else:
-                    if requested == 'auto' and allow_external and providers is not None:
-                        fallback_m = providers.fallback_model(principal)
-                        if fallback_m:
-                            try:
-                                res = providers.complete(principal, fallback_m, effective_prompt)
-                                reply = res.get('reply', '')
-                                send_event({'chunk': reply, 'model': fallback_m})
-                                send_event({'done': True, 'model': fallback_m, 'reply': reply})
-                                if save_history and memory is not None:
-                                    memory.remember_chat(principal, prompt.strip(), reply, fallback_m, session_id=session_id)
-                                return
-                            except Exception as exc:
-                                send_event({'error': str(exc)})
-                                return
                     send_event({'error': 'No local chat model is available or streaming failed'})
             finally:
                 with active_inferences_lock:
@@ -1640,8 +1718,14 @@ def make_server(
                         self._send(503, {"error": {"message": str(exc)}})
                         return
                     models = []
-                if self.path == '/api/web/models' and isinstance(self.connection, ssl.SSLSocket) and providers:
-                    models.extend(providers.chat_models(principal))
+                if providers:
+                    try:
+                        ext_models = providers.chat_models(principal)
+                        for m in ext_models:
+                            if m not in models:
+                                models.append(m)
+                    except Exception:
+                        pass
                 if not models:
                     self._send(503, {"error": {"message": "No chat model available"}})
                 else:
@@ -1657,7 +1741,29 @@ def make_server(
                                         pricing_map[m_k] = pr
                         except Exception:
                             pass
-                    self._send(200, {"models": models, "pricing": pricing_map})
+                    from .model_catalog import build_models_catalog, CATEGORIES
+                    catalog = build_models_catalog(models)
+                    self._send(200, {"models": models, "catalog": catalog, "categories": CATEGORIES, "pricing": pricing_map})
+                return
+            if self.path == '/api/models/catalog':
+                principal = self._principal('any')
+                if principal is None:
+                    return
+                all_models = ['auto']
+                try:
+                    all_models.extend(list(self._available_models(current_ollama())))
+                except Exception:
+                    pass
+                if providers:
+                    try:
+                        ext_models = providers.chat_models(principal)
+                        for m in ext_models:
+                            if m not in all_models:
+                                all_models.append(m)
+                    except Exception:
+                        pass
+                from .model_catalog import build_models_catalog, CATEGORIES
+                self._send(200, {"categories": CATEGORIES, "catalog": build_models_catalog(all_models), "models": all_models})
                 return
             if self.path == "/api/admin/system/metrics":
                 principal = self._principal()
@@ -1935,6 +2041,8 @@ def main():
             context.minimum_version = ssl.TLSVersion.TLSv1_3
             context.load_cert_chain(cert, key)
             server.socket = context.wrap_socket(server.socket, server_side=True)
+        else:
+            server.allow_http_external = True
         print(f"OmniOps gateway listening on {'https' if cert else 'http'}://{host}:{server.server_port}/v1")
         server.serve_forever()
 
