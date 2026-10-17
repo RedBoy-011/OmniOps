@@ -88,6 +88,14 @@ export function applyThemePalette(palette: string) {
   const p = (palette in OMNI_PALETTES ? palette : DEFAULT_PALETTE) as OmniThemePalette;
   if (typeof document !== "undefined") {
     document.documentElement.setAttribute("data-theme-palette", p);
+    const def = OMNI_PALETTES[p];
+    if (def) {
+      document.documentElement.style.setProperty("--primary", def.primary);
+      document.documentElement.style.setProperty("--accent", def.accent);
+      document.documentElement.style.setProperty("--brand-primary", def.primary);
+      document.documentElement.style.setProperty("--brand-gradient", def.gradient);
+      document.documentElement.style.setProperty("--bg-app", def.bgApp);
+    }
     try {
       localStorage.setItem("omniops_theme_palette", p);
     } catch {}
@@ -104,6 +112,11 @@ export function getActiveThemePalette(): OmniThemePalette {
     } catch {}
   }
   return DEFAULT_PALETTE;
+}
+
+// Auto-apply saved palette on module execution
+if (typeof document !== "undefined") {
+  applyThemePalette(getActiveThemePalette());
 }
 
 export type ModelCostTier = "free" | "ultra-low" | "low" | "standard" | "premium";

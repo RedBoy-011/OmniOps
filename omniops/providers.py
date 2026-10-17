@@ -277,8 +277,8 @@ def fetch_models(kind, api_key, mode, proxy_url, with_prices=False):
 
 def _provider_post(host, path, key, mode, proxy_url, payload):
     body = json.dumps(payload, separators=(',', ':')).encode('utf-8')
-    if len(body) > 20000:
-        raise IdentityError('External prompt exceeds request limit')
+    if len(body) > 128000:
+        raise IdentityError('External prompt exceeds request limit (max 128KB)')
     headers = {'Content-Type': 'application/json', 'Accept': 'application/json',
                'x-goog-api-key' if host == ENDPOINTS['gemini'][0] else 'Authorization':
                    key if host == ENDPOINTS['gemini'][0] else 'Bearer ' + key}

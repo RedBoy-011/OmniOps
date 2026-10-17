@@ -178,3 +178,87 @@
 .omni-glow-effect {
   box-shadow: var(--omni-glow);
 }
+
+/* =========================================================================
+   OmniOps Unified Theme System - Global Application Palette Synchronizer
+   Propagates active palette to whole app (Admin, Workspace, PWA, Desktop)
+   ========================================================================= */
+
+:root {
+  --primary: var(--omni-brand-primary);
+  --primary-rgb: var(--omni-brand-primary-rgb);
+  --primary-hover: var(--omni-brand-primary-hover);
+  --primary-glow: var(--omni-glow);
+  --accent: var(--omni-brand-accent);
+  --accent-rgb: var(--omni-brand-accent-rgb);
+  --brand: var(--omni-brand-primary);
+  --brand-primary: var(--omni-brand-primary);
+  --brand-gradient: var(--omni-brand-gradient);
+  --bg-app: var(--omni-bg-app);
+  --border-brand: var(--omni-border);
+}
+
+html[data-theme-palette] .admin-scene,
+html[data-theme-palette] .auth-scene,
+html[data-theme-palette] .user-workspace-scene,
+html[data-theme-palette] body {
+  background: radial-gradient(ellipse 70% 70% at 7% 13%, rgba(var(--omni-brand-primary-rgb), 0.22) 0%, transparent 64%),
+    radial-gradient(ellipse 70% 70% at 94% 95%, rgba(var(--omni-brand-accent-rgb), 0.18) 0%, transparent 65%),
+    var(--omni-bg-app) !important;
+  color: var(--omni-text-primary);
+  transition: background 0.35s ease, color 0.25s ease;
+}
+
+html[data-theme-palette] .ambient-one {
+  background: var(--omni-brand-primary) !important;
+  transition: background 0.35s ease;
+}
+
+html[data-theme-palette] .ambient-two {
+  background: var(--omni-brand-accent) !important;
+  transition: background 0.35s ease;
+}
+
+html[data-theme-palette] .brand-mark {
+  background: var(--omni-brand-gradient) !important;
+  box-shadow: 0 0 22px rgba(var(--omni-brand-primary-rgb), 0.55) !important;
+  color: #ffffff !important;
+  transition: all 0.3s ease;
+}
+
+html[data-theme-palette] .submit-button,
+html[data-theme-palette] button.primary-btn {
+  background: var(--omni-brand-gradient) !important;
+  color: #ffffff !important;
+  box-shadow: 0 8px 24px rgba(var(--omni-brand-primary-rgb), 0.35) !important;
+  transition: all 0.25s ease;
+}
+
+html[data-theme-palette] .submit-button:hover:not(:disabled),
+html[data-theme-palette] button.primary-btn:hover:not(:disabled) {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+
+html[data-theme-palette] .workspace-switch-pill {
+  border-color: rgba(var(--omni-brand-primary-rgb), 0.45) !important;
+  background: rgba(var(--omni-brand-primary-rgb), 0.12) !important;
+  color: #ffffff !important;
+}
+
+html[data-theme-palette] .workspace-tab-pill.active {
+  background: var(--omni-brand-primary) !important;
+  box-shadow: 0 0 16px rgba(var(--omni-brand-primary-rgb), 0.45) !important;
+}
+
+html[data-theme-palette] .form-input:focus,
+html[data-theme-palette] .form-input:hover {
+  border-color: var(--omni-brand-primary) !important;
+}
+
+html[data-theme-palette] button:focus-visible,
+html[data-theme-palette] input:focus-visible {
+  outline: 2px solid var(--omni-brand-primary) !important;
+  outline-offset: 3px;
+}
+

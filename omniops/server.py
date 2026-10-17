@@ -141,6 +141,10 @@ def make_server(
                 fname = attached.get('name')[:120]
                 fcontent = attached.get('content')[:48000]
                 effective_prompt = f"[پیوست فایل پروژه: {fname}]\n```\n{fcontent}\n```\n\n{prompt.strip()}"
+            if any(w in prompt.lower() for w in ("تاریخ", "امروز", "ساعت", "date", "today", "time", "الان", "روز")):
+                from datetime import datetime
+                now_dt = datetime.now()
+                effective_prompt = f"[اطلاعات سیستم: تاریخ امروز {now_dt.strftime('%Y-%m-%d')} و زمان فعلی {now_dt.strftime('%H:%M:%S')} است.]\n\n{effective_prompt}"
             if payload.get('include_system_context', False) or telemetry.is_diagnostic_query(prompt):
                 try:
                     c = current_ollama()
@@ -280,6 +284,10 @@ def make_server(
                 fname = attached.get('name')[:120]
                 fcontent = attached.get('content')[:48000]
                 effective_prompt = f"[پیوست فایل پروژه: {fname}]\n```\n{fcontent}\n```\n\n{prompt.strip()}"
+            if any(w in prompt.lower() for w in ("تاریخ", "امروز", "ساعت", "date", "today", "time", "الان", "روز")):
+                from datetime import datetime
+                now_dt = datetime.now()
+                effective_prompt = f"[اطلاعات سیستم: تاریخ امروز {now_dt.strftime('%Y-%m-%d')} و زمان فعلی {now_dt.strftime('%H:%M:%S')} است.]\n\n{effective_prompt}"
             if payload.get('include_system_context', False) or telemetry.is_diagnostic_query(prompt):
                 try:
                     c = current_ollama()
@@ -765,7 +773,8 @@ def make_server(
             path = self.path
             if path not in {
                 "/api/auth/register", "/api/auth/login", "/api/auth/logout",
-                "/api/agent/pairing", "/api/agent/redeem", "/api/agent/heartbeat", "/api/agent/logout", "/api/agent/chat", "/api/web/chat",
+                "/api/agent/pairing", "/api/agent/redeem", "/api/agent/heartbeat", "/api/agent/logout",
+                "/api/agent/chat", "/api/agent/chat/stream", "/api/web/chat", "/api/web/chat/stream",
                 "/api/chat/sessions", "/api/chat/sessions/rename", "/api/chat/sessions/delete",
                 "/api/agent/sessions", "/api/agent/sessions/rename", "/api/agent/sessions/delete",
                 "/api/chat/history/clear", "/api/chat/memory/add", "/api/chat/memory/remove",

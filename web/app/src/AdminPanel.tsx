@@ -455,14 +455,6 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
                 >
                   🔑 صدور کد اتصال ایجنت
                 </button>
-                <button
-                  type="button"
-                  className="quiet-button"
-                  style={{ fontSize: "12px", padding: "6px 14px" }}
-                  onClick={() => setAdminTab("settings")}
-                >
-                  🎨 تنظیم تم سراسری
-                </button>
               </div>
             </div>
 

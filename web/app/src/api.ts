@@ -748,12 +748,17 @@ export const api = {
     onDone: (fullReply: string, model?: string, routing_reason?: string) => void,
     onError: (err: string) => void,
     attached_files?: AttachedDoc[] | null,
-    onRouting?: (routing: { model: string; reason: string }) => void
+    onRouting?: (routing: { model: string; reason: string }) => void,
+    signal?: AbortSignal
   ) => {
     const token = localStorage.getItem("omniops_token") || volatileWebToken || "";
+    let fullReply = "";
+    let modelUsed = model;
+    let routingReason = "";
     try {
       const response = await fetch("/api/web/chat/stream", {
         method: "POST",
+        signal,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
@@ -782,9 +787,6 @@ export const api = {
 
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
-      let fullReply = "";
-      let modelUsed = model;
-      let routingReason = "";
 
       while (true) {
         const { value, done } = await reader.read();
@@ -827,7 +829,11 @@ export const api = {
         }
       }
       onDone(fullReply, modelUsed, routingReason);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.name === "AbortError" || signal?.aborted) {
+        onDone(fullReply ? `${fullReply}\n\n[⏹️ تولید پاسخ توسط کاربر متوقف شد]` : "[⏹️ تولید پاسخ توسط کاربر متوقف شد]", modelUsed, routingReason);
+        return;
+      }
       onError(err instanceof Error ? err.message : "خطا در برقراری ارتباط جریانی با سرور");
     }
   },
