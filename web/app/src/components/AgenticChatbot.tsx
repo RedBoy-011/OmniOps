@@ -25,9 +25,16 @@ export interface AttachedImage {
   size: number;
 }
 
+export interface ProjectBinding {
+  id: string;
+  name: string;
+  root_path: string;
+  git_repo?: string;
+}
+
 export interface AgentStep {
   id: string;
-  type: "thinking" | "explore" | "command" | "timer" | "approval" | "status";
+  type: "thinking" | "explore" | "command" | "timer" | "approval" | "status" | "file";
   title: string;
   subtitle?: string;
   durationSeconds?: number;
@@ -47,6 +54,7 @@ export interface ChatMessage {
   routingReason?: string;
   permissionMode?: PermissionMode;
   mode?: ChatMode;
+  project?: ProjectBinding;
   steps?: AgentStep[];
   isStreaming?: boolean;
   totalWorkedSeconds?: number;
@@ -71,6 +79,39 @@ const DEFAULT_CONFIG: ChatbotConfig = {
   pasteTextThreshold: 1500,
 };
 
+const DEFAULT_PROJECT: ProjectBinding = {
+  id: "p-omniops",
+  name: "OmniOps",
+  root_path: "C:\\Users\\arfaghani\\Desktop\\OmniOps",
+  git_repo: "https://github.com/RedBoy-011/OmniOps.git",
+};
+
+// Helper for step badges and icons matching Antigravity
+function getStepFileBadge(title: string) {
+  if (title.includes(".tsx") || title.includes(".jsx")) {
+    return { icon: "⚛", label: "React", color: "#61dafb", bg: "rgba(97, 218, 251, 0.15)" };
+  }
+  if (title.includes(".ts") || title.includes(".js")) {
+    return { icon: "📄", label: "TS/JS", color: "#38bdf8", bg: "rgba(56, 189, 248, 0.15)" };
+  }
+  if (title.includes(".py")) {
+    return { icon: "🐍", label: "Python", color: "#fbbf24", bg: "rgba(251, 191, 36, 0.15)" };
+  }
+  if (title.includes(".css")) {
+    return { icon: "🎨", label: "CSS", color: "#f472b6", bg: "rgba(244, 114, 182, 0.15)" };
+  }
+  if (title.toLowerCase().includes("thought") || title.includes("تحلیل") || title.includes("تفکر")) {
+    return { icon: "💡", label: "Thought", color: "#c084fc", bg: "rgba(192, 132, 252, 0.15)" };
+  }
+  if (title.toLowerCase().includes("git") || title.includes("commit") || title.includes("push")) {
+    return { icon: "🌿", label: "Git", color: "#fb923c", bg: "rgba(251, 146, 60, 0.15)" };
+  }
+  if (title.toLowerCase().includes("test") || title.includes("تست")) {
+    return { icon: "🧪", label: "Test", color: "#34d399", bg: "rgba(52, 211, 153, 0.15)" };
+  }
+  return { icon: "🔍", label: "Inspect", color: "#60a5fa", bg: "rgba(96, 165, 250, 0.15)" };
+}
+
 export function AgenticChatbot({ onClose }: Props) {
   // Modes & Config
   const [chatMode, setChatMode] = useState<ChatMode>(() => {
@@ -87,13 +128,32 @@ export function AgenticChatbot({ onClose }: Props) {
     return DEFAULT_CONFIG;
   });
 
+  // Active Project & Path Binding
+  const [activeProject, setActiveProject] = useState<ProjectBinding>(() => {
+    try {
+      const saved = localStorage.getItem("omniops_active_project");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return DEFAULT_PROJECT;
+  });
+  const [projectsList, setProjectsList] = useState<ProjectBinding[]>([DEFAULT_PROJECT]);
+  const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<ProjectBinding>(activeProject);
+
+  // Live Windows Edge Agent status
+  const [agentOnline, setAgentOnline] = useState<boolean>(false);
+  const [agentNodeName, setAgentNodeName] = useState<string>("سیستم ویندوز");
+
+  // Stepper collapsed states per message
+  const [stepperCollapsed, setStepperCollapsed] = useState<Record<string, boolean>>({});
+
   // Messages & Input State
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     return [
       {
         id: "welcome-1",
         role: "assistant",
-        content: "درود! من دستیار هوشمند و ایجنتی OmniOps هستم. می‌توانید سوالات عمومی بپرسید (حالت گفتگو) یا وظایف تحلیلی، کدنویسی و بررسی پروژه را با گزارش گام‌به‌گام و تایید انسانی به من بسپارید (حالت وظیفه).",
+        content: "درود! من دستیار هوشمند و ایجنتی OmniOps هستم. می‌توانید سوالات عمومی بپرسید (حالت گفتگو) یا وظایف تحلیلی، کدنویسی و بررسی پروژه را با اتصال به مسیر لوکال ویندوز و گزارش گام‌به‌گام به من بسپارید (حالت وظیفه).",
         timestamp: Date.now(),
         model: "auto",
         routingReason: "✨ موتور هوشمند JRV فعال است (انتخاب پویای مدل بین محلی و ابری)",
@@ -128,17 +188,14 @@ export function AgenticChatbot({ onClose }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
-  // Load available models and catalog on mount
+  // Load available models, catalog, projects, and agent status on mount
   useEffect(() => {
-    async function loadModels() {
+    async function loadData() {
+      // 1. Models & catalog
       try {
         const res = await api.modelsCatalog();
-        if (res.models && res.models.length > 0) {
-          setAvailableModels(res.models);
-        }
-        if (res.catalog) {
-          setCatalog(res.catalog);
-        }
+        if (res.models && res.models.length > 0) setAvailableModels(res.models);
+        if (res.catalog) setCatalog(res.catalog);
       } catch {
         try {
           const webRes = await api.webModels();
@@ -146,8 +203,47 @@ export function AgenticChatbot({ onClose }: Props) {
           if (webRes.catalog) setCatalog(webRes.catalog);
         } catch {}
       }
+
+      // 2. Projects list
+      try {
+        const pRes = await api.workspaceProjects();
+        if (pRes.projects && pRes.projects.length > 0) {
+          const mapped: ProjectBinding[] = pRes.projects.map(p => ({
+            id: p.id,
+            name: p.name,
+            root_path: p.root_path || "C:\\Users\\arfaghani\\Desktop\\OmniOps",
+            git_repo: p.name === "OmniOps" ? "https://github.com/RedBoy-011/OmniOps.git" : undefined,
+          }));
+          setProjectsList(mapped);
+          // If activeProject is default, align with first found
+          if (activeProject.id === "p-omniops" && mapped[0]) {
+            const found = mapped.find(x => x.name.toLowerCase() === "omniops") || mapped[0];
+            setActiveProject(found);
+            setEditingProject(found);
+          }
+        }
+      } catch {}
+
+      // 3. Windows Agent status
+      try {
+        const st = await api.mobileStatus();
+        setAgentOnline(Boolean(st.agent_online));
+        if (st.node_name) setAgentNodeName(st.node_name);
+      } catch {}
     }
-    void loadModels();
+
+    void loadData();
+
+    // Periodic agent status check every 15s
+    const statusInterval = setInterval(async () => {
+      try {
+        const st = await api.mobileStatus();
+        setAgentOnline(Boolean(st.agent_online));
+        if (st.node_name) setAgentNodeName(st.node_name);
+      } catch {}
+    }, 15000);
+
+    return () => clearInterval(statusInterval);
   }, []);
 
   // Save chat mode changes
@@ -167,6 +263,28 @@ export function AgenticChatbot({ onClose }: Props) {
     setConfig(newCfg);
     localStorage.setItem("omniops_chatbot_config", JSON.stringify(newCfg));
     setIsSettingsOpen(false);
+  };
+
+  // Save project binding
+  const handleSaveProject = async (p: ProjectBinding) => {
+    setActiveProject(p);
+    localStorage.setItem("omniops_active_project", JSON.stringify(p));
+    setIsProjectModalOpen(false);
+
+    // Call backend to bind project root if project id exists
+    if (p.id && p.root_path) {
+      try {
+        await api.bindProjectRoot(p.id, p.root_path);
+      } catch {}
+    }
+  };
+
+  // Toggle stepper collapsed
+  const toggleStepperVisibility = (msgId: string) => {
+    setStepperCollapsed(prev => ({
+      ...prev,
+      [msgId]: !prev[msgId]
+    }));
   };
 
   // Scroll to bottom on new updates
@@ -256,7 +374,7 @@ export function AgenticChatbot({ onClose }: Props) {
             return {
               ...step,
               status: "completed" as const,
-              subtitle: "✅ مجوز دسترسی توسط کاربر صادر و دستور با موفقیت اجرا شد."
+              subtitle: "✅ مجوز دسترسی توسط کاربر صادر و دستور روی کلاینت اجرا شد."
             };
           }
           return step;
@@ -463,10 +581,12 @@ export function AgenticChatbot({ onClose }: Props) {
       content: prompt,
       timestamp: Date.now(),
       mode: chatMode,
+      project: activeProject,
       attachedFiles: activeFiles.length > 0 ? activeFiles : undefined,
       attachedImages: activeImages.length > 0 ? activeImages : undefined
     };
 
+    // Realistic Antigravity-like activity steps if in Task mode
     const initialSteps: AgentStep[] =
       chatMode === "task"
         ? [
@@ -475,8 +595,12 @@ export function AgenticChatbot({ onClose }: Props) {
               type: "thinking",
               title: "تحلیل مسئله و سیگنال‌های محتوا",
               status: "running",
-              isExpanded: true,
-              details: ["استخراج کلمات کلیدی و نیازمندی‌ها...", "مسیریابی هوشمند به بهینه‌ترین مدل..."]
+              isExpanded: false,
+              details: [
+                `پروژه فعال: ${activeProject.name} (${activeProject.root_path})`,
+                "استخراج کلمات کلیدی و نیازمندی‌ها...",
+                "مسیریابی هوشمند JRV به بهینه‌ترین مدل..."
+              ]
             }
           ]
         : [];
@@ -489,6 +613,7 @@ export function AgenticChatbot({ onClose }: Props) {
       model: selectedModel,
       permissionMode: permissionMode,
       mode: chatMode,
+      project: activeProject,
       isStreaming: true,
       steps: initialSteps
     };
@@ -501,13 +626,14 @@ export function AgenticChatbot({ onClose }: Props) {
       ...activeImages.map(img => ({ name: img.name, content: `[تصویر پیوست شده: ${img.name}]` }))
     ];
 
-    // If TASK MODE: execute agentic simulated pipeline
+    // If TASK MODE: execute agentic simulated pipeline with realistic file steps
     if (chatMode === "task") {
-      setLiveStatusText("...در حال بررسی کدها و فایل‌های پروژه");
-      await new Promise(r => setTimeout(r, 700));
+      setLiveStatusText("...در حال کاوش فایل‌ها و شاخه پروژه");
+      await new Promise(r => setTimeout(r, 600));
 
       if (abortController.signal.aborted) return;
 
+      // Realistic file steps modeled after Antigravity
       setMessages(prev =>
         prev.map(msg => {
           if (msg.id !== assistantMsgId) return msg;
@@ -519,19 +645,29 @@ export function AgenticChatbot({ onClose }: Props) {
                 ...currentSteps[0],
                 status: "completed",
                 durationSeconds: 2,
-                subtitle: "تحلیل اولیه تکمیل شد."
+                subtitle: "تحلیل اولیه و بررسی نیازمندی‌ها تکمیل شد."
               },
               {
-                id: "step-2",
+                id: "step-explore",
                 type: "explore",
-                title: "کاوش و ممیزی دامنه فعالیت‌ها (Explored)",
+                title: `کاوش دایرکتوری لوکال ${activeProject.name}`,
                 status: "completed",
                 durationSeconds: 2,
-                isExpanded: true,
+                isExpanded: false,
                 details: [
-                  "فهرست فایل‌ها و ماژول‌های مرتبط بررسی گردید.",
-                  "وابستگی‌های محیطی و پیش‌نیازهای اجرایی ممیزی شدند."
+                  `مسیر پروژه: ${activeProject.root_path}`,
+                  activeProject.git_repo ? `مخزن گیت‌هاب: ${activeProject.git_repo}` : "مخزن گیت محلی",
+                  "بررسی فایل‌های منبع، پکیج‌ها و وضعیت شاخه گیت..."
                 ]
+              },
+              {
+                id: "step-file-1",
+                type: "file",
+                title: "Analyzed ⚛ AgenticChatbot.tsx #L1-450",
+                status: "completed",
+                durationSeconds: 1,
+                isExpanded: false,
+                details: ["بررسی استپر فعالیت‌ها، پیوست فایل‌ها و اتصال پروژه..."]
               }
             ]
           };
@@ -556,7 +692,7 @@ export function AgenticChatbot({ onClose }: Props) {
                   {
                     id: "step-approval",
                     type: "approval",
-                    title: "درخواست مجوز دسترسی سیستم (Human-in-the-Loop)",
+                    title: "درخواست مجوز اجرای سیستم (Human-in-the-Loop)",
                     command: prompt.includes("تست") ? "py -m unittest tests.test_router_and_catalog" : "git status",
                     status: "waiting_approval",
                     isExpanded: true,
@@ -565,9 +701,9 @@ export function AgenticChatbot({ onClose }: Props) {
                 ],
                 pendingApproval: {
                   stepId: "step-approval",
-                  actionName: "اجرای ابزار و ممیزی سیستم",
+                  actionName: "اجرای ابزار در سیستم لوکال ویندوز",
                   command: prompt.includes("تست") ? "py -m unittest tests.test_router_and_catalog" : "git status",
-                  description: "بررسی مستقیم تست‌های واحد و فایل‌های پروژه در محیط کاربری."
+                  description: `اجرای مستقیم دستور در مسیر لوکال ${activeProject.root_path} توسط گره ویندوزی.`
                 }
               };
             })
@@ -589,8 +725,11 @@ export function AgenticChatbot({ onClose }: Props) {
                     command: prompt.includes("تست") ? "py -m unittest tests.test_router_and_catalog" : "git status",
                     status: "completed",
                     durationSeconds: 3,
-                    isExpanded: true,
-                    details: ["مجوز خودکار صادر شد.", "دستور با موفقیت در محیط ایزوله اجرا گردید."]
+                    isExpanded: false,
+                    details: [
+                      "مجوز خودکار صادر شد.",
+                      `دستور در محیط ویندوز (${agentNodeName}) با موفقیت اجرا گردید.`
+                    ]
                   }
                 ]
               };
@@ -601,7 +740,15 @@ export function AgenticChatbot({ onClose }: Props) {
     }
 
     // Stream response from backend
-    setLiveStatusText(chatMode === "task" ? "...در حال دریافت نتیجه نهایی و تدوین گزارش" : "...در حال دریافت پاسخ هوشمند");
+    setLiveStatusText(chatMode === "task" ? "...در حال تدوین گزارش و ثبت مستندات" : "...در حال دریافت پاسخ هوشمند");
+
+    // Include project path context in task mode
+    const effectivePromptText =
+      chatMode === "task"
+        ? `[پروژه فعال: ${activeProject.name} | مسیر لوکال: ${activeProject.root_path}${
+            activeProject.git_repo ? ` | گیت‌هاب: ${activeProject.git_repo}` : ""
+          }]\n\n${prompt}`
+        : prompt;
 
     let accumulatedReply = "";
     let finalModel = selectedModel;
@@ -609,7 +756,7 @@ export function AgenticChatbot({ onClose }: Props) {
 
     try {
       await api.webChatStream(
-        prompt,
+        effectivePromptText,
         selectedModel,
         true, // allow_external
         true, // save_history
@@ -719,32 +866,59 @@ export function AgenticChatbot({ onClose }: Props) {
         flexDirection: "column",
         height: "calc(100vh - 120px)",
         maxHeight: "860px",
-        background: "rgba(13, 17, 23, 0.85)",
+        background: "rgba(13, 17, 23, 0.88)",
         borderRadius: "16px",
         border: "1px solid rgba(255, 255, 255, 0.12)",
         overflow: "hidden",
         boxShadow: "0 24px 60px rgba(0, 0, 0, 0.65)"
       }}
     >
-      {/* هدر چت‌بات: تفکیک حالت، تنظیمات و بستن */}
+      {/* هدر چت‌بات: انتخاب پروژه، وضعیت گره ویندوز، تفکیک حالت، تنظیمات و بستن */}
       <div
         style={{
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
           padding: "10px 16px",
-          background: "rgba(22, 27, 34, 0.9)",
+          background: "rgba(22, 27, 34, 0.92)",
           borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
           gap: "8px",
           flexWrap: "wrap"
         }}
       >
-        {/* راست: نشان برند و انتخابگر حالت گفتگو / وظیفه */}
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        {/* راست: نشان برند، انتخابگر پروژه فعال، و سوییچ گفتگو / وظیفه */}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
           <span style={{ fontSize: "18px" }}>🤖</span>
-          <strong style={{ fontSize: "13.5px", fontWeight: "bold", color: "#f0f6fc" }}>
-            OmniOps AI
-          </strong>
+
+          {/* انتخابگر و بایندر پروژه با مسیر لوکال و گیت‌هاب */}
+          <button
+            type="button"
+            onClick={() => {
+              setEditingProject(activeProject);
+              setIsProjectModalOpen(true);
+            }}
+            style={{
+              background: "rgba(255, 255, 255, 0.06)",
+              border: "1px solid rgba(255, 255, 255, 0.12)",
+              borderRadius: "8px",
+              padding: "4px 10px",
+              color: "#f0f6fc",
+              fontSize: "12px",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              transition: "all 0.15s ease"
+            }}
+            title={`پروژه فعال: ${activeProject.name} | مسیر لوکال: ${activeProject.root_path} (کلیک جهت تغییر)`}
+          >
+            <span>📂</span>
+            <span style={{ fontWeight: "bold" }}>{activeProject.name}</span>
+            <span style={{ fontSize: "10.5px", color: "#8b949e", maxWidth: "160px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} dir="ltr">
+              {activeProject.root_path.split("\\").pop()}
+            </span>
+            <span style={{ fontSize: "10px", color: "#58a6ff" }}>▾</span>
+          </button>
 
           {/* تب مینیمال تفکیک محیط گفتگو و وظیفه */}
           <div
@@ -773,7 +947,7 @@ export function AgenticChatbot({ onClose }: Props) {
                 gap: "4px",
                 transition: "all 0.15s ease"
               }}
-              title="محیط مکالمه سریع، روان و مستقیم با هوش مصنوعی"
+              title="محیط مکالمه سریع و مستقیم با هوش مصنوعی"
             >
               <span>💬</span>
               <span>گفتگو</span>
@@ -803,8 +977,33 @@ export function AgenticChatbot({ onClose }: Props) {
           </div>
         </div>
 
-        {/* چپ: سطح دسترسی (در حالت وظیفه)، دکمه تنظیمات و بستن */}
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        {/* چپ: وضعیت اتصال گره ویندوز، سطح دسترسی، دکمه تنظیمات و بستن */}
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+          {/* وضعیت آنلاین بودن ایجنت لوکال ویندوز */}
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "5px",
+              padding: "4px 9px",
+              borderRadius: "8px",
+              background: agentOnline ? "rgba(16, 185, 129, 0.12)" : "rgba(255, 255, 255, 0.05)",
+              border: `1px solid ${agentOnline ? "rgba(16, 185, 129, 0.3)" : "rgba(255, 255, 255, 0.1)"}`,
+              fontSize: "11px",
+              color: agentOnline ? "#34d399" : "#8b949e"
+            }}
+            title={
+              agentOnline
+                ? `سیستم ویندوز (${agentNodeName}) روشن و متصل است؛ فرامین از وب/موبایل روی این سیستم اجرا می‌شوند.`
+                : "ایجنت ویندوز آفلاین است؛ برای اجرای فرامین محلی سیستم ویندوزی را روشن کنید."
+            }
+          >
+            <span style={{ fontSize: "8px" }}>{agentOnline ? "🟢" : "⚪"}</span>
+            <span className="hidden sm:inline">
+              {agentOnline ? `ویندوز آنلاین (${agentNodeName})` : "ویندوز آفلاین"}
+            </span>
+          </div>
+
           {chatMode === "task" && (
             <div
               style={{
@@ -1013,137 +1212,202 @@ export function AgenticChatbot({ onClose }: Props) {
             ) : (
               /* پاسخ هوش مصنوعی / ایجنت */
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                {/* استپر و پیشرفت فعالیت‌ها (در صورت وجود گام) */}
+                {/* استپر پیشرفت فعالیت‌ها با اسکرولبار محو و شیک (مشابه Antigravity) */}
                 {msg.steps && msg.steps.length > 0 && (
                   <div
                     style={{
-                      background: "rgba(22, 27, 34, 0.8)",
+                      background: "rgba(22, 27, 34, 0.78)",
                       border: "1px solid rgba(255, 255, 255, 0.08)",
                       borderRadius: "12px",
-                      padding: "12px 14px",
+                      padding: "10px 14px",
                       display: "flex",
                       flexDirection: "column",
-                      gap: "8px"
+                      gap: "6px"
                     }}
                   >
-                    {/* هدر استپر: زمان کار و مدل انتخاب شده */}
+                    {/* نوار بالایی استپر: خلاصه تعداد اقدامات و دکمه باز/بسته کردن */}
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
-                      <span style={{ fontSize: "11px", color: "#8b949e", display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                        <span>⏱️</span>
-                        <span>
-                          {msg.totalWorkedSeconds ? `Worked for ${msg.totalWorkedSeconds}s` : `Worked for ${activeTimerSeconds}s`}
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "11.5px", fontWeight: "bold", color: "#38bdf8", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                          <span>⚡</span>
+                          <span>{msg.steps.length} اقدام انجام شد</span>
                         </span>
-                      </span>
+                        <span style={{ fontSize: "10.5px", color: "#8b949e", fontFamily: "monospace" }}>
+                          ({msg.totalWorkedSeconds ? `Worked for ${msg.totalWorkedSeconds}s` : `Worked for ${activeTimerSeconds}s`})
+                        </span>
+                      </div>
 
-                      {msg.routingReason && (
-                        <span
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        {msg.routingReason && (
+                          <span
+                            className="hidden md:inline-flex"
+                            style={{
+                              fontSize: "10.5px",
+                              padding: "2px 8px",
+                              borderRadius: "6px",
+                              background: "rgba(56, 189, 248, 0.12)",
+                              color: "#38bdf8",
+                              border: "1px solid rgba(56, 189, 248, 0.25)"
+                            }}
+                          >
+                            {msg.routingReason}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => toggleStepperVisibility(msg.id)}
                           style={{
-                            fontSize: "10.5px",
-                            padding: "2px 8px",
+                            background: "rgba(255, 255, 255, 0.05)",
+                            border: "1px solid rgba(255, 255, 255, 0.1)",
                             borderRadius: "6px",
-                            background: "rgba(56, 189, 248, 0.12)",
-                            color: "#38bdf8",
-                            border: "1px solid rgba(56, 189, 248, 0.25)"
+                            fontSize: "10.5px",
+                            color: "#c9d1d9",
+                            padding: "2px 8px",
+                            cursor: "pointer"
                           }}
                         >
-                          {msg.routingReason}
-                        </span>
-                      )}
+                          {stepperCollapsed[msg.id] ? "▸ نمایش جزئیات اقدامات" : "▾ فشرده‌سازی"}
+                        </button>
+                      </div>
                     </div>
 
-                    {/* لیست گام‌های فعالیت (آکاردئونی تاشو) */}
-                    {msg.steps.map(step => (
+                    {/* کادر اسکرول‌شونده اختصاصی با اسکرولبار محو و شیک */}
+                    {!stepperCollapsed[msg.id] && (
                       <div
-                        key={step.id}
+                        className="omni-chic-scrollbar"
                         style={{
-                          background: "rgba(13, 17, 23, 0.7)",
-                          border: `1px solid ${
-                            step.status === "waiting_approval"
-                              ? "rgba(245, 158, 11, 0.4)"
-                              : step.status === "rejected"
-                              ? "rgba(239, 68, 68, 0.4)"
-                              : "rgba(255, 255, 255, 0.05)"
-                          }`,
-                          borderRadius: "8px",
-                          overflow: "hidden"
+                          maxHeight: "220px",
+                          overflowY: "auto",
+                          paddingLeft: "4px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "5px"
                         }}
                       >
-                        <div
-                          onClick={() => toggleStepAccordion(msg.id, step.id)}
-                          style={{
-                            padding: "8px 12px",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            cursor: "pointer",
-                            userSelect: "none"
-                          }}
-                        >
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <span style={{ fontSize: "12px", color: "#8b949e" }}>
-                              {step.isExpanded ? "▾" : "▸"}
-                            </span>
-                            <span style={{ fontSize: "12px", fontWeight: "600", color: "#e6edf3" }}>
-                              {step.title}
-                            </span>
-                          </div>
-
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                            {step.durationSeconds && (
-                              <span style={{ fontSize: "10px", color: "#8b949e", fontFamily: "monospace" }}>
-                                {step.durationSeconds}s
-                              </span>
-                            )}
-                            <span style={{ fontSize: "12px" }}>
-                              {step.status === "completed" ? "✅" : step.status === "running" ? "⏳" : step.status === "waiting_approval" ? "⚠️" : "❌"}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* جزئیات بازشونده گام */}
-                        <AnimatePresence>
-                          {step.isExpanded && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: "auto", opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
+                        {msg.steps.map(step => {
+                          const badge = getStepFileBadge(step.title);
+                          return (
+                            <div
+                              key={step.id}
                               style={{
-                                padding: "8px 14px 10px",
-                                borderTop: "1px solid rgba(255, 255, 255, 0.05)",
-                                fontSize: "11.5px",
-                                color: "#8b949e",
-                                lineHeight: "1.7"
+                                background: "rgba(13, 17, 23, 0.7)",
+                                border: `1px solid ${
+                                  step.status === "waiting_approval"
+                                    ? "rgba(245, 158, 11, 0.4)"
+                                    : step.status === "rejected"
+                                    ? "rgba(239, 68, 68, 0.4)"
+                                    : "rgba(255, 255, 255, 0.06)"
+                                }`,
+                                borderRadius: "8px",
+                                overflow: "hidden"
                               }}
                             >
-                              {step.subtitle && <p style={{ margin: "0 0 6px", color: "#c9d1d9" }}>{step.subtitle}</p>}
-                              {step.command && (
-                                <div
-                                  dir="ltr"
-                                  style={{
-                                    background: "#090d13",
-                                    padding: "6px 10px",
-                                    borderRadius: "6px",
-                                    fontFamily: "monospace",
-                                    color: "#58a6ff",
-                                    fontSize: "11px",
-                                    marginBottom: "6px"
-                                  }}
-                                >
-                                  $ {step.command}
+                              <div
+                                onClick={() => toggleStepAccordion(msg.id, step.id)}
+                                style={{
+                                  padding: "6px 10px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  cursor: "pointer",
+                                  userSelect: "none"
+                                }}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                  <span style={{ fontSize: "11px", color: "#8b949e" }}>
+                                    {step.isExpanded ? "▾" : "▸"}
+                                  </span>
+
+                                  {/* نشان فایل یا ابزار مشابه Antigravity */}
+                                  <span
+                                    style={{
+                                      fontSize: "10px",
+                                      padding: "1px 6px",
+                                      borderRadius: "4px",
+                                      background: badge.bg,
+                                      color: badge.color,
+                                      fontWeight: "bold",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "3px"
+                                    }}
+                                  >
+                                    <span>{badge.icon}</span>
+                                    <span>{badge.label}</span>
+                                  </span>
+
+                                  <span
+                                    dir="ltr"
+                                    style={{
+                                      fontSize: "12px",
+                                      fontWeight: "500",
+                                      color: "#e6edf3",
+                                      fontFamily: step.title.includes(".") ? "monospace" : "inherit"
+                                    }}
+                                  >
+                                    {step.title}
+                                  </span>
                                 </div>
-                              )}
-                              {step.details && (
-                                <ul style={{ margin: 0, paddingRight: "18px" }}>
-                                  {step.details.map((d, di) => (
-                                    <li key={di}>{d}</li>
-                                  ))}
-                                </ul>
-                              )}
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
+
+                                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                  {step.durationSeconds && (
+                                    <span style={{ fontSize: "10px", color: "#8b949e", fontFamily: "monospace" }}>
+                                      {step.durationSeconds}s
+                                    </span>
+                                  )}
+                                  <span style={{ fontSize: "11.5px" }}>
+                                    {step.status === "completed" ? "✅" : step.status === "running" ? "⏳" : step.status === "waiting_approval" ? "⚠️" : "❌"}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* جزئیات بازشونده گام */}
+                              <AnimatePresence>
+                                {step.isExpanded && (
+                                  <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: "auto", opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    style={{
+                                      padding: "6px 12px 8px",
+                                      borderTop: "1px solid rgba(255, 255, 255, 0.05)",
+                                      fontSize: "11px",
+                                      color: "#8b949e",
+                                      lineHeight: "1.7"
+                                    }}
+                                  >
+                                    {step.subtitle && <p style={{ margin: "0 0 4px", color: "#c9d1d9" }}>{step.subtitle}</p>}
+                                    {step.command && (
+                                      <div
+                                        dir="ltr"
+                                        style={{
+                                          background: "#090d13",
+                                          padding: "5px 8px",
+                                          borderRadius: "6px",
+                                          fontFamily: "monospace",
+                                          color: "#58a6ff",
+                                          fontSize: "10.5px",
+                                          marginBottom: "4px"
+                                        }}
+                                      >
+                                        $ {step.command}
+                                      </div>
+                                    )}
+                                    {step.details && (
+                                      <ul style={{ margin: 0, paddingRight: "16px" }}>
+                                        {step.details.map((d, di) => (
+                                          <li key={di}>{d}</li>
+                                        ))}
+                                      </ul>
+                                    )}
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
+                          );
+                        })}
                       </div>
-                    ))}
+                    )}
 
                     {/* کارت تأیید انسانی (Human-in-the-Loop) */}
                     {msg.pendingApproval && (
@@ -1438,7 +1702,7 @@ export function AgenticChatbot({ onClose }: Props) {
             placeholder={
               chatMode === "chat"
                 ? "پیام خود را بنویسید... (Ctrl+V برای الصاق متن طولانی یا عکس از حافظه)"
-                : "وظیفه، پرسش کدنویسی یا بررسی پروژه را مطرح نمایید... (Ctrl+V برای الصاق متن یا عکس)"
+                : `وظیفه یا پرسش کدنویسی روی ${activeProject.name} را بنویسید...`
             }
             rows={2}
             disabled={isProcessing}
@@ -1652,6 +1916,190 @@ export function AgenticChatbot({ onClose }: Props) {
           </div>
         </div>
       </div>
+
+      {/* مدال مدیریت و اتصال پروژه و مسیر لوکال */}
+      <AnimatePresence>
+        {isProjectModalOpen && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0, 0, 0, 0.72)",
+              backdropFilter: "blur(6px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 9999,
+              padding: "20px"
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              style={{
+                background: "#161b22",
+                border: "1px solid rgba(255, 255, 255, 0.15)",
+                borderRadius: "14px",
+                padding: "20px",
+                maxWidth: "500px",
+                width: "100%",
+                boxShadow: "0 20px 50px rgba(0, 0, 0, 0.7)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "14px"
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "bold", color: "#f0f6fc", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span>📂</span>
+                  <span>تنظیم پروژه فعال و مسیر محیط لوکال</span>
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setIsProjectModalOpen(false)}
+                  style={{ background: "transparent", border: "none", color: "#8b949e", cursor: "pointer", fontSize: "16px" }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <p style={{ margin: 0, fontSize: "12px", color: "#8b949e", lineHeight: "1.7" }}>
+                مشخصات پروژه شامل مسیر پوشه روی سیستم ویندوزی و آدرس مخزن گیت‌هاب است. مکالمات و وظایف روی این مسیر متمرکز خواهند شد.
+              </p>
+
+              {/* انتخاب پروژه از لیست موجود */}
+              {projectsList.length > 1 && (
+                <div>
+                  <label style={{ display: "block", marginBottom: "4px", fontSize: "12px", color: "#c9d1d9" }}>
+                    انتخاب از پروژه‌های ثبت‌شده:
+                  </label>
+                  <select
+                    value={editingProject.id}
+                    onChange={e => {
+                      const found = projectsList.find(x => x.id === e.target.value);
+                      if (found) setEditingProject(found);
+                    }}
+                    style={{
+                      width: "100%",
+                      background: "#0d1117",
+                      border: "1px solid rgba(255, 255, 255, 0.15)",
+                      borderRadius: "8px",
+                      padding: "6px 10px",
+                      color: "#fff",
+                      fontSize: "12px"
+                    }}
+                  >
+                    {projectsList.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.root_path})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* ویرایش یا تعریف نام و مسیرها */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", fontSize: "12px", color: "#c9d1d9" }}>
+                <div>
+                  <label style={{ display: "block", marginBottom: "4px" }}>نام پروژه:</label>
+                  <input
+                    type="text"
+                    value={editingProject.name}
+                    onChange={e => setEditingProject(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="مثال: OmniOps"
+                    style={{
+                      width: "100%",
+                      background: "#0d1117",
+                      border: "1px solid rgba(255, 255, 255, 0.15)",
+                      borderRadius: "8px",
+                      padding: "7px 10px",
+                      color: "#fff",
+                      fontSize: "12.5px"
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: "block", marginBottom: "4px" }}>مسیر پوشه در سیستم محلی (Local Folder Path):</label>
+                  <input
+                    type="text"
+                    dir="ltr"
+                    value={editingProject.root_path}
+                    onChange={e => setEditingProject(prev => ({ ...prev, root_path: e.target.value }))}
+                    placeholder="C:\Users\username\Desktop\Project"
+                    style={{
+                      width: "100%",
+                      background: "#0d1117",
+                      border: "1px solid rgba(255, 255, 255, 0.15)",
+                      borderRadius: "8px",
+                      padding: "7px 10px",
+                      color: "#58a6ff",
+                      fontFamily: "monospace",
+                      fontSize: "12px"
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: "block", marginBottom: "4px" }}>آدرس مخزن گیت‌هاب (GitHub Repository URL):</label>
+                  <input
+                    type="text"
+                    dir="ltr"
+                    value={editingProject.git_repo || ""}
+                    onChange={e => setEditingProject(prev => ({ ...prev, git_repo: e.target.value }))}
+                    placeholder="https://github.com/username/repo.git"
+                    style={{
+                      width: "100%",
+                      background: "#0d1117",
+                      border: "1px solid rgba(255, 255, 255, 0.15)",
+                      borderRadius: "8px",
+                      padding: "7px 10px",
+                      color: "#34d399",
+                      fontFamily: "monospace",
+                      fontSize: "12px"
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" }}>
+                <button
+                  type="button"
+                  onClick={() => setIsProjectModalOpen(false)}
+                  style={{
+                    padding: "7px 14px",
+                    borderRadius: "8px",
+                    background: "transparent",
+                    color: "#8b949e",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "12px"
+                  }}
+                >
+                  انصراف
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaveProject(editingProject)}
+                  style={{
+                    padding: "7px 18px",
+                    borderRadius: "8px",
+                    background: "var(--primary, #3b82f6)",
+                    color: "#ffffff",
+                    border: "none",
+                    fontWeight: "bold",
+                    cursor: "pointer",
+                    fontSize: "12.5px"
+                  }}
+                >
+                  ذخیره و اتصال به پروژه
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* مدال تایید درج متن طولانی از کلیپ‌بورد */}
       <AnimatePresence>

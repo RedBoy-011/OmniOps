@@ -262,3 +262,29 @@ html[data-theme-palette] input:focus-visible {
   outline-offset: 3px;
 }
 
+/* Subtle, sleek, glassmorphic chic scrollbar */
+.omni-chic-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+.omni-chic-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.omni-chic-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.omni-chic-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  transition: background 0.2s ease;
+}
+
+.omni-chic-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--omni-brand-primary, rgba(56, 189, 248, 0.5));
+}
+
+

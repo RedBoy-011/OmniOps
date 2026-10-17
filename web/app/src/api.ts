@@ -900,6 +900,13 @@ export const api = {
   approve: (id: string, capabilities: string[]) => request<{ status: string }>(`/api/admin/pending/${encodeURIComponent(id)}/approve`, "POST", { capabilities }),
   reject: (id: string) => request<{ status: string }>(`/api/admin/pending/${encodeURIComponent(id)}/reject`, "POST", {}),
   issuePairing: () => request<{ code: string; expires_at: number }>("/api/agent/pairing", "POST", {}),
+  mobileStatus: () =>
+    request<{
+      status: string;
+      agent_online: boolean;
+      node_name: string;
+      agent_state_label: string;
+    }>("/api/mobile/status"),
   logout: () => request<{ status: string }>("/api/auth/logout", "POST", {}),
   projectFiles: () => request<{ files: ProjectFileSummary[] }>("/api/web/project/files"),
   projectFile: (path: string) => request<ProjectFileDetail>(`/api/web/project/file?path=${encodeURIComponent(path)}`),
