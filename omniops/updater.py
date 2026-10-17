@@ -188,18 +188,18 @@ def apply_update(repo_root: Path | str | None = None, branch: str = "main") -> d
         timeout=45,
     )
     if pull_res.returncode != 0:
-        # Fallback to normal pull if fast-forward fails
-        pull_res = subprocess.run(
-            ["git", "pull", "origin", f"refs/heads/{branch}"],
+        # Resilient self-healing fallback: reset tracked files directly to origin branch
+        reset_res = subprocess.run(
+            ["git", "reset", "--hard", f"origin/{branch}"],
             cwd=str(root),
             capture_output=True,
             text=True,
             timeout=45,
         )
-        if pull_res.returncode != 0:
+        if reset_res.returncode != 0:
             return {
                 "status": "error",
-                "message": f"خطا در ادغام تغییرات گیت‌هاب (git pull): {pull_res.stderr.strip()}",
+                "message": f"خطا در ادغام تغییرات گیت‌هاب (git pull): {pull_res.stderr.strip() or reset_res.stderr.strip()}",
                 "current_commit": prev_commit[:7],
             }
 
