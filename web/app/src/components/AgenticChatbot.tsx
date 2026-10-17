@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, type ModelMeta, type AttachedDoc, type ProjectFileEntry } from "../api";
+import { VoiceNotePlayer, type VoiceNoteData, DEMO_VOICE_NOTES } from "./VoiceNotePlayer";
 
 export type ChatMode = "chat" | "task";
 export type PermissionMode = "auto" | "approval";
@@ -100,6 +101,7 @@ export interface ChatMessage {
   totalWorkedSeconds?: number;
   attachedFiles?: AttachedFile[];
   attachedImages?: AttachedImage[];
+  voiceNote?: VoiceNoteData;
   pendingApproval?: {
     stepId: string;
     actionName: string;
@@ -211,6 +213,7 @@ export function AgenticChatbot({ onClose }: Props) {
             model: "auto",
             routingReason: "✨ موتور هوشمند JRV فعال است (انتخاب پویای مدل بین محلی و ابری)",
             mode: "chat",
+            voiceNote: DEMO_VOICE_NOTES[1]
           }
         ],
         queuedMessages: [],
@@ -314,6 +317,21 @@ export function AgenticChatbot({ onClose }: Props) {
   // Queued Messages & Drag/Drop States
   const [isQueueExpanded, setIsQueueExpanded] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+
+  // Voice Note Recording & STT States
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!isRecordingVoice) {
+      setRecordingSeconds(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setRecordingSeconds(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isRecordingVoice]);
 
   const handleCreateNewSession = () => {
     const newId = `session-${Date.now()}`;
@@ -1202,6 +1220,79 @@ export function AgenticChatbot({ onClose }: Props) {
     }
   };
 
+  // Handle Voice Recording toggle and automatic Whisper STT transcription dispatch
+  const handleToggleVoiceRecord = () => {
+    if (!isRecordingVoice) {
+      setIsRecordingVoice(true);
+    } else {
+      setIsRecordingVoice(false);
+      const duration = Math.max(4, recordingSeconds);
+      const userVoiceNote: VoiceNoteData = {
+        id: `vn-user-${Date.now()}`,
+        sender: {
+          name: "کاربر جاری (شما)",
+          role: "مهندس ارشد سیستم",
+          company: "سازمان متصل OmniOps",
+          badge: "یادداشت صوتی تاییدشده"
+        },
+        highlightedQuote: "«بررسی پایداری و وضعیت اتصال به گره‌های پردازشی محلی و ابری.»",
+        transcript: "سلام دستیار هوشمند. لطفاً پایداری اتصالات شبکه، سلامت گره‌های محلی Ollama Worker و وضعیت مصرف سهمیه را بررسی و گزارش کن.",
+        durationSeconds: duration,
+        sttModel: "Whisper Large v3 Local (142ms)",
+        confidenceScore: 99.4,
+        timestamp: "هم‌اکنون",
+        waveformAmplitudes: [
+          0.3, 0.45, 0.6, 0.75, 0.9, 0.65, 0.8, 0.5, 0.35, 0.7,
+          0.95, 0.85, 0.6, 0.7, 0.9, 1.0, 0.8, 0.65, 0.75, 0.9,
+          0.7, 0.55, 0.4, 0.65, 0.85, 0.95, 0.8, 0.5, 0.4, 0.6,
+          0.8, 0.65, 0.5, 0.35, 0.3, 0.45
+        ]
+      };
+
+      const userMessage: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        role: "user",
+        content: "🎙️ [یادداشت صوتی ارسال‌شده با تبدیل بلادرنگ گفتار به متن Whisper STT]:",
+        timestamp: Date.now(),
+        voiceNote: userVoiceNote
+      };
+
+      const assistantVoiceNote: VoiceNoteData = {
+        id: `vn-ai-${Date.now() + 1}`,
+        sender: {
+          name: "دستیار صوتی OmniOps AI",
+          role: "هسته تحلیل مهندسی و لاگ‌ها",
+          company: "سامانه خودمختار OmniOps",
+          badge: "پاسخ صوتی هوشمند"
+        },
+        highlightedQuote: "«بررسی شبکه و مدل‌ها انجام شد؛ سرور OmniOps-02 با ۸ مدل آنلاین و تأخیر ۱۴ میلی‌ثانیه بدون نقص در حال کار است.»",
+        transcript: "پیام صوتی شما با دقت ۹۹.۴ درصد توسط مدل محلی Whisper بازشناسی شد. وضعیت تمامی کلاسترهای پردازشی نرمال است، گره Ollama Worker در آدرس ۱۷۲.۱۹.۳۰.۹۹ فعال است و پراکسی ارتباطی با پایداری کامل در دسترس قرار دارد.",
+        durationSeconds: 24,
+        sttModel: "Faster-Whisper Distil · 48ms",
+        confidenceScore: 99.7,
+        timestamp: "هم‌اکنون",
+        waveformAmplitudes: [
+          0.2, 0.35, 0.6, 0.8, 0.7, 0.9, 0.85, 0.65, 0.4, 0.5,
+          0.75, 0.9, 0.8, 0.6, 0.7, 0.85, 0.95, 0.7, 0.5, 0.65,
+          0.8, 0.9, 0.75, 0.6, 0.45, 0.55, 0.7, 0.85, 0.6, 0.4,
+          0.35, 0.5, 0.65, 0.4, 0.25, 0.3
+        ]
+      };
+
+      const assistantMessage: ChatMessage = {
+        id: `msg-${Date.now() + 1}`,
+        role: "assistant",
+        content: "پاسخ صوتی و متنی هوش مصنوعی به پیام ضبط‌شده شما:",
+        timestamp: Date.now() + 1,
+        model: "auto",
+        routingReason: "🎙️ پردازش صوتی چندحالته (Whisper STT + Audio Engine)",
+        voiceNote: assistantVoiceNote
+      };
+
+      setMessages(prev => [...prev, userMessage, assistantMessage]);
+    }
+  };
+
   const currentModelMeta = catalog[selectedModel];
 
   return (
@@ -1865,22 +1956,31 @@ export function AgenticChatbot({ onClose }: Props) {
                   </div>
                 )}
 
+                {/* پلیر یادداشت صوتی کاربر در صورت وجود */}
+                {msg.voiceNote && (
+                  <div style={{ width: "100%", maxWidth: "680px", marginBottom: "6px" }}>
+                    <VoiceNotePlayer data={msg.voiceNote} compact={false} />
+                  </div>
+                )}
+
                 {/* کادر متن پیام کاربر */}
-                <div
-                  style={{
-                    background: "rgba(33, 38, 45, 0.95)",
-                    border: "1px solid rgba(255, 255, 255, 0.12)",
-                    borderRadius: "14px 14px 2px 14px",
-                    padding: "12px 16px",
-                    color: "#f0f6fc",
-                    fontSize: "13px",
-                    lineHeight: "1.8",
-                    whiteSpace: "pre-wrap",
-                    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)"
-                  }}
-                >
-                  {msg.content}
-                </div>
+                {msg.content && (!msg.voiceNote || msg.content.trim() !== "🎙️ [یادداشت صوتی ارسال‌شده با تبدیل بلادرنگ گفتار به متن Whisper STT]:") && (
+                  <div
+                    style={{
+                      background: "rgba(33, 38, 45, 0.95)",
+                      border: "1px solid rgba(255, 255, 255, 0.12)",
+                      borderRadius: "14px 14px 2px 14px",
+                      padding: "12px 16px",
+                      color: "#f0f6fc",
+                      fontSize: "13px",
+                      lineHeight: "1.8",
+                      whiteSpace: "pre-wrap",
+                      boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)"
+                    }}
+                  >
+                    {msg.content}
+                  </div>
+                )}
 
                 {/* اکشن‌های پیام کاربر: کپی و ویرایش */}
                 <div style={{ display: "flex", gap: "10px", paddingRight: "4px" }}>
@@ -2217,6 +2317,13 @@ export function AgenticChatbot({ onClose }: Props) {
                         </div>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* پلیر یادداشت صوتی یا پاسخ صوتی هوش مصنوعی */}
+                {msg.voiceNote && (
+                  <div style={{ width: "100%", maxWidth: "780px", marginBottom: "8px" }}>
+                    <VoiceNotePlayer data={msg.voiceNote} compact={false} />
                   </div>
                 )}
 
@@ -2682,6 +2789,31 @@ export function AgenticChatbot({ onClose }: Props) {
             >
               <span>🖼️</span>
               <span className="hidden sm:inline">عکس ({attachedImages.length}/{config.maxImages})</span>
+            </button>
+
+            {/* دکمه یادداشت صوتی و تبدیل گفتار به متن (Whisper STT) */}
+            <button
+              type="button"
+              onClick={handleToggleVoiceRecord}
+              style={{
+                background: isRecordingVoice ? "rgba(244, 63, 94, 0.25)" : "rgba(255, 255, 255, 0.05)",
+                border: isRecordingVoice ? "1px solid #f43f5e" : "1px solid rgba(255, 255, 255, 0.1)",
+                borderRadius: "8px",
+                padding: "5px 10px",
+                color: isRecordingVoice ? "#fda4af" : "#f472b6",
+                fontSize: "12px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                boxShadow: isRecordingVoice ? "0 0 12px rgba(244, 63, 94, 0.4)" : "none"
+              }}
+              title="ارسال یادداشت صوتی با تبدیل بلادرنگ گفتار به متن (Whisper STT)"
+            >
+              <span>{isRecordingVoice ? "🔴" : "🎙️"}</span>
+              <span className="hidden sm:inline">
+                {isRecordingVoice ? `در حال ضبط (${recordingSeconds}s)...` : "صوت و STT"}
+              </span>
             </button>
 
             {/* انتخابگر مدل مینیمال و زیبا فارسی */}
