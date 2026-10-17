@@ -66,6 +66,18 @@ class TestRouterAndCatalog(unittest.TestCase):
         chosen, reason, fallbacks = router.choose_model("برنامه پایتون بنویس", available, allow_external=True)
         self.assertEqual(chosen, "gemini/gemini-2.5-flash")
 
+    def test_router_realtime_search_and_grounding(self):
+        router = JRVRouter()
+        res = router.classify_intent("قیمت لحظه‌ای بیت‌کوین و دلار امروز چقدر است؟")
+        self.assertEqual(res["intent"], "realtime_search")
+        self.assertGreaterEqual(res["search_score"], 2)
+
+        grounded, meta = router.ground_prompt("امروز چند شنبه است؟")
+        self.assertTrue(meta["needs_grounding"])
+        self.assertIn("اطلاعات زنده بستر OmniOps", grounded)
+        self.assertIn("تاریخ امروز (هجری شمسی)", grounded)
+        self.assertIn("تاریخ میلادی", grounded)
+
 
 if __name__ == "__main__":
     unittest.main()

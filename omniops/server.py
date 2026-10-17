@@ -209,6 +209,7 @@ def make_server(
                         raise IdentityError('No chat model is available (local or cloud)', 503)
 
                     from .router import JRVRouter
+                    effective_prompt, search_meta = JRVRouter.ground_prompt(effective_prompt)
                     chosen_id, routing_reason, fallback_chain = JRVRouter.choose_model(
                         effective_prompt, all_candidates, allow_external=allow_external
                     )
@@ -218,6 +219,8 @@ def make_server(
                             if cand.startswith(('gemini/', 'openrouter/', 'openai/', 'anthropic/')):
                                 res = external(cand)
                                 res['routing_reason'] = routing_reason
+                                if search_meta.get('needs_grounding'):
+                                    res['search_meta'] = search_meta
                                 return res
                             else:
                                 local_name = cand.split('/', 1)[-1]
@@ -225,6 +228,8 @@ def make_server(
                                 answer = client.chat(local_name, [{'role': 'user', 'content': effective_prompt}])
                                 res = completed({'reply': answer, 'model': cand})
                                 res['routing_reason'] = routing_reason
+                                if search_meta.get('needs_grounding'):
+                                    res['search_meta'] = search_meta
                                 return res
                         except Exception as exc:
                             last_error = exc
@@ -376,10 +381,17 @@ def make_server(
                         return
 
                     from .router import JRVRouter
+                    effective_prompt, search_meta = JRVRouter.ground_prompt(effective_prompt)
                     chosen_id, routing_reason, fallback_chain = JRVRouter.choose_model(
                         effective_prompt, all_candidates, allow_external=allow_external
                     )
-                    send_event({'routing': {'model': chosen_id, 'reason': routing_reason}})
+                    send_event({
+                        'routing': {
+                            'model': chosen_id,
+                            'reason': routing_reason,
+                            'search_meta': search_meta if search_meta.get('needs_grounding') else None
+                        }
+                    })
 
                     for cand in [chosen_id] + fallback_chain:
                         try:
@@ -387,7 +399,13 @@ def make_server(
                                 res = providers.complete(principal, cand, effective_prompt, max_tokens=2048)
                                 reply = res.get('reply', '')
                                 send_event({'chunk': reply, 'model': cand})
-                                send_event({'done': True, 'model': cand, 'reply': reply, 'routing_reason': routing_reason})
+                                send_event({
+                                    'done': True,
+                                    'model': cand,
+                                    'reply': reply,
+                                    'routing_reason': routing_reason,
+                                    'search_meta': search_meta if search_meta.get('needs_grounding') else None
+                                })
                                 if save_history and memory is not None:
                                     memory.remember_chat(principal, prompt.strip(), reply, cand, session_id=session_id)
                                 return
@@ -399,7 +417,13 @@ def make_server(
                                     full_reply_parts.append(chunk)
                                     send_event({'chunk': chunk, 'model': cand})
                                 full_reply = "".join(full_reply_parts)
-                                send_event({'done': True, 'model': cand, 'reply': full_reply, 'routing_reason': routing_reason})
+                                send_event({
+                                    'done': True,
+                                    'model': cand,
+                                    'reply': full_reply,
+                                    'routing_reason': routing_reason,
+                                    'search_meta': search_meta if search_meta.get('needs_grounding') else None
+                                })
                                 if save_history and memory is not None:
                                     memory.remember_chat(principal, prompt.strip(), full_reply, cand, session_id=session_id)
                                 return

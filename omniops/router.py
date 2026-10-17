@@ -144,9 +144,21 @@ LIGHTWEIGHT_PERSIAN_KEYWORDS = [
     "خلاصه کوتاه", "یک جمله بگو", "تعریف کن"
 ]
 
+REALTIME_SEARCH_KEYWORDS = [
+    "امروز", "الان", "تاریخ", "ساعت", "قیمت", "دلار", "ارز", "طلا", "سکه",
+    "بیت‌کوین", "بیت کوین", "اخبار", "جدیدترین", "لحظه‌ای", "آب و هوا",
+    "وضعیت بازار", "آخرین نرخ", "قیمت روز", "نرخ روز", "today", "news", "price"
+]
+
 
 class JRVRouter:
     """Intelligent multi-provider routing and arbitration engine."""
+
+    @staticmethod
+    def ground_prompt(prompt: str) -> Tuple[str, Dict[str, Any]]:
+        """Augments prompt with live temporal and web grounding context."""
+        from .web_search import build_grounded_context
+        return build_grounded_context(prompt)
 
     @staticmethod
     def classify_intent(prompt: str) -> Dict[str, Any]:
@@ -158,6 +170,7 @@ class JRVRouter:
         code_score = 0
         reasoning_score = 0
         lightweight_score = 0
+        search_score = 0
 
         # Code detection
         for pat in CODE_PATTERNS:
@@ -183,6 +196,13 @@ class JRVRouter:
         if reasoning_score >= 2:
             signals.append("تشخیص نیازمندی به تفکر منطقی و محاسباتی")
 
+        # Real-time search & temporal detection
+        for kw in REALTIME_SEARCH_KEYWORDS:
+            if kw in lower:
+                search_score += 2
+        if search_score >= 2:
+            signals.append("نیاز به اطلاعات زنده، تاریخ/ساعت یا وب‌سرچ")
+
         # Long document detection
         is_long = length >= 3500
         if is_long:
@@ -198,11 +218,15 @@ class JRVRouter:
         # Determine dominant intent
         if is_long:
             intent = "long_context"
-        elif code_score >= 2 and code_score >= reasoning_score:
+        elif code_score >= 2 and code_score >= reasoning_score and code_score >= search_score:
             intent = "coding"
-        elif reasoning_score >= 2:
+        elif reasoning_score >= 2 and reasoning_score >= search_score:
             intent = "reasoning"
-        elif lightweight_score >= 2 or (length <= 60 and code_score == 0 and reasoning_score == 0):
+        elif lightweight_score >= 4 and lightweight_score > search_score:
+            intent = "fast_chat"
+        elif search_score >= 2:
+            intent = "realtime_search"
+        elif lightweight_score >= 2 or (length <= 60 and code_score == 0 and reasoning_score == 0 and search_score == 0):
             intent = "fast_chat"
         else:
             intent = "general"
@@ -211,6 +235,7 @@ class JRVRouter:
             "intent": intent,
             "code_score": code_score,
             "reasoning_score": reasoning_score,
+            "search_score": search_score,
             "lightweight_score": lightweight_score,
             "length": length,
             "signals": signals
@@ -305,6 +330,16 @@ class JRVRouter:
                 elif "flash" in model_id.lower() or "mini" in model_id.lower():
                     score += 30.0
 
+            elif intent == "realtime_search":
+                if is_cloud:
+                    score += 90.0
+                    if "gemini" in model_id.lower():
+                        score += 30.0
+                    elif "flash" in model_id.lower():
+                        score += 25.0
+                else:
+                    score += 50.0
+
             else:  # general
                 if cat == "general":
                     score += 70.0
@@ -334,6 +369,7 @@ class JRVRouter:
             "reasoning": "مسئله منطقی، ریاضی یا استدلال عمیق",
             "long_context": "متن طولانی با نیاز به پنجره بافت بالا",
             "fast_chat": "گفتگوی روزمره و پرسش سبک",
+            "realtime_search": "اطلاعات زنده بستر، تاریخ/ساعت یا وب‌سرچ",
             "general": "موضوع عمومی و چندمنظوره"
         }
         intent_label = intent_fa_map.get(intent, "گفتگو")

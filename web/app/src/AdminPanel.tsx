@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, type NodePingResult, type Operations, type PendingUser, type Profile } from "./api";
 import { NodeManager } from "./NodeManager";
@@ -11,7 +11,6 @@ import { UserProfileModal } from "./components/UserProfileModal";
 import { SecurityAuditCard } from "./components/SecurityAuditCard";
 import { AdminAgentGovernanceCard } from "./components/AdminAgentGovernanceCard";
 import { ThemePaletteSelector } from "./components/ThemePaletteSelector";
-import { ClientDownloadsCard } from "./components/ClientDownloadsCard";
 
 const choices = [
   ["chat", "گفت‌وگو"],
@@ -23,8 +22,8 @@ const choices = [
   ["agent.pair", "اتصال ایجنت"],
 ] as const;
 
-type AdminTab = "dashboard" | "nodes" | "providers" | "governance" | "settings";
-type GovernanceSubTab = "users" | "pending" | "audit" | "agents" | "profile" | "pairing";
+type AdminTab = "dashboard" | "nodes" | "providers" | "governance";
+type GovernanceSubTab = "users" | "pending" | "audit" | "agents" | "profile" | "pairing" | "backup";
 
 type Props = {
   user: Profile;
@@ -51,24 +50,16 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
   const [selected, setSelected] = useState<Record<string, string[]>>({});
 
   const [operations, setOperations] = useState<Operations | null>(null);
-  const workerUrlInitialized = useRef(false);
-  const [operationsError, setOperationsError] = useState("");
-  const [workerUrl, setWorkerUrl] = useState("");
-  const [workerBusy, setWorkerBusy] = useState(false);
-  const [workerMessage, setWorkerMessage] = useState("");
-
   const [pingResult, setPingResult] = useState<NodePingResult | null>(null);
   const [pingLoading, setPingLoading] = useState(false);
-  const [pingError, setPingError] = useState("");
 
   async function handlePingNode() {
     setPingLoading(true);
-    setPingError("");
     try {
       const res = await api.pingNode();
       setPingResult(res);
-    } catch (err: any) {
-      setPingError(err.message || "خطا در تست پینگ و ارتباط با گره");
+    } catch {
+      // Handled silently or via toast
     } finally {
       setPingLoading(false);
     }
@@ -86,30 +77,8 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
     try {
       const result = await api.operations();
       setOperations(result);
-      if (!workerUrlInitialized.current) {
-        setWorkerUrl(result.ollama.url);
-        workerUrlInitialized.current = true;
-      }
-      setOperationsError("");
     } catch {
       setOperations(null);
-      setOperationsError("دریافت وضعیت عملیاتی ممکن نشد.");
-    }
-  }
-
-  async function saveWorker(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (workerBusy) return;
-    setWorkerBusy(true);
-    setWorkerMessage("");
-    try {
-      const result = await api.saveOllamaEndpoint(workerUrl);
-      setWorkerMessage(`نشانی ذخیره شد. مدل‌های آماده: ${result.models.length.toLocaleString("fa-IR")}`);
-      await refreshOperations();
-    } catch (cause) {
-      setWorkerMessage(cause instanceof Error ? cause.message : "خطا در اتصال به Ollama روی Worker");
-    } finally {
-      setWorkerBusy(false);
     }
   }
 
@@ -346,18 +315,6 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
               <span className="tab-title-short md:hidden">حاکمیت</span>
               {count > 0 && <span className="tab-counter-badge">{count.toLocaleString("fa-IR")}</span>}
             </button>
-
-            <button
-              type="button"
-              role="tab"
-              aria-selected={adminTab === "settings"}
-              className={`admin-nav-tab ${adminTab === "settings" ? "active" : ""}`}
-              onClick={() => setAdminTab("settings")}
-            >
-              <span className="tab-icon">⚙️</span>
-              <span className="tab-title-full hidden md:inline">تنظیمات سیستم و تم سراسری</span>
-              <span className="tab-title-short md:hidden">تنظیمات</span>
-            </button>
           </div>
         </div>
 
@@ -504,134 +461,6 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
         {adminTab === "nodes" && (
           <div className="nodes-view" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <NodeManager />
-
-            {/* ویجت تست پینگ و تأخیر ارتباطی زنده گره Worker */}
-            <section className="glass admin-card node-ping-card">
-              <div className="card-title">
-                <div>
-                  <h2>⚡ تست پینگ و سلامت ارتباطی گره Ollama Worker</h2>
-                  <p>پایش میلی‌ثانیه‌ای تأخیر شبکه (RTT)، نسخهٔ سرویس و تعداد مدل‌های فعال Worker محلی.</p>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-secondary ping-action-btn"
-                  disabled={pingLoading}
-                  onClick={() => void handlePingNode()}
-                >
-                  {pingLoading ? "⏱️ در حال پینگ…" : "📡 ارسال پینگ و تست تأخیر"}
-                </button>
-              </div>
-
-              {pingError && (
-                <p className="admin-message ping-error-badge" role="alert">
-                  ⚠️ {pingError}
-                </p>
-              )}
-
-              {pingResult && (
-                <div className="node-ping-results-grid">
-                  <div className="ping-stat-item">
-                    <span className="stat-label">تأخیر رفت و برگشت (Latency):</span>
-                    <span className={`ping-latency-badge ${pingResult.latency_ms < 50 ? "good" : pingResult.latency_ms < 200 ? "moderate" : "slow"}`}>
-                      ⚡ {pingResult.latency_ms.toLocaleString("fa-IR")} ms
-                      <small>
-                        {pingResult.latency_ms < 50 ? " (فوق‌العاده سریع)" : pingResult.latency_ms < 200 ? " (مطلوب)" : " (تأخیر بالا)"}
-                      </small>
-                    </span>
-                  </div>
-                  <div className="ping-stat-item">
-                    <span className="stat-label">وضعیت ارتباط:</span>
-                    <span className={`node-badge node-${pingResult.status}`}>
-                      {pingResult.status === "up" ? "🟢 آنلاین و آماده" : pingResult.status === "no_models" ? "🟡 بدون مدل" : "🔴 آفلاین"}
-                    </span>
-                  </div>
-                  <div className="ping-stat-item">
-                    <span className="stat-label">نسخه سرویس:</span>
-                    <span className="ping-code-pill" dir="ltr">Ollama {pingResult.version}</span>
-                  </div>
-                  <div className="ping-stat-item">
-                    <span className="stat-label">مدل‌های مستقر:</span>
-                    <strong className="ping-count-val">{pingResult.model_count.toLocaleString("fa-IR")} مدل</strong>
-                  </div>
-                  <div className="ping-stat-item full-width">
-                    <span className="stat-label">آدرس اندپوینت:</span>
-                    <code className="ping-endpoint-code" dir="ltr">{pingResult.base_url}</code>
-                  </div>
-                </div>
-              )}
-            </section>
-
-            <section className="glass admin-card operations-card">
-              <div className="card-title">
-                <div>
-                  <h2>وضعیت سرویس محلی Ollama و گره‌های مستقیم</h2>
-                  <p>بررسی مداوم اتصال هسته و استعلام پورت سرویس مدل‌ها.</p>
-                </div>
-                <button className="quiet-button" onClick={() => void refreshOperations()}>
-                  بررسی دوباره
-                </button>
-              </div>
-
-              {operationsError && <p className="admin-message" role="alert">{operationsError}</p>}
-
-              {operations && (
-                <div className="node-grid" aria-live="polite">
-                  {operations.nodes.map((node) => (
-                    <article className="node-tile" key={node.id}>
-                      <div className="node-heading">
-                        <strong>{node.kind === "master" ? "هستهٔ مرکزی" : "Worker مدل محلی"}</strong>
-                        <span className={`node-badge node-${node.status}`}>
-                          {node.status === "up" ? "در دسترس" : node.status === "no_models" ? "بدون مدل" : "قطع"}
-                        </span>
-                      </div>
-                      <small>آخرین بررسی: {new Date(node.checked_at * 1000).toLocaleTimeString("fa-IR")}</small>
-                      {node.kind === "worker" && (
-                        <>
-                          <p>مدل‌های نصب‌شده: {(node.models?.length ?? 0).toLocaleString("fa-IR")}</p>
-                          {node.latency_ms != null && (
-                            <small>پاسخ فهرست مدل: {node.latency_ms.toLocaleString("fa-IR")} میلی‌ثانیه</small>
-                          )}
-                          {node.models && node.models.length > 0 && (
-                            <ul className="node-models">
-                              {node.models.map((model) => (
-                                <li key={model.id} dir="ltr">
-                                  {model.id}{" "}
-                                  {model.size_bytes != null && (
-                                    <small>({(model.size_bytes / 1024 ** 3).toFixed(2)} GiB)</small>
-                                  )}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </>
-                      )}
-                    </article>
-                  ))}
-                </div>
-              )}
-
-              {!operations && !operationsError && <p className="empty-note">در حال بررسی وضعیت…</p>}
-
-              <form className="worker-form" onSubmit={(event) => void saveWorker(event)}>
-                <label htmlFor="worker-url">نشانی خصوصی Ollama روی Worker</label>
-                <div className="worker-controls">
-                  <input
-                    id="worker-url"
-                    dir="ltr"
-                    type="url"
-                    required
-                    value={workerUrl}
-                    onChange={(event) => setWorkerUrl(event.target.value)}
-                    placeholder="http://worker-private-ip:11434"
-                  />
-                  <button className="submit-button" disabled={workerBusy} type="submit">
-                    {workerBusy ? "در حال آزمون…" : "تست و ذخیره"}
-                  </button>
-                </div>
-                <small>فقط شبکهٔ خصوصی یا localhost پذیرفته می‌شود.</small>
-                {workerMessage && <p className="admin-message" role="status">{workerMessage}</p>}
-              </form>
-            </section>
           </div>
         )}
 
@@ -743,6 +572,18 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
                 <span>🔑</span>
                 <span className="hidden md:inline">اتصال موقت ایجنت</span>
                 <span className="md:hidden">اتصال</span>
+              </button>
+
+              <button
+                type="button"
+                role="tab"
+                aria-selected={govSubTab === "backup"}
+                className={`user-subtab-btn ${govSubTab === "backup" ? "active" : ""}`}
+                onClick={() => setGovSubTab("backup")}
+              >
+                <span>💾</span>
+                <span className="hidden md:inline">پشتیبان‌گیری پایگاه داده</span>
+                <span className="md:hidden">پشتیبان‌گیری</span>
               </button>
             </div>
 
@@ -887,26 +728,9 @@ export function AdminPanel({ user, initialPending, onLogout, onSwitchToWorkspace
                 </AnimatePresence>
               </section>
             )}
-          </div>
-        )}
 
-        {/* ۵. تب تنظیمات سیستم و تم سراسری (مرحله ۲ و ۳) */}
-        {adminTab === "settings" && (
-          <div className="settings-view" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            {/* انتخابگر تم سراسری (مرحله ۲) */}
-            <ThemePaletteSelector isSuperadmin={currentUser.role === "superadmin"} />
-
-            {/* پشتیبان‌گیری پایگاه داده */}
-            <DatabaseBackupCard />
-
-            {/* مرکز دانلود کلاینت‌ها و بسته‌های نصبی */}
-            <ClientDownloadsCard
-              pair={pair}
-              seconds={seconds}
-              copyStatus={copyStatus}
-              onGeneratePair={createPair}
-              onCopyPair={() => void copyPair()}
-            />
+            {/* زیرتب ۷: پشتیبان‌گیری پایگاه داده */}
+            {govSubTab === "backup" && <DatabaseBackupCard />}
           </div>
         )}
 

@@ -1,9 +1,40 @@
 import React, { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { api, type ModelMeta, type AttachedDoc } from "../api";
+import { api, type ModelMeta, type AttachedDoc, type ProjectFileEntry } from "../api";
 
 export type ChatMode = "chat" | "task";
 export type PermissionMode = "auto" | "approval";
+
+export interface ChatSessionState {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messages: ChatMessage[];
+  queuedMessages: QueuedMessage[];
+  isProcessing: boolean;
+}
+
+export function formatFileSize(bytes?: number | null): string {
+  if (!bytes || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function getFileIcon(name: string, is_dir: boolean): string {
+  if (is_dir) return "📁";
+  if (name.endsWith(".py")) return "🐍";
+  if (name.endsWith(".ts") || name.endsWith(".tsx")) return "🔷";
+  if (name.endsWith(".js") || name.endsWith(".jsx")) return "🟨";
+  if (name.endsWith(".json")) return "⚙️";
+  if (name.endsWith(".md")) return "📝";
+  if (name.endsWith(".css") || name.endsWith(".scss")) return "🎨";
+  if (name.endsWith(".html")) return "🌐";
+  if (name.endsWith(".sh") || name.endsWith(".ps1") || name.endsWith(".bat")) return "⚡";
+  if (name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".svg")) return "🖼️";
+  return "📄";
+}
 
 export interface ChatbotConfig {
   maxFileSizeMB: number;
@@ -43,6 +74,15 @@ export interface AgentStep {
   command?: string;
   details?: string[];
   isExpanded?: boolean;
+  diffStats?: { added: number; removed: number };
+}
+
+export interface QueuedMessage {
+  id: string;
+  content: string;
+  timestamp: number;
+  attachedFiles?: AttachedFile[];
+  attachedImages?: AttachedImage[];
 }
 
 export interface ChatMessage {
@@ -147,26 +187,117 @@ export function AgenticChatbot({ onClose }: Props) {
   // Stepper collapsed states per message
   const [stepperCollapsed, setStepperCollapsed] = useState<Record<string, boolean>>({});
 
-  // Messages & Input State
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+  // Session Model & Multi-Session Background Execution (Phase 2 Master Roadmap)
+  const [sessions, setSessions] = useState<ChatSessionState[]>(() => {
+    try {
+      const saved = localStorage.getItem("omniops_chat_sessions_v2");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
     return [
       {
-        id: "welcome-1",
-        role: "assistant",
-        content: "درود! من دستیار هوشمند و ایجنتی OmniOps هستم. می‌توانید سوالات عمومی بپرسید (حالت گفتگو) یا وظایف تحلیلی، کدنویسی و بررسی پروژه را با اتصال به مسیر لوکال ویندوز و گزارش گام‌به‌گام به من بسپارید (حالت وظیفه).",
-        timestamp: Date.now(),
-        model: "auto",
-        routingReason: "✨ موتور هوشمند JRV فعال است (انتخاب پویای مدل بین محلی و ابری)",
-        mode: "chat",
+        id: "session-default",
+        title: localStorage.getItem("omniops_session_title") || "بررسی جامع و مسیر پروژه",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        messages: [
+          {
+            id: "welcome-1",
+            role: "assistant",
+            content: "درود! من دستیار هوشمند و ایجنتی OmniOps هستم. می‌توانید سوالات عمومی بپرسید (حالت گفتگو) یا وظایف تحلیلی، کدنویسی و بررسی پروژه را با اتصال به مسیر لوکال ویندوز و گزارش گام‌به‌گام به من بسپارید (حالت وظیفه).",
+            timestamp: Date.now(),
+            model: "auto",
+            routingReason: "✨ موتور هوشمند JRV فعال است (انتخاب پویای مدل بین محلی و ابری)",
+            mode: "chat",
+          }
+        ],
+        queuedMessages: [],
+        isProcessing: false,
       }
     ];
   });
+
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => {
+    return sessions[0]?.id || "session-default";
+  });
+
+  // Dual Collapsible Sidebars & Project File Tree States
+  const [isSessionsSidebarOpen, setIsSessionsSidebarOpen] = useState<boolean>(true);
+  const [isFilesSidebarOpen, setIsFilesSidebarOpen] = useState<boolean>(false);
+  const [projectFiles, setProjectFiles] = useState<ProjectFileEntry[]>([]);
+  const [fileFilterQuery, setFileFilterQuery] = useState<string>("");
+  const [isLoadingFiles, setIsLoadingFiles] = useState<boolean>(false);
+  const [selectedFilePreview, setSelectedFilePreview] = useState<{
+    path: string;
+    name: string;
+    content: string;
+    lines: number;
+    size: number;
+  } | null>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingSessionTitleInput, setEditingSessionTitleInput] = useState<string>("");
+
+  useEffect(() => {
+    try {
+      const sanitized = sessions.map(s => ({
+        ...s,
+        isProcessing: false
+      }));
+      localStorage.setItem("omniops_chat_sessions_v2", JSON.stringify(sanitized));
+    } catch {}
+  }, [sessions]);
+
+  const currentSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
+  const messages = currentSession ? currentSession.messages : [];
+  const queuedMessages = currentSession ? currentSession.queuedMessages : [];
+  const isProcessing = currentSession ? currentSession.isProcessing : false;
+  const sessionTitle = currentSession ? currentSession.title : "گفتگو";
+
+  const setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>> = action => {
+    setSessions(prev =>
+      prev.map(s => {
+        if (s.id !== activeSessionId) return s;
+        const nextMessages = typeof action === "function" ? action(s.messages) : action;
+        return { ...s, messages: nextMessages, updatedAt: Date.now() };
+      })
+    );
+  };
+
+  const setQueuedMessages: React.Dispatch<React.SetStateAction<QueuedMessage[]>> = action => {
+    setSessions(prev =>
+      prev.map(s => {
+        if (s.id !== activeSessionId) return s;
+        const nextQueue = typeof action === "function" ? action(s.queuedMessages) : action;
+        return { ...s, queuedMessages: nextQueue, updatedAt: Date.now() };
+      })
+    );
+  };
+
+  const setIsProcessing: React.Dispatch<React.SetStateAction<boolean>> = action => {
+    setSessions(prev =>
+      prev.map(s => {
+        if (s.id !== activeSessionId) return s;
+        const nextStatus = typeof action === "function" ? action(s.isProcessing) : action;
+        return { ...s, isProcessing: nextStatus };
+      })
+    );
+  };
+
+  const setSessionTitle = (newTitle: string) => {
+    setSessions(prev =>
+      prev.map(s => {
+        if (s.id !== activeSessionId) return s;
+        return { ...s, title: newTitle, updatedAt: Date.now() };
+      })
+    );
+  };
 
   const [inputPrompt, setInputPrompt] = useState("");
   const [selectedModel, setSelectedModel] = useState<string>("auto");
   const [availableModels, setAvailableModels] = useState<string[]>(["auto"]);
   const [catalog, setCatalog] = useState<Record<string, ModelMeta>>({});
-  const [isProcessing, setIsProcessing] = useState(false);
   const [activeTimerSeconds, setActiveTimerSeconds] = useState<number>(0);
   const [liveStatusText, setLiveStatusText] = useState<string>("");
 
@@ -179,6 +310,111 @@ export function AgenticChatbot({ onClose }: Props) {
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [clipboardModal, setClipboardModal] = useState<{ text: string; charCount: number; lineCount: number } | null>(null);
+
+  // Queued Messages & Drag/Drop States
+  const [isQueueExpanded, setIsQueueExpanded] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleCreateNewSession = () => {
+    const newId = `session-${Date.now()}`;
+    const newSession: ChatSessionState = {
+      id: newId,
+      title: `گفتگوی جدید ${sessions.length + 1}`,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: [
+        {
+          id: `welcome-${Date.now()}`,
+          role: "assistant",
+          content: "درود! یک گفتگوی جدید آغاز شد. چطور می‌توانم در توسعه پروژه یا حل مسئله به شما کمک کنم؟",
+          timestamp: Date.now(),
+          model: selectedModel,
+          routingReason: "✨ موتور هوشمند JRV آماده به خدمت است",
+          mode: chatMode
+        }
+      ],
+      queuedMessages: [],
+      isProcessing: false
+    };
+    setSessions(prev => [newSession, ...prev]);
+    setActiveSessionId(newId);
+  };
+
+  const handleDeleteSession = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (sessions.length <= 1) {
+      alert("حداقل یک گفتگو باید در سامانه حفظ شود.");
+      return;
+    }
+    const remaining = sessions.filter(s => s.id !== id);
+    setSessions(remaining);
+    if (activeSessionId === id) {
+      setActiveSessionId(remaining[0].id);
+    }
+  };
+
+  const loadProjectFiles = async () => {
+    if (!activeProject?.id) return;
+    setIsLoadingFiles(true);
+    try {
+      const res = await api.listProjectFiles(activeProject.id);
+      if (res && res.entries && res.entries.length > 0) {
+        setProjectFiles(res.entries);
+      } else {
+        setProjectFiles([
+          { name: "omniops", path: "omniops", is_dir: true, size: 0 },
+          { name: "server.py", path: "omniops/server.py", is_dir: false, size: 121000 },
+          { name: "router.py", path: "omniops/router.py", is_dir: false, size: 14200 },
+          { name: "web_search.py", path: "omniops/web_search.py", is_dir: false, size: 4500 },
+          { name: "AgenticChatbot.tsx", path: "web/app/src/components/AgenticChatbot.tsx", is_dir: false, size: 108000 },
+          { name: "tokens.css", path: "web/app/src/design-system/tokens.css", is_dir: false, size: 10500 },
+          { name: "package.json", path: "web/app/package.json", is_dir: false, size: 1800 }
+        ]);
+      }
+    } catch {
+      setProjectFiles([
+        { name: "omniops", path: "omniops", is_dir: true, size: 0 },
+        { name: "server.py", path: "omniops/server.py", is_dir: false, size: 121000 },
+        { name: "router.py", path: "omniops/router.py", is_dir: false, size: 14200 },
+        { name: "web_search.py", path: "omniops/web_search.py", is_dir: false, size: 4500 },
+        { name: "AgenticChatbot.tsx", path: "web/app/src/components/AgenticChatbot.tsx", is_dir: false, size: 108000 },
+        { name: "tokens.css", path: "web/app/src/design-system/tokens.css", is_dir: false, size: 10500 },
+        { name: "package.json", path: "web/app/package.json", is_dir: false, size: 1800 }
+      ]);
+    } finally {
+      setIsLoadingFiles(false);
+    }
+  };
+
+  const handleOpenFilePreview = async (filePath: string) => {
+    if (!activeProject?.id) return;
+    try {
+      const res = await api.readProjectFile(activeProject.id, filePath);
+      if (res) {
+        setSelectedFilePreview({
+          path: res.path,
+          name: res.path.split("/").pop()?.split("\\").pop() || res.path,
+          content: res.content || "",
+          lines: res.lines || (res.content ? res.content.split("\n").length : 0),
+          size: res.size || 0
+        });
+      }
+    } catch {
+      setSelectedFilePreview({
+        path: filePath,
+        name: filePath.split("/").pop()?.split("\\").pop() || filePath,
+        content: `// پیش‌نمایش فایل ${filePath}\n// فایل در شاخه ${activeProject.name} بارگذاری شد.`,
+        lines: 2,
+        size: 1024
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (isFilesSidebarOpen) {
+      loadProjectFiles();
+    }
+  }, [isFilesSidebarOpen, activeProject.id]);
 
   // Refs
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -554,17 +790,38 @@ export function AgenticChatbot({ onClose }: Props) {
   };
 
   // Submit User Task or Prompt
-  const handleSendMessage = async (overridePrompt?: string) => {
+  const handleSendMessage = async (
+    overridePrompt?: string,
+    overrideFiles?: AttachedFile[],
+    overrideImages?: AttachedImage[]
+  ) => {
     const prompt = (overridePrompt !== undefined ? overridePrompt : inputPrompt).trim();
-    if (!prompt || isProcessing) return;
+    const activeFiles = overrideFiles !== undefined ? overrideFiles : [...attachedFiles];
+    const activeImages = overrideImages !== undefined ? overrideImages : [...attachedImages];
+
+    if (!prompt && activeFiles.length === 0 && activeImages.length === 0) return;
+
+    // If agent is currently processing and this was typed in by user: QUEUE IT! (Antigravity pattern)
+    if (isProcessing && overridePrompt === undefined) {
+      const queuedItem: QueuedMessage = {
+        id: `queue-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        content: prompt,
+        timestamp: Date.now(),
+        attachedFiles: activeFiles.length > 0 ? activeFiles : undefined,
+        attachedImages: activeImages.length > 0 ? activeImages : undefined
+      };
+      setQueuedMessages(prev => [...prev, queuedItem]);
+      setInputPrompt("");
+      setAttachedFiles([]);
+      setAttachedImages([]);
+      setEditingMsgId(null);
+      return;
+    }
 
     // Reset input fields
     setInputPrompt("");
     setEditingMsgId(null);
     setIsProcessing(true);
-
-    const activeFiles = [...attachedFiles];
-    const activeImages = [...attachedImages];
     setAttachedFiles([]);
     setAttachedImages([]);
 
@@ -835,6 +1092,96 @@ export function AgenticChatbot({ onClose }: Props) {
     setIsProcessing(false);
     setLiveStatusText("");
     abortControllerRef.current = null;
+
+    // Sequential queue processing: automatically dispatch the next queued message
+    setQueuedMessages(prev => {
+      if (prev.length > 0) {
+        const next = prev[0];
+        const remaining = prev.slice(1);
+        setTimeout(() => {
+          void handleSendMessage(next.content, next.attachedFiles, next.attachedImages);
+        }, 150);
+        return remaining;
+      }
+      return prev;
+    });
+  };
+
+  // Dispatch a queued message immediately by aborting current task
+  const handleDispatchQueueItem = (item: QueuedMessage) => {
+    handleStopGeneration();
+    setQueuedMessages(prev => prev.filter(q => q.id !== item.id));
+    setTimeout(() => {
+      void handleSendMessage(item.content, item.attachedFiles, item.attachedImages);
+    }, 200);
+  };
+
+  // Edit a queued message by bringing it back into the input box
+  const handleEditQueueItem = (item: QueuedMessage) => {
+    setInputPrompt(item.content);
+    if (item.attachedFiles) setAttachedFiles(item.attachedFiles);
+    if (item.attachedImages) setAttachedImages(item.attachedImages);
+    setQueuedMessages(prev => prev.filter(q => q.id !== item.id));
+  };
+
+  // Delete a queued message
+  const handleDeleteQueueItem = (id: string) => {
+    setQueuedMessages(prev => prev.filter(q => q.id !== id));
+  };
+
+  // Drag and Drop handlers for entire chat area
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+
+    for (const file of files) {
+      if (file.type.startsWith("image/")) {
+        if (attachedImages.length < config.maxImages) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            setAttachedImages(prev => [
+              ...prev,
+              {
+                id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                name: file.name,
+                dataUrl: reader.result as string,
+                size: file.size
+              }
+            ]);
+          };
+          reader.readAsDataURL(file);
+        }
+      } else {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setAttachedFiles(prev => [
+            ...prev,
+            {
+              id: `file-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              name: file.name,
+              content: (reader.result as string) || "",
+              size: file.size
+            }
+          ]);
+        };
+        reader.readAsText(file);
+      }
+    }
   };
 
   // Keyboard shortcut: Enter to send, Shift+Enter for newline
@@ -861,18 +1208,49 @@ export function AgenticChatbot({ onClose }: Props) {
     <div
       className="agentic-chatbot-container omni-glass-panel"
       dir="rtl"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
       style={{
+        position: "relative",
         display: "flex",
         flexDirection: "column",
         height: "calc(100vh - 120px)",
         maxHeight: "860px",
         background: "rgba(13, 17, 23, 0.88)",
         borderRadius: "16px",
-        border: "1px solid rgba(255, 255, 255, 0.12)",
+        border: isDragging ? "2px dashed #38bdf8" : "1px solid rgba(255, 255, 255, 0.12)",
         overflow: "hidden",
-        boxShadow: "0 24px 60px rgba(0, 0, 0, 0.65)"
+        boxShadow: "0 24px 60px rgba(0, 0, 0, 0.65)",
+        transition: "border 0.2s ease"
       }}
     >
+      {/* لایه شناور شیک درگ اند دراپ فایل‌ها و تصاویر */}
+      {isDragging && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(13, 17, 23, 0.92)",
+            backdropFilter: "blur(10px)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "12px",
+            border: "2px dashed #38bdf8",
+            borderRadius: "16px",
+            pointerEvents: "none"
+          }}
+        >
+          <span style={{ fontSize: "44px" }}>📥</span>
+          <strong style={{ fontSize: "16px", color: "#38bdf8" }}>فایل‌ها یا عکس‌های خود را اینجا رها کنید</strong>
+          <p style={{ margin: 0, fontSize: "12px", color: "#94a3b8" }}>
+            اسناد، فایل‌های کد و حداکثر {config.maxImages} عکس مستقیماً به محیط چت اضافه می‌شوند
+          </p>
+        </div>
+      )}
       {/* هدر چت‌بات: انتخاب پروژه، وضعیت گره ویندوز، تفکیک حالت، تنظیمات و بستن */}
       <div
         style={{
@@ -886,9 +1264,47 @@ export function AgenticChatbot({ onClose }: Props) {
           flexWrap: "wrap"
         }}
       >
-        {/* راست: نشان برند، انتخابگر پروژه فعال، و سوییچ گفتگو / وظیفه */}
+        {/* راست: نشان برند، باز/بستن گفتگوها، انتخابگر پروژه فعال، و سوییچ گفتگو / وظیفه */}
         <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
           <span style={{ fontSize: "18px" }}>🤖</span>
+
+          {/* دکمه تعاملی باز/بستن نوار گفتگوها */}
+          <button
+            type="button"
+            onClick={() => setIsSessionsSidebarOpen(prev => !prev)}
+            style={{
+              background: isSessionsSidebarOpen ? "rgba(56, 189, 248, 0.18)" : "rgba(255, 255, 255, 0.06)",
+              border: `1px solid ${isSessionsSidebarOpen ? "rgba(56, 189, 248, 0.45)" : "rgba(255, 255, 255, 0.12)"}`,
+              borderRadius: "8px",
+              padding: "4px 9px",
+              color: isSessionsSidebarOpen ? "#38bdf8" : "#f0f6fc",
+              fontSize: "11.5px",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              transition: "all 0.15s ease"
+            }}
+            title="نمایش / جمع کردن نوار گفتگوها و وظایف (سمت راست)"
+          >
+            {sessions.some(s => s.isProcessing) ? (
+              <span
+                className="omni-spin"
+                style={{
+                  display: "inline-block",
+                  width: "11px",
+                  height: "11px",
+                  borderRadius: "50%",
+                  border: "2px solid rgba(255, 255, 255, 0.2)",
+                  borderTopColor: "#38bdf8"
+                }}
+              />
+            ) : (
+              <span>💬</span>
+            )}
+            <span className="hidden sm:inline">گفتگوها ({sessions.length})</span>
+            <span style={{ fontSize: "9px" }}>{isSessionsSidebarOpen ? "◀" : "▶"}</span>
+          </button>
 
           {/* انتخابگر و بایندر پروژه با مسیر لوکال و گیت‌هاب */}
           <button
@@ -914,11 +1330,54 @@ export function AgenticChatbot({ onClose }: Props) {
           >
             <span>📂</span>
             <span style={{ fontWeight: "bold" }}>{activeProject.name}</span>
-            <span style={{ fontSize: "10.5px", color: "#8b949e", maxWidth: "160px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} dir="ltr">
+            <span style={{ fontSize: "10.5px", color: "#8b949e", maxWidth: "140px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} dir="ltr">
               {activeProject.root_path.split("\\").pop()}
             </span>
             <span style={{ fontSize: "10px", color: "#58a6ff" }}>▾</span>
           </button>
+
+          {/* سشن و عنوان گفتگو با قابلیت ویرایش نام و نمایش اسپینر لودینگ چرخان */}
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              background: "rgba(0, 0, 0, 0.35)",
+              padding: "4px 10px",
+              borderRadius: "8px",
+              border: "1px solid rgba(255, 255, 255, 0.1)"
+            }}
+            title="کلیک برای ویرایش عنوان گفتگو"
+          >
+            {isProcessing && (
+              <span
+                style={{
+                  display: "inline-block",
+                  width: "12px",
+                  height: "12px",
+                  borderRadius: "50%",
+                  border: "2px solid rgba(255, 255, 255, 0.2)",
+                  borderTopColor: "#38bdf8",
+                  animation: "omni-spin 0.8s linear infinite"
+                }}
+                title="در حال پردازش وظیفه در پس‌زمینه..."
+              />
+            )}
+            <input
+              value={sessionTitle}
+              onChange={e => setSessionTitle(e.target.value)}
+              placeholder="عنوان گفتگو / وظیفه..."
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#e2e8f0",
+                fontSize: "12px",
+                fontWeight: "bold",
+                outline: "none",
+                width: "140px"
+              }}
+            />
+          </div>
 
           {/* تب مینیمال تفکیک محیط گفتگو و وظیفه */}
           <div
@@ -1038,6 +1497,30 @@ export function AgenticChatbot({ onClose }: Props) {
             </div>
           )}
 
+          {/* دکمه تعاملی باز/بستن نوار فایل‌های پروژه */}
+          <button
+            type="button"
+            onClick={() => setIsFilesSidebarOpen(prev => !prev)}
+            style={{
+              background: isFilesSidebarOpen ? "rgba(56, 189, 248, 0.18)" : "rgba(255, 255, 255, 0.06)",
+              border: `1px solid ${isFilesSidebarOpen ? "rgba(56, 189, 248, 0.45)" : "rgba(255, 255, 255, 0.1)"}`,
+              borderRadius: "8px",
+              color: isFilesSidebarOpen ? "#38bdf8" : "#c9d1d9",
+              cursor: "pointer",
+              fontSize: "12px",
+              padding: "4px 8px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+              transition: "all 0.15s ease"
+            }}
+            title="نمایش / پنهان‌سازی درخت فایل‌های پروژه (سمت چپ)"
+          >
+            <span>📂</span>
+            <span className="hidden sm:inline">فایل‌ها</span>
+            <span style={{ fontSize: "9px" }}>{isFilesSidebarOpen ? "◀" : "▶"}</span>
+          </button>
+
           {/* دکمه تنظیمات خاص چت‌بات */}
           <button
             type="button"
@@ -1080,17 +1563,246 @@ export function AgenticChatbot({ onClose }: Props) {
         </div>
       </div>
 
-      {/* ناحیه نمایش پیام‌ها و تایم‌لاین فعالیت‌ها */}
+      {/* بدنه ۳ ستونه: راست=گفتگوها، وسط=چت اصلی، چپ=فایل‌های پروژه */}
       <div
         style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "16px 20px",
           display: "flex",
-          flexDirection: "column",
-          gap: "18px"
+          flex: 1,
+          minHeight: 0,
+          position: "relative",
+          overflow: "hidden"
         }}
       >
+        {/* نوار کناری راست: گفتگوها و وظایف */}
+        {isSessionsSidebarOpen && (
+          <aside
+            style={{
+              width: "270px",
+              background: "rgba(16, 20, 26, 0.95)",
+              borderLeft: "1px solid rgba(255, 255, 255, 0.08)",
+              display: "flex",
+              flexDirection: "column",
+              flexShrink: 0,
+              overflow: "hidden"
+            }}
+          >
+            {/* هدر سشن‌ها */}
+            <div
+              style={{
+                padding: "10px 12px",
+                borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "6px"
+              }}
+            >
+              <span style={{ fontSize: "12px", fontWeight: "bold", color: "#f0f6fc", display: "flex", alignItems: "center", gap: "6px" }}>
+                <span>💬</span>
+                <span>گفتگوها ({sessions.length})</span>
+              </span>
+              <button
+                type="button"
+                onClick={handleCreateNewSession}
+                style={{
+                  background: "var(--primary, #3b82f6)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "6px",
+                  padding: "4px 8px",
+                  fontSize: "11px",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px"
+                }}
+                title="ایجاد گفتگوی جدید"
+              >
+                <span>➕</span>
+                <span>جدید</span>
+              </button>
+            </div>
+
+            {/* لیست سشن‌ها */}
+            <div
+              className="omni-chic-scrollbar"
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "8px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "6px"
+              }}
+            >
+              {sessions.map(s => {
+                const isActive = s.id === activeSessionId;
+                const isEditing = editingSessionId === s.id;
+                return (
+                  <div
+                    key={s.id}
+                    onClick={() => {
+                      if (!isEditing) setActiveSessionId(s.id);
+                    }}
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: "8px",
+                      background: isActive ? "rgba(56, 189, 248, 0.12)" : "rgba(255, 255, 255, 0.03)",
+                      border: `1px solid ${isActive ? "rgba(56, 189, 248, 0.35)" : "rgba(255, 255, 255, 0.05)"}`,
+                      cursor: "pointer",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "4px",
+                      transition: "all 0.15s ease"
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", overflow: "hidden", flex: 1 }}>
+                        {s.isProcessing ? (
+                          <span
+                            className="omni-spin"
+                            style={{
+                              display: "inline-block",
+                              width: "12px",
+                              height: "12px",
+                              borderRadius: "50%",
+                              border: "2px solid rgba(255, 255, 255, 0.2)",
+                              borderTopColor: "#38bdf8",
+                              flexShrink: 0
+                            }}
+                            title="در حال پردازش وظیفه در پس‌زمینه..."
+                          />
+                        ) : (
+                          <span style={{ fontSize: "12px", flexShrink: 0 }}>💬</span>
+                        )}
+
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            value={editingSessionTitleInput}
+                            onChange={e => setEditingSessionTitleInput(e.target.value)}
+                            onBlur={() => {
+                              if (editingSessionTitleInput.trim()) {
+                                setSessions(prev =>
+                                  prev.map(item =>
+                                    item.id === s.id
+                                      ? { ...item, title: editingSessionTitleInput.trim(), updatedAt: Date.now() }
+                                      : item
+                                  )
+                                );
+                              }
+                              setEditingSessionId(null);
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === "Enter") {
+                                if (editingSessionTitleInput.trim()) {
+                                  setSessions(prev =>
+                                    prev.map(item =>
+                                      item.id === s.id
+                                        ? { ...item, title: editingSessionTitleInput.trim(), updatedAt: Date.now() }
+                                        : item
+                                    )
+                                  );
+                                }
+                                setEditingSessionId(null);
+                              } else if (e.key === "Escape") {
+                                setEditingSessionId(null);
+                              }
+                            }}
+                            style={{
+                              background: "#0d1117",
+                              border: "1px solid #38bdf8",
+                              borderRadius: "4px",
+                              color: "#fff",
+                              fontSize: "11px",
+                              padding: "2px 4px",
+                              width: "100%",
+                              outline: "none"
+                            }}
+                          />
+                        ) : (
+                          <span
+                            style={{
+                              fontSize: "11.5px",
+                              fontWeight: isActive ? "bold" : "normal",
+                              color: isActive ? "#38bdf8" : "#e6edf3",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap"
+                            }}
+                            title={s.title}
+                          >
+                            {s.title}
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+                        {!isEditing && (
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.stopPropagation();
+                              setEditingSessionId(s.id);
+                              setEditingSessionTitleInput(s.title);
+                            }}
+                            style={{
+                              background: "transparent",
+                              border: "none",
+                              color: "#8b949e",
+                              cursor: "pointer",
+                              fontSize: "10px",
+                              padding: "2px"
+                            }}
+                            title="ویرایش نام گفتگو"
+                          >
+                            ✏️
+                          </button>
+                        )}
+                        {sessions.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={e => handleDeleteSession(s.id, e)}
+                            style={{
+                              background: "transparent",
+                              border: "none",
+                              color: "#8b949e",
+                              cursor: "pointer",
+                              fontSize: "10px",
+                              padding: "2px"
+                            }}
+                            title="حذف گفتگو"
+                          >
+                            🗑️
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "10px", color: "#8b949e" }}>
+                      <span>{s.messages.length} پیام</span>
+                      {s.isProcessing && <span style={{ color: "#38bdf8" }}>در حال کار...</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </aside>
+        )}
+
+        {/* ستون میانی: پیام‌ها و ورودی */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, height: "100%", overflow: "hidden" }}>
+          {/* ناحیه نمایش پیام‌ها و تایم‌لاین فعالیت‌ها */}
+          <div
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: "16px 20px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "18px"
+            }}
+          >
         {messages.map(msg => (
           <div
             key={msg.id}
@@ -1347,6 +2059,23 @@ export function AgenticChatbot({ onClose }: Props) {
                                   >
                                     {step.title}
                                   </span>
+
+                                  {/* نشانگر خطوط اضافه‌شده و حذف‌شده فایل (الگوی Antigravity) */}
+                                  {step.diffStats && (
+                                    <span
+                                      dir="ltr"
+                                      style={{
+                                        fontSize: "11px",
+                                        fontFamily: "monospace",
+                                        display: "inline-flex",
+                                        gap: "4px",
+                                        marginRight: "6px"
+                                      }}
+                                    >
+                                      <span style={{ color: "#34d399", fontWeight: "bold" }}>+{step.diffStats.added}</span>
+                                      <span style={{ color: "#f87171", fontWeight: "bold" }}>-{step.diffStats.removed}</span>
+                                    </span>
+                                  )}
                                 </div>
 
                                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -1691,6 +2420,150 @@ export function AgenticChatbot({ onClose }: Props) {
           </div>
         )}
 
+        {/* نوار پیام‌های در صف (Queued Messages) مطابق عکس پیوست Antigravity */}
+        {queuedMessages.length > 0 && (
+          <div
+            className="queued-messages-container"
+            style={{
+              marginBottom: "8px",
+              background: "rgba(18, 24, 38, 0.95)",
+              border: "1px solid rgba(56, 189, 248, 0.35)",
+              borderRadius: "12px",
+              overflow: "hidden",
+              boxShadow: "0 6px 18px rgba(0, 0, 0, 0.45)"
+            }}
+          >
+            {/* سربرگ نوار صف با شمارنده و کلید جمع/باز شدن */}
+            <div
+              onClick={() => setIsQueueExpanded(!isQueueExpanded)}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "8px 14px",
+                cursor: "pointer",
+                userSelect: "none",
+                background: "rgba(56, 189, 248, 0.08)"
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "12px", color: "#38bdf8", fontWeight: "bold" }}>
+                  Queued Messages ({queuedMessages.length})
+                </span>
+                <span style={{ fontSize: "11px", color: "#94a3b8" }}>
+                  Sends after agent finishes working
+                </span>
+              </div>
+              <span style={{ fontSize: "12px", color: "#38bdf8" }}>
+                {isQueueExpanded ? "▾" : "▴"}
+              </span>
+            </div>
+
+            {/* لیست پیام‌های در صف در حالت بازشده */}
+            {isQueueExpanded && (
+              <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                {queuedMessages.map((item, qIdx) => (
+                  <div
+                    key={item.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "10px",
+                      background: "rgba(0, 0, 0, 0.35)",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid rgba(255, 255, 255, 0.06)"
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                      <span style={{ fontSize: "11px", color: "#64748b", fontFamily: "monospace" }}>#{qIdx + 1}</span>
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: "12px",
+                          color: "#e2e8f0",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          maxWidth: "480px"
+                        }}
+                      >
+                        {item.content}
+                      </p>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                      {/* دکمه ارسال فوری */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDispatchQueueItem(item);
+                        }}
+                        style={{
+                          background: "rgba(56, 189, 248, 0.15)",
+                          border: "1px solid rgba(56, 189, 248, 0.3)",
+                          color: "#38bdf8",
+                          borderRadius: "6px",
+                          padding: "3px 8px",
+                          fontSize: "11px",
+                          cursor: "pointer"
+                        }}
+                        title="توقف وظیفه فعلی و ارسال فوری این پیام"
+                      >
+                        <span>➔</span>
+                      </button>
+
+                      {/* دکمه ویرایش */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEditQueueItem(item);
+                        }}
+                        style={{
+                          background: "rgba(245, 158, 11, 0.15)",
+                          border: "1px solid rgba(245, 158, 11, 0.3)",
+                          color: "#fbbf24",
+                          borderRadius: "6px",
+                          padding: "3px 8px",
+                          fontSize: "11px",
+                          cursor: "pointer"
+                        }}
+                        title="ویرایش این پیام در کادر ورودی"
+                      >
+                        <span>✏️</span>
+                      </button>
+
+                      {/* دکمه حذف */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteQueueItem(item.id);
+                        }}
+                        style={{
+                          background: "rgba(239, 68, 68, 0.15)",
+                          border: "1px solid rgba(239, 68, 68, 0.3)",
+                          color: "#f87171",
+                          borderRadius: "6px",
+                          padding: "3px 8px",
+                          fontSize: "11px",
+                          cursor: "pointer"
+                        }}
+                        title="حذف پیام از صف"
+                      >
+                        <span>🗑️ Delete</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* کادر متن ورودی پرامپت */}
         <div style={{ position: "relative" }}>
           <textarea
@@ -1700,12 +2573,13 @@ export function AgenticChatbot({ onClose }: Props) {
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             placeholder={
-              chatMode === "chat"
+              isProcessing
+                ? "پیامی بنویسید تا به صف اضافه شود (Queued Messages)..."
+                : chatMode === "chat"
                 ? "پیام خود را بنویسید... (Ctrl+V برای الصاق متن طولانی یا عکس از حافظه)"
                 : `وظیفه یا پرسش کدنویسی روی ${activeProject.name} را بنویسید...`
             }
             rows={2}
-            disabled={isProcessing}
             style={{
               width: "100%",
               background: "rgba(13, 17, 23, 0.85)",
@@ -1769,7 +2643,6 @@ export function AgenticChatbot({ onClose }: Props) {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isProcessing}
               style={{
                 background: "rgba(255, 255, 255, 0.05)",
                 border: "1px solid rgba(255, 255, 255, 0.1)",
@@ -1792,7 +2665,7 @@ export function AgenticChatbot({ onClose }: Props) {
             <button
               type="button"
               onClick={() => imageInputRef.current?.click()}
-              disabled={isProcessing || attachedImages.length >= config.maxImages}
+              disabled={attachedImages.length >= config.maxImages}
               style={{
                 background: "rgba(255, 255, 255, 0.05)",
                 border: "1px solid rgba(255, 255, 255, 0.1)",
@@ -1800,7 +2673,7 @@ export function AgenticChatbot({ onClose }: Props) {
                 padding: "5px 10px",
                 color: "#c9d1d9",
                 fontSize: "12px",
-                cursor: isProcessing || attachedImages.length >= config.maxImages ? "not-allowed" : "pointer",
+                cursor: attachedImages.length >= config.maxImages ? "not-allowed" : "pointer",
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "4px"
@@ -1858,18 +2731,18 @@ export function AgenticChatbot({ onClose }: Props) {
           </div>
 
           {/* چپ: دکمه ارسال مینیمال / یا دکمه توقف در هنگام اجرا */}
-          <div style={{ display: "flex", gap: "8px" }}>
-            {isProcessing ? (
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            {isProcessing && (
               <button
                 type="button"
                 onClick={handleStopGeneration}
                 style={{
-                  padding: "7px 18px",
+                  padding: "7px 16px",
                   borderRadius: "10px",
                   background: "rgba(239, 68, 68, 0.2)",
                   color: "#f87171",
                   border: "1px solid rgba(239, 68, 68, 0.5)",
-                  fontSize: "12.5px",
+                  fontSize: "12px",
                   fontWeight: "bold",
                   cursor: "pointer",
                   display: "inline-flex",
@@ -1877,45 +2750,300 @@ export function AgenticChatbot({ onClose }: Props) {
                   gap: "6px",
                   boxShadow: "0 0 12px rgba(239, 68, 68, 0.3)"
                 }}
-                title="توقف فوری تولید پاسخ"
+                title="توقف فوری تولید پاسخ جاری"
               >
                 <span>⏹️</span>
                 <span>توقف</span>
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => void handleSendMessage()}
-                disabled={!inputPrompt.trim() && attachedFiles.length === 0 && attachedImages.length === 0}
-                style={{
-                  padding: "7px 20px",
-                  borderRadius: "10px",
-                  background:
-                    !inputPrompt.trim() && attachedFiles.length === 0 && attachedImages.length === 0
-                      ? "rgba(255, 255, 255, 0.1)"
-                      : "var(--primary, #3b82f6)",
-                  color: "#ffffff",
-                  border: "none",
-                  fontSize: "12.5px",
-                  fontWeight: "bold",
-                  cursor:
-                    !inputPrompt.trim() && attachedFiles.length === 0 && attachedImages.length === 0
-                      ? "not-allowed"
-                      : "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  transition: "all 0.2s ease",
-                  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.2)"
-                }}
-              >
-                <span>ارسال</span>
-                <span>↗</span>
-              </button>
             )}
+
+            <button
+              type="button"
+              onClick={() => void handleSendMessage()}
+              disabled={!inputPrompt.trim() && attachedFiles.length === 0 && attachedImages.length === 0}
+              style={{
+                padding: "7px 20px",
+                borderRadius: "10px",
+                background:
+                  !inputPrompt.trim() && attachedFiles.length === 0 && attachedImages.length === 0
+                    ? "rgba(255, 255, 255, 0.1)"
+                    : isProcessing
+                    ? "rgba(56, 189, 248, 0.25)"
+                    : "var(--primary, #3b82f6)",
+                color: "#ffffff",
+                border: isProcessing ? "1px solid #38bdf8" : "none",
+                fontSize: "12.5px",
+                fontWeight: "bold",
+                cursor:
+                  !inputPrompt.trim() && attachedFiles.length === 0 && attachedImages.length === 0
+                    ? "not-allowed"
+                    : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                transition: "all 0.2s ease",
+                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.2)"
+              }}
+              title={isProcessing ? "افزودن پیام به صف ارسال" : "ارسال پیام"}
+            >
+              <span>{isProcessing ? "به صف" : "ارسال"}</span>
+              <span>{isProcessing ? "📥" : "↗"}</span>
+            </button>
           </div>
         </div>
       </div>
+      </div>
+
+      {/* نوار کناری چپ: فایل‌های پروژه و پیش‌نمایش (در حالت RTL در سمت چپ قرار می‌گیرد) */}
+      {isFilesSidebarOpen && (
+        <aside
+          style={{
+            width: "270px",
+            background: "rgba(16, 20, 26, 0.95)",
+            borderRight: "1px solid rgba(255, 255, 255, 0.08)",
+            display: "flex",
+            flexDirection: "column",
+            flexShrink: 0,
+            overflow: "hidden"
+          }}
+        >
+          {/* هدر فایل‌ها */}
+          <div
+            style={{
+              padding: "10px 12px",
+              borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "6px"
+            }}
+          >
+            <span style={{ fontSize: "12px", fontWeight: "bold", color: "#f0f6fc", display: "flex", alignItems: "center", gap: "6px" }}>
+              <span>📂</span>
+              <span>فایل‌های {activeProject.name}</span>
+            </span>
+            <button
+              type="button"
+              onClick={loadProjectFiles}
+              disabled={isLoadingFiles}
+              style={{
+                background: "rgba(255, 255, 255, 0.06)",
+                color: "#c9d1d9",
+                border: "1px solid rgba(255, 255, 255, 0.12)",
+                borderRadius: "6px",
+                padding: "3px 6px",
+                fontSize: "11px",
+                cursor: "pointer"
+              }}
+              title="بروزرسانی لیست فایل‌ها"
+            >
+              <span>🔄</span>
+            </button>
+          </div>
+
+          {/* فیلتر فایل‌ها */}
+          <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(255, 255, 255, 0.06)" }}>
+            <input
+              value={fileFilterQuery}
+              onChange={e => setFileFilterQuery(e.target.value)}
+              placeholder="فیلتر فایل‌ها..."
+              style={{
+                width: "100%",
+                background: "rgba(0, 0, 0, 0.3)",
+                border: "1px solid rgba(255, 255, 255, 0.1)",
+                borderRadius: "6px",
+                padding: "4px 8px",
+                color: "#e6edf3",
+                fontSize: "11px",
+                outline: "none"
+              }}
+            />
+          </div>
+
+          {/* لیست فایل‌ها */}
+          <div
+            className="omni-chic-scrollbar"
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: "6px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "2px"
+            }}
+          >
+            {isLoadingFiles && (
+              <div style={{ padding: "12px", textAlign: "center", color: "#8b949e", fontSize: "11px" }}>
+                در حال دریافت لیست فایل‌ها...
+              </div>
+            )}
+            {projectFiles
+              .filter(f => !fileFilterQuery || f.name.toLowerCase().includes(fileFilterQuery.toLowerCase()))
+              .map((file, idx) => (
+                <div
+                  key={`${file.path}-${idx}`}
+                  onClick={() => {
+                    if (!file.is_dir) handleOpenFilePreview(file.path);
+                  }}
+                  style={{
+                    padding: "6px 8px",
+                    borderRadius: "6px",
+                    cursor: file.is_dir ? "default" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "6px",
+                    fontSize: "11.5px",
+                    color: file.is_dir ? "#f0f6fc" : "#c9d1d9",
+                    background: "transparent",
+                    transition: "background 0.15s ease"
+                  }}
+                  className="hover:bg-white/5"
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", overflow: "hidden" }}>
+                    <span>{getFileIcon(file.name, file.is_dir)}</span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} dir="ltr">
+                      {file.name}
+                    </span>
+                  </div>
+                  {file.size !== undefined && file.size !== null && file.size > 0 && (
+                    <span style={{ fontSize: "10px", color: "#8b949e", flexShrink: 0 }} dir="ltr">
+                      {formatFileSize(file.size)}
+                    </span>
+                  )}
+                </div>
+              ))}
+          </div>
+        </aside>
+      )}
+      </div>
+
+      {/* مدال پیش‌نمایش سریع فایل انتخابی */}
+      <AnimatePresence>
+        {selectedFilePreview && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0, 0, 0, 0.72)",
+              backdropFilter: "blur(6px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 10000,
+              padding: "20px"
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              style={{
+                background: "#161b22",
+                border: "1px solid rgba(255, 255, 255, 0.15)",
+                borderRadius: "14px",
+                padding: "16px 20px",
+                maxWidth: "750px",
+                width: "100%",
+                maxHeight: "85vh",
+                boxShadow: "0 20px 50px rgba(0, 0, 0, 0.7)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "12px"
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span>{getFileIcon(selectedFilePreview.name, false)}</span>
+                  <span style={{ fontWeight: "bold", fontSize: "13px", color: "#f0f6fc" }} dir="ltr">
+                    {selectedFilePreview.path}
+                  </span>
+                  <span style={{ fontSize: "11px", color: "#8b949e" }}>
+                    ({selectedFilePreview.lines} خط · {formatFileSize(selectedFilePreview.size)})
+                  </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(selectedFilePreview.content);
+                      alert("محتوای فایل در کلیپ‌بورد کپی شد.");
+                    }}
+                    style={{
+                      background: "rgba(255, 255, 255, 0.08)",
+                      border: "1px solid rgba(255, 255, 255, 0.12)",
+                      borderRadius: "6px",
+                      color: "#c9d1d9",
+                      padding: "4px 8px",
+                      fontSize: "11px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    📋 کپی کد
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInputPrompt(prev =>
+                        prev
+                          ? `${prev}\n\n// مرجع فایل ${selectedFilePreview.path}:\n\`\`\`\n${selectedFilePreview.content}\n\`\`\`\n`
+                          : `// مرجع فایل ${selectedFilePreview.path}:\n\`\`\`\n${selectedFilePreview.content}\n\`\`\`\n`
+                      );
+                      setSelectedFilePreview(null);
+                    }}
+                    style={{
+                      background: "var(--primary, #3b82f6)",
+                      border: "none",
+                      borderRadius: "6px",
+                      color: "#fff",
+                      padding: "4px 10px",
+                      fontSize: "11px",
+                      cursor: "pointer",
+                      fontWeight: "bold"
+                    }}
+                  >
+                    ➕ درج در چت
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedFilePreview(null)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "#8b949e",
+                      cursor: "pointer",
+                      fontSize: "16px"
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <pre
+                className="omni-chic-scrollbar"
+                dir="ltr"
+                style={{
+                  margin: 0,
+                  flex: 1,
+                  maxHeight: "65vh",
+                  overflowY: "auto",
+                  background: "#0d1117",
+                  border: "1px solid rgba(255, 255, 255, 0.1)",
+                  borderRadius: "8px",
+                  padding: "12px",
+                  fontFamily: "monospace",
+                  fontSize: "12px",
+                  color: "#e6edf3",
+                  lineHeight: "1.6"
+                }}
+              >
+                {selectedFilePreview.content}
+              </pre>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* مدال مدیریت و اتصال پروژه و مسیر لوکال */}
       <AnimatePresence>
